@@ -1,0 +1,10 @@
+{
+  "name": "S.A.Y.A.D. — Study Assistant for Your Academic Development",
+  "description": "Smart PDF Study Assistant with multi-key Gemini AI integration, real-time reader, OCR, voice narrator, and study tools.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

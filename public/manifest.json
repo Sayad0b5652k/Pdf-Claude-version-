@@ -1,0 +1,113 @@
+{
+  "id": "/",
+  "name": "S.A.Y.A.D. — Academic Study Assistant & Native PDF Engine",
+  "short_name": "S.A.Y.A.D.",
+  "description": "High-performance native PDF study reader, FSRS spaced repetition flashcards, interactive ink annotation and multi-provider Gemini AI academic copilot.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#0B0F19",
+  "theme_color": "#0B0F19",
+  "lang": "en",
+  "dir": "ltr",
+  "prefer_related_applications": false,
+  "categories": ["education", "productivity", "utilities", "books", "reference"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/screenshot-mobile-1.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Native PDF Study Reader & AI Copilot on Mobile"
+    },
+    {
+      "src": "/screenshots/screenshot-mobile-2.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "FSRS Spaced Repetition Flashcards & Active Recall"
+    },
+    {
+      "src": "/screenshots/screenshot-desktop-1.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Multi-Layer PDF Annotation & AI Academic Tutor Dashboard"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "/",
+      "name": "PDF Document",
+      "accept": {
+        "application/pdf": [".pdf"]
+      },
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "shortcuts": [
+    {
+      "name": "Academic PDF Library",
+      "short_name": "Library",
+      "description": "Open your native PDF textbooks and notes",
+      "url": "/?view=library",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "FSRS Flashcard Review",
+      "short_name": "Review",
+      "description": "Practice active recall with spaced repetition",
+      "url": "/?view=review",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI Study Copilot",
+      "short_name": "AI Copilot",
+      "description": "Ask questions and generate summaries with Gemini",
+      "url": "/?view=ai",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Retention Analytics",
+      "short_name": "Analytics",
+      "description": "View study streaks and memory stability stats",
+      "url": "/?view=stats",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+  <title>S.A.Y.A.D. — Study Assistant for Your Academic Development</title>
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="shortcut icon" href="/favicon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
+  <link rel="apple-touch-icon" href="/icons/icon-512.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0A0F14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="S.A.Y.A.D.">
+  <script>
+    (function() {
+      try {
+        var savedTheme = localStorage.getItem('sayad_theme') || 'light';
+        document.documentElement.dataset.theme = savedTheme;
+        var savedProTheme = localStorage.getItem('sayad_pro_theme') || 'classic';
+        document.documentElement.dataset.proTheme = savedProTheme;
+        var metaTheme = document.querySelector('meta[name="theme-color"]');
+        if (metaTheme) {
+          var c = '#EEF1EA';
+          if (savedTheme === 'dark') c = '#0A0F14';
+          else if (savedTheme === 'sepia') c = '#DECFAE';
+          else if (savedTheme === 'oled') c = '#000000';
+          metaTheme.setAttribute('content', c);
+        }
+      } catch(e) {}
+
+      // Immediate Service Worker & beforeinstallprompt capture
+      window.deferredInstallPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        window.deferredInstallPrompt = e;
+        console.log('[PWA Early] Captured beforeinstallprompt event!');
+        if (window.onDeferredPromptReady && typeof window.onDeferredPromptReady === 'function') {
+          window.onDeferredPromptReady(e);
+        }
+      });
+
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){});
+      }
+    })();
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,600&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://unpkg.com/pdfjs-dist@3.11.174/web/pdf_viewer.css">
+  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/7.0.0/fuse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+</head>
+<body>
+
+  <div id="root"></div>
+  <div id="toast"></div>
+  <div id="sel-toolbar"></div>
+  <div class="sheet-backdrop" id="sheet-backdrop"></div>
+  <div class="sheet" id="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-body" id="sheet-body"></div>
+    <div class="sheet-fade-bottom" id="sheet-fade-bottom">
+      <div class="sheet-scroll-hint">More options below ↓</div>
+    </div>
+    <div class="sheet-scroll-progress" id="sheet-scroll-progress">
+      <div class="sheet-scroll-progress-bar" id="sheet-scroll-progress-bar"></div>
+    </div>
+  </div>
+  <input type="file" id="file-input" accept=".pdf, application/pdf" multiple style="display:none">
+
+  <!-- Core App Entrypoint (Bundles and compiles CSS/JS via Vite) -->
+  <script type="module" src="/src/main.tsx"></script>
+
+</body>
+</html>
