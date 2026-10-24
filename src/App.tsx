@@ -80,7 +80,10 @@ export default function App() {
     // INTERACTIVE PARTICLE CONSTELLATION CANVAS
     // -------------------------------------------------------------
     const canvas = canvasRef.current;
-    let animId: number;
+    let animId = 0;
+    // Stops the particle loop and its listener. The loop used to keep running (drawing into a
+    // detached canvas) for the whole session after the splash was gone.
+    let stopSplashCanvas = () => {};
     let ripples: { x: number; y: number; r: number; alpha: number }[] = [];
 
     if (canvas) {
@@ -211,6 +214,11 @@ export default function App() {
         };
 
         render();
+        stopSplashCanvas = () => {
+          if (animId) cancelAnimationFrame(animId);
+          animId = 0;
+          window.removeEventListener('pointerdown', handleCanvasClick);
+        };
       }
     }
 
@@ -223,7 +231,12 @@ export default function App() {
     const fullQuoteString = currentQuote.author
       ? `“${currentQuote.text}” — ${currentQuote.author}`
       : `“${currentQuote.text}”`;
-    const totalDuration = 5500; // 5.5 seconds smooth cinematic flow requested by user
+    // The splash used to run for a fixed 5.5 s on every launch even when the app was ready in a
+    // fraction of that. It now plays for MIN_SPLASH_MS and then waits only for boot() to finish
+    // (never longer than MAX_SPLASH_MS). Raise MIN_SPLASH_MS for a longer cinematic intro.
+    const MIN_SPLASH_MS = 1800;
+    const MAX_SPLASH_MS = 8000;
+    const totalDuration = MIN_SPLASH_MS;
 
     const dismissSplash = () => {
       if (cancelled) return;
@@ -233,12 +246,14 @@ export default function App() {
       if (splashEl) {
         splashEl.classList.add('splash-dissolve');
         setTimeout(() => {
+          stopSplashCanvas();
           setSplashVisible(false);
           if (typeof (window as any).triggerAutoInstallPromptAfterLoading === 'function') {
             (window as any).triggerAutoInstallPromptAfterLoading();
           }
         }, 400);
       } else {
+        stopSplashCanvas();
         setSplashVisible(false);
         if (typeof (window as any).triggerAutoInstallPromptAfterLoading === 'function') {
           (window as any).triggerAutoInstallPromptAfterLoading();
@@ -246,9 +261,15 @@ export default function App() {
       }
     };
 
-    // Boot database in parallel immediately
-    if (typeof (window as any).boot === 'function') {
-      (window as any).boot().catch(console.error);
+    // Boot database in parallel immediately (once: boot() registers global listeners)
+    let bootDone = false;
+    if (typeof (window as any).boot === 'function' && !(window as any).__sayadBootStarted) {
+      (window as any).__sayadBootStarted = true;
+      Promise.resolve((window as any).boot())
+        .catch(console.error)
+        .finally(() => { bootDone = true; });
+    } else {
+      bootDone = true;
     }
 
     const runContinuousSequence = () => {
@@ -324,7 +345,7 @@ export default function App() {
           quoteEl.textContent = fullQuoteString.slice(0, charsToShow);
         }
 
-        if (rawProgress < 1) {
+        if (rawProgress < 1 || (!bootDone && elapsed < MAX_SPLASH_MS)) {
           progressAnimId = requestAnimationFrame(tick);
         } else {
           if (fillEl) fillEl.style.width = '100%';
@@ -347,7 +368,7 @@ export default function App() {
     return () => {
       cancelled = true;
       if (progressAnimId) cancelAnimationFrame(progressAnimId);
-      if (animId) cancelAnimationFrame(animId);
+      stopSplashCanvas();
     };
   }, []);
 

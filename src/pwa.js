@@ -66,12 +66,12 @@ export function registerServiceWorker() {
         console.warn('[SAYAD PWA] SW Registration:', err);
       });
 
-    let refreshing = false;
+    // A new worker taking control used to force a reload. That fired on the very first visit and
+    // on every update, even in the middle of reading or typing. The "Update Now" banner (and the
+    // next launch) now picks up new versions instead; open pages keep working because the hashed
+    // bundles they already loaded are never changed in place.
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!refreshing) {
-        refreshing = true;
-        window.location.reload();
-      }
+      console.log('[SAYAD PWA] A new Service Worker took control. New version loads on next launch or via "Update Now".');
     });
   }
 }

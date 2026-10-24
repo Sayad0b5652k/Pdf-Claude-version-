@@ -163,6 +163,7 @@ export async function rotatePagesInline(fid, pages, pageRotations){
     const full = await window.DB.get('files', fid);
     const raw = await window.DB.normalizeBuffer(full.data);
     if (!raw) throw new Error('Cannot load PDF buffer for rotation');
+    await window.ensureLib('pdflib');
     const { PDFDocument, degrees } = PDFLib;
     const pdfDoc = await PDFDocument.load(raw.slice(0));
     const docPages = pdfDoc.getPages();
@@ -180,9 +181,9 @@ export async function rotatePagesInline(fid, pages, pageRotations){
     await window.DB.put('files', full);
     
     if(window.State.view==='reader' && window.State.currentFile && window.State.currentFile.id===fid) {
-      window.State.currentFile.data = cleanBuffer;
       // Re-load pdfjs document in background without breaking reader view
-      window.State.currentDoc = typeof window.loadPdfDocumentSafely === 'function' ? await window.loadPdfDocumentSafely(cleanBuffer) : await pdfjsLib.getDocument({data: cleanBuffer.slice(0), ...window.PDFJS_LOAD_OPTS}).promise;
+      const rotatedDoc = typeof window.loadPdfDocumentSafely === 'function' ? await window.loadPdfDocumentSafely(cleanBuffer) : await pdfjsLib.getDocument({data: cleanBuffer.slice(0), ...window.PDFJS_LOAD_OPTS}).promise;
+      if (typeof window.setCurrentDoc === 'function') window.setCurrentDoc(rotatedDoc); else window.State.currentDoc = rotatedDoc;
       if (typeof window.mountReaderContent === 'function') {
         window.mountReaderContent();
       }
@@ -227,6 +228,7 @@ export async function deletePages(fid, pages){
     const full = await window.DB.get('files', fid);
     const raw = await window.DB.normalizeBuffer(full.data);
     if (!raw) throw new Error('Cannot load PDF buffer for deletion');
+    await window.ensureLib('pdflib');
     const { PDFDocument } = PDFLib;
     const pdfDoc = await PDFDocument.load(raw.slice(0));
     const sorted = [...pages].sort((a,b)=>b-a);
@@ -281,6 +283,7 @@ export async function extractPagesAsNewBook(fid, pages){
   window.toast('Extracting…');
   try{
     const full = await window.DB.get('files', fid);
+    await window.ensureLib('pdflib');
     const { PDFDocument } = PDFLib;
     const src = await PDFDocument.load(full.data.slice(0));
     const out = await PDFDocument.create();
@@ -326,6 +329,7 @@ export async function openMergeBookPicker(fid){
 export async function mergeBooks(fidA, fidB){
   window.toast('Merging…');
   try{
+    await window.ensureLib('pdflib');
     const { PDFDocument } = PDFLib;
     const fullA = await window.DB.get('files', fidA);
     const fullB = await window.DB.get('files', fidB);

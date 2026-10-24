@@ -48,14 +48,44 @@ export function isMarkupModeActive() {
 export function toggleMarkupToolbar() {
   isMarkupActive = !isMarkupActive;
   renderMarkupToolbar();
+
+  if (isMarkupActive) {
+    // Drawing layers are created lazily (a full Fabric canvas is two extra canvases per page),
+    // so make sure every page that is on screen has one before the first stroke.
+    for (const [num, pe] of Object.entries(window.pageEls || {})) {
+      if (pe && pe.rendered) paintDrawingsForPage(Number(num));
+    }
+  }
   updateAllPageOverlayPointerEvents();
 
   if (isMarkupActive) {
     window.toast('Annotation tools enabled');
   } else {
     deselectAllCanvases();
+    releaseEmptyDrawLayers();
     window.toast('Annotation tools closed');
   }
+}
+
+// Pages without any drawn object do not need a Fabric layer once markup mode is closed.
+function releaseEmptyDrawLayers() {
+  [...fabricCanvases.entries()].forEach(([pNum, fCanvas]) => {
+    try {
+      if (!fCanvas.getObjects().length) {
+        destroyPageDrawLayer(pNum);
+        const pe = window.pageEls ? window.pageEls[pNum] : null;
+        const container = pe && pe.wrap ? pe.wrap.querySelector('.fabric-canvas-container') : null;
+        if (container) container.remove();
+      }
+    } catch (e) { /* keep the layer if it cannot be inspected */ }
+  });
+}
+
+// True when a saved Fabric JSON actually contains drawn objects.
+function drawingHasObjects(json) {
+  if (!json) return false;
+  if (typeof json === 'string') return !/"objects"\s*:\s*\[\s*\]/.test(json);
+  return Array.isArray(json.objects) && json.objects.length > 0;
 }
 
 function getToolLabel(t) {
@@ -890,23 +920,35 @@ async function savePageCanvasState(pageNum) {
   renderMarkupToolbar();
 }
 
-export async function paintDrawingsForPage(pageNum) {
+export async function paintDrawingsForPage(pageNum, preloadedAnnots) {
   try {
-    const fCanvas = ensurePageDrawLayer(pageNum);
-    if (!fCanvas || !window.State || !window.State.currentFile) return;
+    if (!window.State || !window.State.currentFile) return;
+
+    // While markup mode is open (or a layer already exists) the layer is needed straight away.
+    let fCanvas = (isMarkupActive || fabricCanvases.has(pageNum)) ? ensurePageDrawLayer(pageNum) : null;
 
     const pe = window.pageEls ? window.pageEls[pageNum] : null;
     const currentScale = pe?.scale || 1.0;
 
-    let annots = [];
-    try {
-      annots = await window.DB.byIndex('annotations', 'fileId', window.State.currentFile.id);
-    } catch (err) {
-      console.warn('Error fetching annotations:', err);
-      return;
+    let annots = preloadedAnnots;
+    if (!annots) {
+      try {
+        annots = await window.DB.byIndex('annotations', 'fileId', window.State.currentFile.id);
+      } catch (err) {
+        console.warn('Error fetching annotations:', err);
+        return;
+      }
     }
 
     const drawingRecord = annots.find(a => a.page === pageNum && a.kind === 'drawing' && a.json);
+
+    // Nothing drawn on this page and no reason to draw: skip creating the Fabric canvases.
+    if (!fCanvas) {
+      if (!drawingRecord || !drawingHasObjects(drawingRecord.json)) return;
+      if (!window.pageEls || window.pageEls[pageNum] !== pe || !pe || !pe.rendered) return;
+      fCanvas = ensurePageDrawLayer(pageNum);
+      if (!fCanvas) return;
+    }
 
     if (drawingRecord && drawingRecord.json) {
       await safeLoadFromJSON(fCanvas, drawingRecord.json, () => {

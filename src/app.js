@@ -445,7 +445,8 @@ export async function boot(){
   window.State.mwApiKey = window.State.mwDictKey;
   if(window.State.autoTheme) applyAutoTheme();
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>{ if(window.State.autoTheme) applyAutoTheme(); });
-  window.State.files = await window.DB.all('files');
+  // Metadata only: loading every PDF's bytes just to draw the library cost hundreds of MB at startup.
+  window.State.files = await window.DB.allFileMeta();
   
   // Connect file-input element to importFiles for mobile & desktop uploads
   const fileInput = document.getElementById('file-input');
@@ -719,12 +720,13 @@ export async function openInDocSearch(){
 
 export function flashSearchMatch(pageNum, query, attemptsLeft=8){
   const pe = window.pageEls[pageNum];
-  if(!pe || !pe.spanRects || !pe.spanRects.length){
+  const spanRects = window.getSpanRects ? window.getSpanRects(pe) : (pe && pe.spanRects);
+  if(!spanRects || !spanRects.length){
     if(attemptsLeft>0) setTimeout(()=>flashSearchMatch(pageNum, query, attemptsLeft-1), 150);
     return;
   }
   const q = query.toLowerCase();
-  const matches = pe.spanRects.filter(entry => entry.span.textContent.toLowerCase().includes(q));
+  const matches = spanRects.filter(entry => entry.span.textContent.toLowerCase().includes(q));
   if(!matches.length || !pe.annotLayer) return;
   const flashEls = matches.map(entry=>{
     const r = entry.rect;

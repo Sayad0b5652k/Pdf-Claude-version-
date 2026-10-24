@@ -237,13 +237,14 @@ export function caretFromPoint(x,y){
 
 export function findSpanAtPoint(pageNum, x, y){
   const pe = window.pageEls[pageNum];
-  if(!pe || !pe.spanRects || !pe.spanRects.length) return null;
-  for(const entry of pe.spanRects){
+  const spanRects = window.getSpanRects ? window.getSpanRects(pe) : (pe && pe.spanRects);
+  if(!spanRects || !spanRects.length) return null;
+  for(const entry of spanRects){
     const r = entry.rect;
     if(x>=r.left && x<=r.right && y>=r.top && y<=r.bottom) return entry;
   }
   let best=null, bestDist=Infinity;
-  for(const entry of pe.spanRects){
+  for(const entry of spanRects){
     const r = entry.rect;
     const vDist = y<r.top ? r.top-y : y>r.bottom ? y-r.bottom : 0;
     const hDist = x<r.left ? r.left-x : x>r.right ? x-r.right : 0;
@@ -815,7 +816,7 @@ export async function paintAnnotations(pageNum){
   }
 
   if (typeof window.paintDrawingsForPage === 'function') {
-    await window.paintDrawingsForPage(pageNum);
+    await window.paintDrawingsForPage(pageNum, annots);
   }
 
   // Restore active pending selection overlay on this page

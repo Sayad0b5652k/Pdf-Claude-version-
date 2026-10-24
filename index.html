@@ -53,15 +53,45 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,400;1,600&family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="https://unpkg.com/pdfjs-dist@3.11.174/web/pdf_viewer.css">
-  <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/fuse.js/7.0.0/fuse.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <link rel="stylesheet" href="/pdfjs/pdf_viewer.css">
+  <script src="/pdfjs/pdf.min.js"></script>
+  <!-- KaTeX is small and used for inline math, so it is loaded up front (from this origin). -->
+  <link rel="stylesheet" href="/vendor/katex/katex.min.css">
+  <script defer src="/vendor/katex/katex.min.js"></script>
+  <script defer src="/vendor/katex/contrib/auto-render.min.js"></script>
+  <script>
+    // Heavy libraries load on first use instead of blocking startup:
+    //   await window.ensureLib('mermaid') | 'pdflib' | 'tesseract'
+    (function () {
+      var LIBS = {
+        mermaid:   { global: 'mermaid',   urls: ['/vendor/mermaid.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js'] },
+        pdflib:    { global: 'PDFLib',    urls: ['/vendor/pdf-lib.min.js', 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js'] },
+        tesseract: { global: 'Tesseract', urls: ['https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js'] }
+      };
+      var pending = {};
+      function inject(url) {
+        return new Promise(function (resolve, reject) {
+          var el = document.createElement('script');
+          el.src = url;
+          el.onload = function () { resolve(); };
+          el.onerror = function () { el.remove(); reject(new Error('Failed to load ' + url)); };
+          document.head.appendChild(el);
+        });
+      }
+      window.ensureLib = function (name) {
+        var lib = LIBS[name];
+        if (!lib) return Promise.reject(new Error('Unknown library: ' + name));
+        if (window[lib.global]) return Promise.resolve();
+        if (pending[name]) return pending[name];
+        pending[name] = lib.urls.reduce(function (chain, url) {
+          return chain.catch(function () { return window[lib.global] ? undefined : inject(url); });
+        }, Promise.reject(new Error('start'))).then(function () {
+          if (!window[lib.global]) throw new Error(name + ' did not initialise');
+        }).catch(function (err) { delete pending[name]; throw err; });
+        return pending[name];
+      };
+    })();
+  </script>
 </head>
 <body>
 

@@ -944,13 +944,11 @@ export function renderMermaidDiagrams(container) {
     } catch(err) {
       console.warn('Mermaid initialization warning:', err);
     }
-  } else {
-    // Retry if Mermaid script is still loading
-    setTimeout(() => {
-      if (typeof window.mermaid !== 'undefined') {
-        renderMermaidDiagrams(container);
-      }
-    }, 300);
+  } else if (typeof window.ensureLib === 'function') {
+    // Mermaid is ~3 MB, so it is fetched the first time a diagram needs it.
+    window.ensureLib('mermaid').then(() => {
+      if (typeof window.mermaid !== 'undefined') renderMermaidDiagrams(container);
+    }).catch((e) => console.warn('Mermaid could not be loaded:', e && e.message));
   }
 }
 

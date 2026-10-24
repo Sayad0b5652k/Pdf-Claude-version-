@@ -3,7 +3,10 @@
 export const BUILD_TAG = 'quality-and-autozoom-2026-07-26';
 console.log('%cSTRATA build: ' + BUILD_TAG, 'font-weight:bold; font-size:14px; color:#FF6A2B;');
 
-const DB_NAME='marginal_db', DB_VER=9;
+// v10 adds the small `filemeta` store (name, thumb, lastPage, folder ... without the PDF bytes).
+// The `files` store is left exactly as it was: it keeps owning the binary. Upgrading is additive,
+// nothing is moved or deleted, and a book that is not indexed yet gets indexed lazily (see allFileMeta).
+const DB_NAME='marginal_db', DB_VER=10;
 let dbP;
 try{
   if(!('indexedDB' in window)) throw new Error('IndexedDB is not available in this browser context.');
@@ -59,8 +62,17 @@ try{
         s.createIndex('fileId','fileId');
         s.createIndex('page','page');
       }
+      if(!db.objectStoreNames.contains('filemeta')){
+        db.createObjectStore('filemeta', {keyPath:'id'});
+      }
     };
-    req.onsuccess = ()=>resolve(req.result);
+    req.onblocked = ()=>console.warn('[DB] Upgrade is waiting for other tabs of this app to close.');
+    req.onsuccess = ()=>{
+      const db = req.result;
+      // If a newer tab upgrades the schema, step aside instead of blocking it forever.
+      db.onversionchange = ()=>{ try{ db.close(); }catch(e){} };
+      resolve(db);
+    };
     req.onerror = ()=>reject(req.error);
   });
 }catch(err){
@@ -108,11 +120,108 @@ export async function normalizeBuffer(data) {
   return null;
 }
 
+/* ------------------------------------------------------------
+   Book records: PDF bytes live in `files`, everything else is mirrored in `filemeta`.
+   Listing the library or saving reading progress only ever touches `filemeta`, so
+   it no longer reads/writes every PDF (tens of MB each) into JS memory.
+   ------------------------------------------------------------ */
+function stripData(rec){
+  if(!rec) return rec;
+  const { data, ...meta } = rec;
+  return meta;
+}
+async function filesTx(mode){
+  const db = await dbP;
+  return db.transaction(['files','filemeta'], mode);
+}
+function txDone(tx){
+  return new Promise((res,rej)=>{
+    tx.oncomplete = ()=>res();
+    tx.onerror = ()=>rej(tx.error);
+    tx.onabort = ()=>rej(tx.error || new Error('IndexedDB transaction aborted'));
+  });
+}
+
+async function putFileRecord(rec){
+  // Never let a metadata-only object wipe the stored PDF bytes.
+  if(rec && rec.data === undefined){
+    const existing = await reqP((await idb('files')).get(rec.id));
+    if(existing && existing.data !== undefined) rec = { ...rec, data: existing.data };
+  }
+  const tx = await filesTx('readwrite');
+  const done = txDone(tx);
+  tx.objectStore('files').put(rec);
+  tx.objectStore('filemeta').put(stripData(rec));
+  await done;
+  return rec.id;
+}
+
+async function getFileRecord(id){
+  const tx = await filesTx('readonly');
+  const [full, meta] = await Promise.all([
+    reqP(tx.objectStore('files').get(id)),
+    reqP(tx.objectStore('filemeta').get(id)),
+  ]);
+  if(!full) return full;
+  // filemeta holds the freshest metadata; the bytes always come from `files`.
+  return meta ? { ...full, ...meta, data: full.data } : full;
+}
+
+async function delFileRecord(id){
+  const tx = await filesTx('readwrite');
+  const done = txDone(tx);
+  tx.objectStore('files').delete(id);
+  tx.objectStore('filemeta').delete(id);
+  await done;
+}
+
+// Library listing without PDF bytes. Books saved before v10 are indexed here, one at a
+// time (so only a single PDF is in memory at once), and only the first time.
+async function allFileMeta(){
+  const metas = await reqP((await idb('filemeta')).getAll());
+  const keys = await reqP((await idb('files')).getAllKeys());
+  const keySet = new Set(keys);
+  const have = new Set(metas.map(m=>m.id));
+  const result = metas.filter(m=>keySet.has(m.id));
+  for(const key of keys){
+    if(have.has(key)) continue;
+    try{
+      const full = await reqP((await idb('files')).get(key));
+      if(!full) continue;
+      const meta = stripData(full);
+      await reqP((await idb('filemeta','readwrite')).put(meta));
+      result.push(meta);
+    }catch(err){
+      console.warn('[DB] Could not index book', key, err);
+    }
+  }
+  // Drop index rows whose book no longer exists, so ghosts never show up in the library.
+  const stale = metas.filter(m=>!keySet.has(m.id));
+  for(const m of stale){
+    try{ await reqP((await idb('filemeta','readwrite')).delete(m.id)); }catch(e){}
+  }
+  return result;
+}
+
 export const DB = {
-  async put(store, val){ const s = await idb(store,'readwrite'); return reqP(s.put(val)); },
-  async get(store, key){ const s = await idb(store); return reqP(s.get(key)); },
-  async del(store, key){ const s = await idb(store,'readwrite'); return reqP(s.delete(key)); },
-  async all(store){ const s = await idb(store); return reqP(s.getAll()); },
+  async put(store, val){
+    if(store === 'files') return putFileRecord(val);
+    const s = await idb(store,'readwrite'); return reqP(s.put(val));
+  },
+  async get(store, key){
+    if(store === 'files') return getFileRecord(key);
+    const s = await idb(store); return reqP(s.get(key));
+  },
+  async del(store, key){
+    if(store === 'files') return delFileRecord(key);
+    const s = await idb(store,'readwrite'); return reqP(s.delete(key));
+  },
+  // For the `files` store this returns metadata only (no PDF bytes); use get('files', id) for the bytes.
+  async all(store){
+    if(store === 'files') return allFileMeta();
+    const s = await idb(store); return reqP(s.getAll());
+  },
+  allFileMeta,
   async byIndex(store, idx, val){ const s = await idb(store); return reqP(s.index(idx).getAll(val)); },
   async setting(key, val){ return this.put('settings', {key, val}); },
   async getSetting(key, fallback){ const r = await this.get('settings', key); return r ? r.val : fallback; },
@@ -120,13 +229,17 @@ export const DB = {
   async putCachedPage(fileId, pageNum, text){ return this.put('pagecache', { id: `${fileId}_p${pageNum}`, fileId, page: pageNum, text, updatedAt: Date.now() }); },
   normalizeBuffer,
   async updateFileMeta(fileId, updates){
-    const existing = await this.get('files', fileId);
-    if (!existing) return null;
-    const merged = { ...existing, ...updates };
-    if (!merged.data && existing.data) {
-      merged.data = existing.data;
+    // Metadata only: the PDF bytes in `files` are not read or rewritten.
+    let meta = await reqP((await idb('filemeta')).get(fileId));
+    if (!meta) {
+      // Book not indexed yet (saved before v10): derive its metadata once.
+      const full = await reqP((await idb('files')).get(fileId));
+      if (!full) return null;
+      meta = stripData(full);
     }
-    await this.put('files', merged);
+    const merged = { ...meta, ...updates };
+    delete merged.data;
+    await reqP((await idb('filemeta','readwrite')).put(merged));
     if (window.State && Array.isArray(window.State.files)) {
       const idx = window.State.files.findIndex(f => f.id === fileId);
       if (idx > -1) {

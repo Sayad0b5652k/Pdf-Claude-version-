@@ -8,18 +8,25 @@ let wakeLockRef = null;
 window.pageEls = pageEls;
 
 // Setup PDF.js worker explicitly with fallback
+// pdf.js, its worker, CMaps and standard fonts are served from this app's own origin
+// (/public/pdfjs). That removes a cross-origin round trip, works offline via the service
+// worker cache, and keeps the library version locked to the one in package.json.
+const PDFJS_LOCAL_WORKER = '/pdfjs/pdf.worker.min.js';
+const PDFJS_LOCAL_CMAPS = '/pdfjs/cmaps/';
+const PDFJS_LOCAL_FONTS = '/pdfjs/standard_fonts/';
+
 if (typeof window !== 'undefined' && window.pdfjsLib) {
   try {
     if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_LOCAL_WORKER;
     }
   } catch(e) {}
 }
 
 export const PDFJS_LOAD_OPTS = {
-  cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+  cMapUrl: PDFJS_LOCAL_CMAPS,
   cMapPacked: true,
-  standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/',
+  standardFontDataUrl: PDFJS_LOCAL_FONTS,
   disableFontFace: false,
   useSystemFonts: false,
   stopAtErrors: false,
@@ -38,16 +45,16 @@ export async function loadPdfDocumentSafely(rawBuffer, password = null) {
 
   // Ensure worker is configured
   if (window.pdfjsLib && window.pdfjsLib.GlobalWorkerOptions) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_LOCAL_WORKER;
   }
 
-  // Tier 1: Primary unpkg CDN with full CMaps & Standard Fonts (FoxitSerif, LiberationSans, etc.)
+  // Tier 1: Local CMaps & Standard Fonts (FoxitSerif, LiberationSans, etc.)
   try {
     const opts1 = {
       data: new Uint8Array(rawBuffer.slice(0)),
-      cMapUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/cmaps/',
+      cMapUrl: PDFJS_LOCAL_CMAPS,
       cMapPacked: true,
-      standardFontDataUrl: 'https://unpkg.com/pdfjs-dist@3.11.174/standard_fonts/',
+      standardFontDataUrl: PDFJS_LOCAL_FONTS,
       disableFontFace: false,
       useSystemFonts: false,
       stopAtErrors: false,
@@ -60,7 +67,7 @@ export async function loadPdfDocumentSafely(rawBuffer, password = null) {
     if (err1 && (err1.name === 'PasswordException' || err1.message?.toLowerCase().includes('password'))) {
       throw err1;
     }
-    console.warn('[PDF Loader] Tier 1 (unpkg) failed, trying Tier 2 (jsDelivr CDN)...', err1?.message);
+    console.warn('[PDF Loader] Tier 1 (local) failed, trying Tier 2 (jsDelivr CDN)...', err1?.message);
   }
 
   // Tier 2: Fallback jsDelivr CDN with complete standard fonts
@@ -119,6 +126,17 @@ window.loadPdfDocumentSafely = loadPdfDocumentSafely;
 let pageVpCache = {};
 let pageVpCacheDoc = null;
 
+// Single place that swaps the open pdf.js document, so the previous one is always destroyed
+// (an undestroyed PDFDocumentProxy stays parsed in memory inside the pdf.js worker).
+export function setCurrentDoc(doc){
+  const previous = window.State.currentDoc;
+  window.State.currentDoc = doc;
+  if (previous && previous !== doc && typeof previous.destroy === 'function') {
+    previous.destroy().catch(() => {});
+  }
+}
+window.setCurrentDoc = setCurrentDoc;
+
 export async function openReader(fileId, jumpToPage, pageList, pageListLabel){
   const full = await window.DB.get('files', fileId);
   if(!full){ window.toast('Book not found'); return; }
@@ -137,7 +155,10 @@ export async function openReader(fileId, jumpToPage, pageList, pageListLabel){
   const idx = window.State.files.findIndex(f=>f.id===fileId);
   if(idx>-1) window.State.files[idx] = cleanMeta;
 
-  window.State.currentFile = { ...full, data: rawBuffer || full.data };
+  // Metadata only: nothing reads the bytes from State.currentFile, and keeping them here held a
+  // second full copy of the PDF in memory for as long as the app stayed open.
+  const { data: _fullBytes, ...fileMeta } = full;
+  window.State.currentFile = fileMeta;
   const progress = await window.DB.get('progress', fileId);
   window.State.currentPage = jumpToPage || (pageList && pageList[0]) || progress?.page || 1;
   window.State.zoom = 1;
@@ -161,9 +182,6 @@ export async function openReader(fileId, jumpToPage, pageList, pageListLabel){
     // If buffer is missing in memory, try re-fetching from DB one more time
     const fresh = await window.DB.get('files', fileId);
     rawBuffer = await window.DB.normalizeBuffer(fresh?.data);
-    if (rawBuffer && rawBuffer.byteLength > 0) {
-      window.State.currentFile.data = rawBuffer;
-    }
   }
 
   if (!rawBuffer || rawBuffer.byteLength === 0) {
@@ -174,7 +192,7 @@ export async function openReader(fileId, jumpToPage, pageList, pageListLabel){
 
   try{
     const doc = await loadPdfDocumentSafely(rawBuffer);
-    window.State.currentDoc = doc;
+    setCurrentDoc(doc);
     window.State.numPages = doc.numPages;
     if (typeof applyOrientationLock === 'function') {
       applyOrientationLock(window.State.screenOrientationMode || 'auto');
@@ -2002,7 +2020,20 @@ export function renderReaderShell(){
         await window.stopReadingSession();
       }
       window.State.view='dashboard';
+      // Release the document for real: cancel renders, free canvases and tell pdf.js to drop the
+      // parsed PDF. Only nulling the reference used to leave every opened book alive in the
+      // pdf.js worker (plus all its page elements) until the app was reloaded.
+      const closingDoc = window.State.currentDoc;
       window.State.currentDoc=null;
+      clearPageEls();
+      pageVpCache = {};
+      pageVpCacheDoc = null;
+      const scrollElOnExit = document.getElementById('reader-scroll');
+      if (scrollElOnExit) scrollElOnExit.onscroll = null;
+      window.currentPageContainer = null;
+      if (closingDoc && typeof closingDoc.destroy === 'function') {
+        closingDoc.destroy().catch(() => {});
+      }
       window.State.pageList=null;
       window.State.pageListLabel='';
       releaseWakeLock();
@@ -2192,7 +2223,7 @@ export function promptPassword(fileRec, rawBuffer){
     try{
       const buf = rawBuffer || (await window.DB.normalizeBuffer(fileRec.data));
       const doc = await loadPdfDocumentSafely(buf, pass);
-      window.State.currentDoc = doc;
+      setCurrentDoc(doc);
       window.State.numPages = doc.numPages;
       await mountReaderContent();
     }catch(e){
@@ -2315,6 +2346,16 @@ export function updateReaderZoom(preserveAnchor = true) {
       pe.textLayerDiv.style.setProperty('--scale-factor', `${newScale}`);
     }
 
+    // The scale changed: drop any render still running for the old scale (it would commit a
+    // bitmap of the wrong size) but keep the current canvas on screen until the new one is ready.
+    pe._renderToken = (pe._renderToken || 0) + 1;
+    if (pe.renderTask) {
+      try { pe.renderTask.cancel(); } catch(e) {}
+      pe.renderTask = null;
+    }
+    pe.rendering = false;
+    pe._renderPromise = null;
+    pe.spanRects = null;
     pe.rendered = false;
   }
 
@@ -2362,12 +2403,7 @@ export async function mountReaderContent(){
   if (!scrollEl) return;
   scrollEl.innerHTML = '';
   // Empty pageEls safely keeping identical reference of window.pageEls
-  for (const k in pageEls) {
-    if (typeof window.destroyPageDrawLayer === 'function') {
-      window.destroyPageDrawLayer(Number(k));
-    }
-    delete pageEls[k];
-  }
+  clearPageEls();
   
   const mode = window.State.readingMode;
   scrollEl.classList.remove('rm-continuous','rm-single');
@@ -2429,9 +2465,24 @@ export async function mountReaderContent(){
     scrollEl.onscroll = null;
     showSinglePage(window.State.currentPage);
   } else {
+    // Jump to the saved page first, so the first pages painted are the ones the reader is
+    // actually looking at (previously page 1 was painted, then thrown away, on every open).
+    scrollToPage(window.State.currentPage, false);
     setupVirtualRender();
     scrollEl.onscroll = window.throttle(()=>{ updateCurrentPageFromScroll(); setupVirtualRender(); }, 120);
-    scrollToPage(window.State.currentPage, false);
+  }
+}
+
+// Releases every page (render tasks, canvases, drawing layers) and empties pageEls while keeping
+// the same object, because other modules hold a reference to window.pageEls.
+export function clearPageEls(){
+  resetRenderPipeline();
+  for (const k in pageEls) {
+    if (typeof window.destroyPageDrawLayer === 'function') {
+      try { window.destroyPageDrawLayer(Number(k)); } catch(e) {}
+    }
+    discardPage(pageEls[k]);
+    delete pageEls[k];
   }
 }
 
@@ -2850,15 +2901,55 @@ export function setupReaderInteractions(scrollEl){
   });
 }
 
-export function unloadPage(num){
-  const pe = pageEls[num];
-  if(!pe) return;
+/* ============================================================
+   PAGE RENDER PIPELINE (virtualised)
+   - at most MAX_PARALLEL_RENDERS pages paint at once, nearest-to-viewport first, so a fast
+     scroll can no longer pile up dozens of canvases
+   - every render carries a token: a page that is unloaded or re-mounted while its render is
+     still in flight can never come back to life (that race used to keep 30+ canvases alive)
+   - a canvas backing store is released the moment its page is unloaded
+   - the bitmap is shown as soon as it is painted; the text layer follows
+   ============================================================ */
+// iOS Safari silently draws nothing past ~16.7M pixels per canvas and phones run out of GPU
+// memory long before that, so very large (zoomed) pages are rendered at a reduced resolution.
+const MAX_CANVAS_PIXELS = 12 * 1024 * 1024;
+const MAX_PARALLEL_RENDERS = 2;
+const MAX_RENDER_FAILURES = 3;
+let activeRenders = 0;
+let renderQueue = [];
+let renderGeneration = 0;
+
+function releasePageResources(pe){
+  pe._renderToken = (pe._renderToken || 0) + 1; // invalidates any render still in flight
   if(pe.renderTask){
     try { pe.renderTask.cancel(); } catch(e){}
     pe.renderTask = null;
   }
+  if(pe.canvas){
+    // Free the pixel buffer now instead of waiting for the garbage collector.
+    try { pe.canvas.width = 0; pe.canvas.height = 0; } catch(e){}
+  }
+  if(pe.pageProxy){
+    try { pe.pageProxy.cleanup(); } catch(e){}
+    pe.pageProxy = null;
+  }
   pe.rendered = false;
   pe.rendering = false;
+  pe._renderPromise = null;
+}
+
+// Forget everything about the pages (used when leaving the reader or re-mounting it).
+export function resetRenderPipeline(){
+  renderGeneration++;
+  activeRenders = 0;
+  renderQueue = [];
+}
+
+export function unloadPage(num){
+  const pe = pageEls[num];
+  if(!pe) return;
+  releasePageResources(pe);
+  pe._failCount = 0;
   if (typeof window.destroyPageDrawLayer === 'function') {
     window.destroyPageDrawLayer(num);
   }
@@ -2868,6 +2959,61 @@ export function unloadPage(num){
   pe.annotLayer = null;
   pe.viewport = null;
   pe.spanRects = null;
+  pe.ocrBtn = null;
+}
+
+// Releases a page's resources without touching the DOM (the whole reader is being torn down).
+export function discardPage(pe){
+  if(!pe) return;
+  releasePageResources(pe);
+  pe.canvas = null;
+  pe.textLayerDiv = null;
+  pe.annotLayer = null;
+  pe.viewport = null;
+  pe.spanRects = null;
+  pe.ocrBtn = null;
+}
+
+// Bounding boxes of the text spans of a page, relative to the page. Measured on first use
+// instead of for every page render (it forces a layout of every span), and never cached while
+// the page is hidden (single-page mode keeps neighbours at display:none, where every rect is 0).
+export function getSpanRects(pe){
+  if(!pe || !pe.textLayerDiv || !pe.wrap) return null;
+  if(pe.spanRects) return pe.spanRects;
+  const wrapRect = pe.wrap.getBoundingClientRect();
+  if(!wrapRect.width || !wrapRect.height) return null;
+  pe.spanRects = [...pe.textLayerDiv.querySelectorAll('span')]
+    .filter(s => s.firstChild && s.firstChild.textContent)
+    .map(span => {
+      const r = span.getBoundingClientRect();
+      return {
+        span,
+        rect: {
+          left: r.left - wrapRect.left,
+          right: r.right - wrapRect.left,
+          top: r.top - wrapRect.top,
+          bottom: r.bottom - wrapRect.top,
+          width: r.width
+        }
+      };
+    });
+  return pe.spanRects;
+}
+window.getSpanRects = getSpanRects;
+
+function pumpRenderQueue(){
+  while(activeRenders < MAX_PARALLEL_RENDERS && renderQueue.length){
+    const n = renderQueue.shift();
+    const pe = pageEls[n];
+    if(!pe || pe.rendered || pe.rendering) continue;
+    const generation = renderGeneration;
+    activeRenders++;
+    Promise.resolve(renderPage(n)).catch(()=>{}).finally(()=>{
+      if(generation !== renderGeneration) return; // the pipeline was reset meanwhile
+      activeRenders = Math.max(0, activeRenders - 1);
+      pumpRenderQueue();
+    });
+  }
 }
 
 export function setupVirtualRender(){
@@ -2875,10 +3021,13 @@ export function setupVirtualRender(){
   const scrollEl = document.getElementById('reader-scroll');
   if (!scrollEl) return;
   const top = scrollEl.scrollTop;
-  const bottom = top + scrollEl.clientHeight;
-  const renderMargin = 1200; // Render buffer ahead/behind
-  const unloadMargin = 2800; // Memory release buffer for distant pages
+  const viewH = scrollEl.clientHeight;
+  const bottom = top + viewH;
+  const mid = top + viewH / 2;
+  const renderMargin = Math.max(900, viewH);                          // paint about one screen ahead/behind
+  const unloadMargin = renderMargin + Math.max(1400, viewH * 1.5);    // release memory a bit further out
 
+  const wanted = [];
   for(const [num, pe] of Object.entries(pageEls)){
     const n = Number(num);
     const relTop = pe._top !== undefined ? pe._top : (pe.wrap ? pe.wrap.offsetTop : 0);
@@ -2889,28 +3038,51 @@ export function setupVirtualRender(){
     const farAway = relBottom < top - unloadMargin || relTop > bottom + unloadMargin;
 
     if(inView && !pe.rendered && !pe.rendering){
-      renderPage(n);
+      wanted.push({ n, dist: Math.abs(relTop + relHeight / 2 - mid) });
     } else if(farAway && (pe.rendered || pe.rendering)){
       unloadPage(n);
     }
   }
+  wanted.sort((a, b) => a.dist - b.dist);
+  renderQueue = wanted.map(w => w.n);
+  pumpRenderQueue();
 }
 
 export async function renderPage(num){
   const pe = pageEls[num];
-  if(!pe || pe.rendered || pe.rendering) return;
+  if(!pe || pe.rendered) return;
+  if(pe.rendering) return pe._renderPromise; // join the render that is already running
+  if((pe._failCount || 0) >= MAX_RENDER_FAILURES) return; // give up until the page is unloaded and loaded again
+  const token = (pe._renderToken = (pe._renderToken || 0) + 1);
   pe.rendering = true;
+  const job = renderPageNow(num, pe, token);
+  pe._renderPromise = job;
+  return job;
+}
+
+async function renderPageNow(num, pe, token){
+  const doc = window.State.currentDoc;
+  // True once this render was superseded: page unloaded, reader re-mounted or document closed.
+  const isStale = () => pe._renderToken !== token || pageEls[num] !== pe || window.State.currentDoc !== doc;
+  let canvas = null;
+  let committed = false;
   try{
-    const page = await window.State.currentDoc.getPage(num);
+    const page = await doc.getPage(num);
+    if(isStale()) return;
+    pe.pageProxy = page;
     const viewport = page.getViewport({scale: pe.scale});
-    
+
     // High-performance crystal-clear rendering (Retina grade clarity without GPU memory bloat)
     const dpr = Math.min(window.devicePixelRatio || 2, 2.5);
-    const renderViewport = page.getViewport({ scale: pe.scale * dpr });
+    let renderViewport = page.getViewport({ scale: pe.scale * dpr });
+    const pixels = renderViewport.width * renderViewport.height;
+    if(pixels > MAX_CANVAS_PIXELS){
+      renderViewport = page.getViewport({ scale: pe.scale * dpr * Math.sqrt(MAX_CANVAS_PIXELS / pixels) });
+    }
 
-    const canvas = document.createElement('canvas');
-    canvas.width = renderViewport.width;
-    canvas.height = renderViewport.height;
+    canvas = document.createElement('canvas');
+    canvas.width = Math.floor(renderViewport.width);
+    canvas.height = Math.floor(renderViewport.height);
     canvas.style.width = viewport.width + 'px';
     canvas.style.height = viewport.height + 'px';
     canvas.style.display = 'block';
@@ -2919,13 +3091,13 @@ export async function renderPage(num){
     if (!ctx) {
       console.warn(`Could not acquire 2d context for page ${num}`);
       pe.rendering = false;
+      pe._renderPromise = null;
       return;
     }
 
-    if(pe.renderTask){
-      try{ pe.renderTask.cancel(); }catch(e){}
-      pe.renderTask = null;
-    }
+    // Fetch the text while the bitmap paints so the two overlap instead of queueing.
+    const textPromise = page.getTextContent();
+    textPromise.catch(() => {});
 
     const renderTask = page.render({canvasContext: ctx, viewport: renderViewport});
     pe.renderTask = renderTask;
@@ -2933,7 +3105,7 @@ export async function renderPage(num){
       await renderTask.promise;
     } catch (renderError) {
       if (renderError?.name === 'RenderingCancelledException' || renderError?.message?.includes('cancelled')) {
-        pe.rendering = false;
+        if(!isStale()){ pe.rendering = false; pe._renderPromise = null; }
         return;
       }
       throw renderError;
@@ -2942,14 +3114,36 @@ export async function renderPage(num){
         pe.renderTask = null;
       }
     }
+    if(isStale()) return;
 
-    const textContent = await page.getTextContent();
+    // Show the bitmap right away (the text layer is added below, a moment later).
+    if (typeof window.destroyPageDrawLayer === 'function') {
+      try {
+        window.destroyPageDrawLayer(num);
+      } catch (destroyErr) {
+        console.warn('destroyPageDrawLayer notice:', destroyErr);
+      }
+    }
+    const previousCanvas = pe.canvas;
+    pe.wrap.innerHTML = '';
+    pe.wrap.appendChild(canvas);
+    if(previousCanvas && previousCanvas !== canvas){
+      try { previousCanvas.width = 0; previousCanvas.height = 0; } catch(e){}
+    }
+    pe.canvas = canvas;
+    pe.textLayerDiv = null;
+    pe.annotLayer = null;
+    pe.spanRects = null;
+    committed = true;
+
+    const textContent = await textPromise;
+    if(isStale()) return;
     const textLayerDiv = document.createElement('div');
     textLayerDiv.className = 'textLayer';
     textLayerDiv.style.width = viewport.width + 'px';
     textLayerDiv.style.height = viewport.height + 'px';
     textLayerDiv.style.setProperty('--scale-factor', `${viewport.scale}`);
-    
+
     if (pdfjsLib.renderTextLayer) {
       await pdfjsLib.renderTextLayer({
         textContentSource: textContent,
@@ -2966,28 +3160,21 @@ export async function renderPage(num){
     } else {
       renderTextLayer(textLayerDiv, textContent, viewport);
     }
+    if(isStale()) return;
 
     const annotLayer = document.createElement('div');
     annotLayer.className = 'annot-layer';
-
-    if (typeof window.destroyPageDrawLayer === 'function') {
-      try {
-        window.destroyPageDrawLayer(num);
-      } catch (destroyErr) {
-        console.warn('destroyPageDrawLayer notice:', destroyErr);
-      }
-    }
-    pe.wrap.innerHTML = '';
-    pe.wrap.appendChild(canvas);
     pe.wrap.appendChild(textLayerDiv);
     pe.wrap.appendChild(annotLayer);
 
     pe.viewport = viewport;
     pe.annotLayer = annotLayer;
     pe.textLayerDiv = textLayerDiv;
-    pe.canvas = canvas;
+    pe.spanRects = null; // measured lazily by getSpanRects()
+    pe._failCount = 0;
     pe.rendered = true;
     pe.rendering = false;
+    pe._renderPromise = null;
 
     try {
       if (typeof window.paintAnnotations === 'function') {
@@ -3001,23 +3188,6 @@ export async function renderPage(num){
       window.paintPendingOverlay(window.pendingSelection, true);
     }
 
-    const wrapRectAtRender = pe.wrap.getBoundingClientRect();
-    pe.spanRects = [...textLayerDiv.querySelectorAll('span')]
-      .filter(s => s.firstChild && s.firstChild.textContent)
-      .map(span => {
-        const r = span.getBoundingClientRect();
-        return {
-          span,
-          rect: {
-            left: r.left - wrapRectAtRender.left,
-            right: r.right - wrapRectAtRender.left,
-            top: r.top - wrapRectAtRender.top,
-            bottom: r.bottom - wrapRectAtRender.top,
-            width: r.width
-          }
-        };
-      });
-
     if(textContent.items.length===0){
       pe.scanned = true;
       const ocrBtn = document.createElement('button');
@@ -3030,13 +3200,27 @@ export async function renderPage(num){
     }
   }catch(err){
     if(err && err.name === 'RenderingCancelledException'){
-      pe.rendering = false;
+      if(!isStale()){ pe.rendering = false; pe._renderPromise = null; }
       return;
     }
+    if(isStale()) return;
     console.warn(`Page ${num} failed to render, will retry when back in view:`, err && err.message);
+    pe._failCount = (pe._failCount || 0) + 1;
     pe.rendered = false;
     pe.rendering = false;
+    pe._renderPromise = null;
+    if(pe.canvas){
+      try { pe.canvas.width = 0; pe.canvas.height = 0; } catch(e){}
+    }
+    pe.canvas = null;
+    pe.textLayerDiv = null;
+    pe.annotLayer = null;
+    pe.spanRects = null;
     pe.wrap.innerHTML = '';
+  }finally{
+    if(!committed && canvas){
+      try { canvas.width = 0; canvas.height = 0; } catch(e){}
+    }
   }
 }
 
@@ -3072,6 +3256,7 @@ export function renderTextLayer(div, textContent, viewport){
 
 export async function getTesseractWorker(){
   if(tesseractWorker) return tesseractWorker;
+  await window.ensureLib('tesseract');
   tesseractWorker = await Tesseract.createWorker('eng');
   return tesseractWorker;
 }
@@ -3120,6 +3305,7 @@ export async function exportAnnotatedPdf(fileId, annots){
   window.toast('Preparing export…');
   try{
     const full = await window.DB.get('files', fileId);
+    await window.ensureLib('pdflib');
     const { PDFDocument, rgb } = PDFLib;
     const pdfDoc = await PDFDocument.load(full.data.slice(0));
     const pages = pdfDoc.getPages();
