@@ -2,6 +2,10 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
+import compression from "compression";
+import crypto from "node:crypto";
+import dns from "node:dns/promises";
+import net from "node:net";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
@@ -1255,9 +1259,187 @@ async function generateAIImage(prompt: string): Promise<{ imageUrl: string; desc
   return null;
 }
 
+// -------------------------------------------------------------
+// SAFE OUTBOUND IMAGE FETCH (used by /api/image-proxy)
+// -------------------------------------------------------------
+// The proxy fetches URLs on behalf of visitors, so it must never reach private networks (SSRF),
+// never return non-image content under this app's origin (script injection) and never buffer
+// unbounded downloads.
+
+function isPrivateAddress(ip: string): boolean {
+  const v = ip.toLowerCase();
+  if (net.isIPv4(v)) {
+    const [a, b] = v.split(".").map(Number);
+    return (
+      a === 0 || a === 10 || a === 127 ||
+      (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168) ||
+      (a === 192 && b === 0) ||
+      (a === 198 && (b === 18 || b === 19)) ||
+      a >= 224
+    );
+  }
+  if (net.isIPv6(v)) {
+    if (v === "::" || v === "::1") return true;
+    // IPv4 hidden inside IPv6: ::ffff:10.0.0.1 and the hex form ::ffff:a00:1 that URL parsing produces,
+    // plus the deprecated IPv4-compatible ::a00:1.
+    const mappedDotted = v.match(/^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+    if (mappedDotted) return isPrivateAddress(mappedDotted[1]);
+    const mappedHex = v.match(/^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mappedHex) {
+      const hi = parseInt(mappedHex[1], 16);
+      const lo = parseInt(mappedHex[2], 16);
+      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    // NAT64 (64:ff9b::/96) can reach IPv4 hosts, including private ones.
+    return /^(fc|fd|fe[89ab]|ff|64:ff9b:)/.test(v);
+  }
+  return true; // not an IP literal: treat as unsafe
+}
+
+async function assertPublicHost(hostname: string): Promise<void> {
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (!host || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal")) {
+    throw new Error("blocked host");
+  }
+  if (net.isIP(host)) {
+    if (isPrivateAddress(host)) throw new Error("blocked address");
+    return;
+  }
+  const addresses = await dns.lookup(host, { all: true });
+  if (!addresses.length || addresses.some((a) => isPrivateAddress(a.address))) {
+    throw new Error("blocked address");
+  }
+}
+
+const MAX_PROXY_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_PROXY_REDIRECTS = 3;
+const ALLOWED_IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp|avif|bmp|svg\+xml|x-icon|vnd\.microsoft\.icon)$/i;
+
+function sniffImageType(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.toString("ascii", 0, 3) === "GIF") return "image/gif";
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  return null;
+}
+
+async function fetchPublicImage(
+  startUrl: string,
+  timeoutMs: number,
+  headers: Record<string, string>
+): Promise<{ buffer: Buffer; contentType: string } | null> {
+  let current = startUrl;
+  for (let hop = 0; hop <= MAX_PROXY_REDIRECTS; hop++) {
+    const parsed = new URL(current);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    await assertPublicHost(parsed.hostname); // re-checked on every redirect hop
+    const resp = await fetch(parsed.toString(), { headers, signal: AbortSignal.timeout(timeoutMs), redirect: "manual" });
+    if (resp.status >= 300 && resp.status < 400) {
+      const location = resp.headers.get("location");
+      if (!location) return null;
+      current = new URL(location, parsed).toString();
+      continue;
+    }
+    if (!resp.ok) return null;
+
+    const declaredLength = Number(resp.headers.get("content-length") || 0);
+    if (declaredLength > MAX_PROXY_IMAGE_BYTES) return null;
+    const reader = resp.body?.getReader();
+    if (!reader) return null;
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > MAX_PROXY_IMAGE_BYTES) {
+        try { await reader.cancel(); } catch {}
+        return null;
+      }
+      chunks.push(Buffer.from(value));
+    }
+    const buffer = Buffer.concat(chunks);
+
+    let contentType = (resp.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!ALLOWED_IMAGE_TYPES.test(contentType)) {
+      // Some image hosts label files as octet-stream; accept those only when the bytes really are an image.
+      const sniffed = !contentType || contentType === "application/octet-stream" ? sniffImageType(buffer) : null;
+      if (!sniffed) return null;
+      contentType = sniffed;
+    }
+    return { buffer, contentType };
+  }
+  return null;
+}
+
+function sendProxyImage(res: express.Response, buffer: Buffer, contentType: string, cacheControl: string) {
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Cache-Control", cacheControl);
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  // Even if someone opens the URL directly, a hostile SVG cannot run script on this origin.
+  res.setHeader("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+  return res.send(buffer);
+}
+
+// -------------------------------------------------------------
+// SIMPLE PER-IP RATE LIMITER (no extra dependency)
+// -------------------------------------------------------------
+function createRateLimiter(windowMs: number, max: number): express.RequestHandler {
+  const hits = new Map<string, { count: number; resetAt: number }>();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of hits) if (entry.resetAt <= now) hits.delete(key);
+  }, windowMs).unref();
+  return (req, res, next) => {
+    const key = req.ip || "unknown";
+    const now = Date.now();
+    let entry = hits.get(key);
+    if (!entry || entry.resetAt <= now) {
+      entry = { count: 0, resetAt: now + windowMs };
+      hits.set(key, entry);
+    }
+    entry.count++;
+    if (entry.count > max) {
+      res.setHeader("Retry-After", String(Math.ceil((entry.resetAt - now) / 1000)));
+      return res.status(429).json({ error: "Too many requests. Please slow down for a minute.", status: "error" });
+    }
+    next();
+  };
+}
+
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  return ab.length === bb.length && crypto.timingSafeEqual(ab, bb);
+}
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[Server] Unhandled promise rejection (kept running):", reason);
+});
+process.on("uncaughtException", (err) => {
+  console.error("[Server] Uncaught exception (kept running):", err);
+});
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+
+  // One reverse proxy hop (Cloud Run / AI Studio): makes req.ip the real visitor for rate limiting.
+  app.set("trust proxy", 1);
+
+  // Abuse protection: the AI routes spend the owner's API quota. Limits are generous for normal study use.
+  app.use("/api/", createRateLimiter(60_000, 300));
+  app.use(["/api/ai", "/api/tts", "/api/gemini", "/api/dictionary", "/api/image-proxy"], createRateLimiter(60_000, 150));
+
+  // Compress static files only: API responses include streamed (SSE) replies that must not be buffered.
+  app.use(compression({
+    filter: (req, res) => !req.path.startsWith("/api/") && compression.filter(req, res),
+  }));
 
   app.use(express.json({ limit: "30mb" }));
 
@@ -1273,7 +1455,17 @@ async function startServer() {
   });
 
   // Comprehensive Key Diagnostics & Live Responsiveness Test
+  // Spends real API calls and shows key fragments, so it is locked: set DIAGNOSTICS_TOKEN and send it
+  // as the `x-diagnostics-token` header. Without a token it is only available outside production.
   app.get("/api/keys-diagnostics", async (req, res) => {
+    const configuredToken = (process.env.DIAGNOSTICS_TOKEN || "").trim();
+    if (configuredToken) {
+      if (!safeEqual(String(req.get("x-diagnostics-token") || ""), configuredToken)) {
+        return res.status(404).json({ error: "Not found" });
+      }
+    } else if (process.env.NODE_ENV === "production") {
+      return res.status(404).json({ error: "Not found" });
+    }
     try {
       const envKeys = [
         { varName: "GEMINI_API_KEY", tag: "Primary Default Fallback", pool: "Universal" },
@@ -1450,10 +1642,7 @@ async function startServer() {
       const cacheKey = rawUrl || subject;
       if (cacheKey && imageProxyCache.has(cacheKey)) {
         const cached = imageProxyCache.get(cacheKey)!;
-        res.setHeader("Content-Type", cached.contentType);
-        res.setHeader("Cache-Control", "public, max-age=604800, immutable");
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        return res.send(cached.buffer);
+        return sendProxyImage(res, cached.buffer, cached.contentType, "public, max-age=604800, immutable");
       }
 
       // If no URL was provided but subject was, automatically search an authentic image for subject
@@ -1498,71 +1687,42 @@ async function startServer() {
         return res.status(400).send("Invalid protocol");
       }
 
-      let upstream: Response | null = null;
+      const imageHeaders = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+      };
+
+      let fetched: { buffer: Buffer; contentType: string } | null = null;
       try {
-        upstream = await fetch(parsed.toString(), {
-          headers: {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9"
-          },
-          signal: AbortSignal.timeout(9000),
-          redirect: "follow"
-        });
+        fetched = await fetchPublicImage(parsed.toString(), 9000, imageHeaders);
       } catch (fetchErr: any) {
-        console.warn("[Proxy Fetch Timeout/Error]:", fetchErr?.message);
+        console.warn("[Proxy Fetch blocked/failed]:", fetchErr?.message);
       }
 
-      // If upstream failed or returned non-200, try alternative search for subject
-      if (!upstream || !upstream.ok) {
-        if (subject) {
-          const altImg = await fetchEducationalInternetImage(subject);
-          if (altImg && altImg.imageUrl && altImg.imageUrl !== targetUrl) {
-            try {
-              const altUpstream = await fetch(altImg.imageUrl, {
-                headers: {
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                },
-                signal: AbortSignal.timeout(8000),
-                redirect: "follow"
-              });
-              if (altUpstream.ok) {
-                const contentType = altUpstream.headers.get("content-type") || "image/jpeg";
-                const arrayBuffer = await altUpstream.arrayBuffer();
-                const buf = Buffer.from(arrayBuffer);
-                setCacheItem(cacheKey, { buffer: buf, contentType, time: Date.now() });
-                res.setHeader("Content-Type", contentType);
-                res.setHeader("Cache-Control", "public, max-age=604800, immutable");
-                res.setHeader("Access-Control-Allow-Origin", "*");
-                return res.send(buf);
-              }
-            } catch (e) {}
-          }
+      // If upstream failed or was refused, try an alternative image for the subject
+      if (!fetched && subject) {
+        const altImg = await fetchEducationalInternetImage(subject);
+        if (altImg && altImg.imageUrl && altImg.imageUrl !== targetUrl) {
+          try {
+            fetched = await fetchPublicImage(altImg.imageUrl, 8000, imageHeaders);
+          } catch (e) {}
         }
-
-        const svg = generateFallbackSvg(subject || "Educational Archive Visual");
-        res.setHeader("Content-Type", "image/svg+xml");
-        res.setHeader("Cache-Control", "public, max-age=86400");
-        res.setHeader("Access-Control-Allow-Origin", "*");
-        return res.send(Buffer.from(svg));
       }
 
-      const contentType = upstream.headers.get("content-type") || "image/jpeg";
-      const arrayBuffer = await upstream.arrayBuffer();
-      const buf = Buffer.from(arrayBuffer);
+      if (!fetched) {
+        const svg = generateFallbackSvg(subject || "Educational Archive Visual");
+        return sendProxyImage(res, Buffer.from(svg), "image/svg+xml", "public, max-age=86400");
+      }
 
-      setCacheItem(cacheKey, { buffer: buf, contentType, time: Date.now() });
-
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Cache-Control", "public, max-age=604800, immutable");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      return res.send(buf);
+      if (cacheKey.length <= 500) {
+        setCacheItem(cacheKey, { buffer: fetched.buffer, contentType: fetched.contentType, time: Date.now() });
+      }
+      return sendProxyImage(res, fetched.buffer, fetched.contentType, "public, max-age=604800, immutable");
     } catch (err: any) {
       console.warn("[Image Proxy Error]:", err?.message);
       const svg = generateFallbackSvg("Educational Visual");
-      res.setHeader("Content-Type", "image/svg+xml");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      return res.send(Buffer.from(svg));
+      return sendProxyImage(res, Buffer.from(svg), "image/svg+xml", "no-cache");
     }
   });
 
@@ -2690,8 +2850,22 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        const rel = path.relative(distPath, filePath).split(path.sep).join("/");
+        if (rel.startsWith("assets/")) {
+          // content-hashed by Vite: safe to cache forever
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        } else if (rel === "index.html" || rel === "sw.js" || rel === "manifest.json") {
+          // must always be revalidated so updates are picked up
+          res.setHeader("Cache-Control", "no-cache");
+        } else if (rel.startsWith("pdfjs/") || rel.startsWith("vendor/") || rel.startsWith("icons/")) {
+          res.setHeader("Cache-Control", "public, max-age=604800");
+        }
+      },
+    }));
     app.get("*", (req, res) => {
+      res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });
   }

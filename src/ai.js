@@ -3060,14 +3060,14 @@ export async function fetchHybridDictionary(word, context = '', subjectDomain = 
     mwThesRes,
     aiRes
   ] = await Promise.allSettled([
-    fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`).then(r => r.ok ? r.json() : null),
-    fetch(`https://api.datamuse.com/words?sp=${encodeURIComponent(cleanWord)}&md=dp`).then(r => r.ok ? r.json() : null),
-    fetch(`https://api.datamuse.com/words?rel_syn=${encodeURIComponent(cleanWord)}`).then(r => r.ok ? r.json() : null),
-    fetch(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(cleanWord)}`).then(r => r.ok ? r.json() : null),
-    fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&dt=bd&q=${encodeURIComponent(cleanWord)}`).then(r => r.ok ? r.json() : null),
-    fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=en|hi`).then(r => r.ok ? r.json() : null),
-    fetch(mwDictUrl).then(r => r.ok ? r.json() : null),
-    fetch(mwThesUrl).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(`https://api.datamuse.com/words?sp=${encodeURIComponent(cleanWord)}&md=dp`, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(`https://api.datamuse.com/words?rel_syn=${encodeURIComponent(cleanWord)}`, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(`https://api.datamuse.com/words?rel_ant=${encodeURIComponent(cleanWord)}`, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=hi&dt=t&dt=bd&q=${encodeURIComponent(cleanWord)}`, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(cleanWord)}&langpair=en|hi`, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(mwDictUrl, {}, 9000).then(r => r.ok ? r.json() : null),
+    fetchWithTimeout(mwThesUrl, {}, 9000).then(r => r.ok ? r.json() : null),
     fetchAIDictionaryVerification(cleanWord, context, subjectDomain)
   ]);
 
@@ -6118,7 +6118,7 @@ export async function speakWithMicrosoftNeural(text, voiceId, options = {}) {
   const rate = typeof options.rate === 'number' ? options.rate : (settings.rate || 1.0);
   const pitch = typeof options.pitch === 'number' ? options.pitch : (settings.pitch || 1.0);
 
-  const res = await fetch('/api/tts/synthesize', {
+  const res = await fetchWithTimeout('/api/tts/synthesize', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -6127,7 +6127,7 @@ export async function speakWithMicrosoftNeural(text, voiceId, options = {}) {
       rate,
       pitch
     })
-  });
+  }, 30000);
 
   if (!res.ok) {
     const errData = await res.json().catch(() => ({}));
