@@ -13,6 +13,7 @@ import './page_tools.js';
 import './selection.js';
 import './annotations_drawing.js';
 import './teacher.js';
+import './paper_ui.js';
 import './mind_audio.js';
 import './custom_select.js';
 import { initPWAListeners } from './pwa.js';
@@ -80,6 +81,9 @@ export function render(){
     }
     else if(window.State.view==='review') {
       if(typeof window.renderReviewView === 'function') window.renderReviewView();
+    }
+    else if(window.State.view==='paper') {
+      if(typeof window.renderPaperView === 'function') window.renderPaperView();
     }
   } catch (err) {
     console.error('Error during render():', err);
@@ -357,6 +361,14 @@ export function initHardwareBackNavigation() {
       return;
     }
 
+    // Priority 2.5: Question Paper Generator handles its own inner screens
+    if (window.State && window.State.view === 'paper') {
+      if (typeof window.paperBack === 'function') window.paperBack();
+      else { window.State.view = 'dashboard'; window.render(); }
+      pushAppScreen('paper');
+      return;
+    }
+
     // Priority 3: Check if inside AI Teacher Workspace
     if (window.State && window.State.view === 'teacher') {
       if (typeof window.stopElevenAudio === 'function') window.stopElevenAudio();
@@ -447,6 +459,7 @@ export async function boot(){
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', ()=>{ if(window.State.autoTheme) applyAutoTheme(); });
   // Metadata only: loading every PDF's bytes just to draw the library cost hundreds of MB at startup.
   window.State.files = await window.DB.allFileMeta();
+  try { await window.initPaperModule?.(); } catch (e) { console.warn('[Paper] init failed', e); }
   
   // Connect file-input element to importFiles for mobile & desktop uploads
   const fileInput = document.getElementById('file-input');
@@ -822,6 +835,11 @@ export function openAIMenu(isFromSettings = false){
     b.onclick = () => {
       const toolKey = b.dataset.key;
       const toolObj = window.AI_TOOLS.find(t => t.key === toolKey);
+      if (toolKey === 'paper') {
+        window.Sheet.close();
+        if (window.openPaperView) window.openPaperView({ new: true });
+        return;
+      }
       if (hasText) {
         if (toolKey === 'meaning' && window.runDictionaryLookup) {
           window.runDictionaryLookup(sel);

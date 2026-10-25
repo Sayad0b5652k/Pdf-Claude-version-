@@ -23,6 +23,7 @@ export async function renderDashboard(preserveScroll = true){
     if (widgetsEl) {
       widgetsEl.innerHTML = `
         ${renderAnalyticsCard(files, readingStats)}
+        ${paperEntryCard()}
 
         ${recents.length? `
         <div id="continue-reading-section" style="margin-bottom:24px;">
@@ -97,6 +98,7 @@ export async function renderDashboard(preserveScroll = true){
     <div style="padding:6px 20px;">
       <div id="dash-widgets">
         ${renderAnalyticsCard(files, readingStats)}
+        ${paperEntryCard()}
 
         ${recents.length? `
         <div id="continue-reading-section" style="margin-bottom:24px;">
@@ -322,6 +324,13 @@ export function bindBooksSectionEvents(){
       bindBooksSectionEvents();
     };
   });
+}
+
+export function paperEntryCard() {
+  return `<button class="pp-entry" onclick="window.openPaperView && window.openPaperView({screen:'home'})">
+    <span class="pp-entry-ic">${window.icon('paper','icon')}</span>
+    <span class="pp-entry-t"><b>Question Papers</b><small>Board-pattern papers from your books, with history</small></span>
+    <span class="pp-entry-go">${window.icon('chevRight','icon icon-sm')}</span></button>`;
 }
 
 export function renderAnalyticsCard(files, readingStats) {

@@ -41,6 +41,7 @@ export const ICONS = {
   help:'<rect x="3" y="3" width="18" height="18"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><path d="M12 17h.01"/>',
   language:'<path d="M4 5h11M9 3v2M6 5c0 4.5 3 7 6 8.5M11 9c-.7 2-2.6 4.7-5.5 6.5"/><path d="m14 21 4-9 4 9M15.5 18h5"/>',
   check:'<path d="m5 12 5 5 9-9"/>',
+  paper:'<path d="M5 3h11l3 3v15H5Z"/><path d="M8 8h6M8 12h8M8 16h4"/><path d="m14.5 17.2 1.4 1.4 2.6-3"/>',
   fileText:'<path d="M6 3h9l5 5v13H6Z"/><path d="M15 3v5h5"/><path d="M9 13h6M9 17h6M9 9h2"/>',
   rotate:'<path d="M20 11A8 8 0 1 0 12 20"/><path d="M20 5v6h-6"/>',
   merge:'<path d="M6 3v8a4 4 0 0 0 4 4h8"/><path d="M14 11l4 4-4 4"/><path d="M6 15v6"/>',

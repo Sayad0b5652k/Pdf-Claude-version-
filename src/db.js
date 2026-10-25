@@ -3,10 +3,11 @@
 export const BUILD_TAG = 'quality-and-autozoom-2026-07-26';
 console.log('%cSTRATA build: ' + BUILD_TAG, 'font-weight:bold; font-size:14px; color:#FF6A2B;');
 
+// v11 adds the `papers` store (generated question papers + attempts). Additive, nothing is moved.
 // v10 adds the small `filemeta` store (name, thumb, lastPage, folder ... without the PDF bytes).
 // The `files` store is left exactly as it was: it keeps owning the binary. Upgrading is additive,
 // nothing is moved or deleted, and a book that is not indexed yet gets indexed lazily (see allFileMeta).
-const DB_NAME='marginal_db', DB_VER=10;
+const DB_NAME='marginal_db', DB_VER=11;
 let dbP;
 try{
   if(!('indexedDB' in window)) throw new Error('IndexedDB is not available in this browser context.');
@@ -64,6 +65,11 @@ try{
       }
       if(!db.objectStoreNames.contains('filemeta')){
         db.createObjectStore('filemeta', {keyPath:'id'});
+      }
+      if(!db.objectStoreNames.contains('papers')){
+        const s = db.createObjectStore('papers', {keyPath:'id'});
+        s.createIndex('fileId','fileId');
+        s.createIndex('updatedAt','updatedAt');
       }
     };
     req.onblocked = ()=>console.warn('[DB] Upgrade is waiting for other tabs of this app to close.');

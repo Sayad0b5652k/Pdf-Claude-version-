@@ -1729,7 +1729,7 @@ async function startServer() {
   // Dedicated AI Study Tools Endpoint (Summarize, Explain, Flashcards, MCQs, Revision, Meaning, Key Facts)
   app.post("/api/ai/study-tool", async (req, res) => {
     try {
-      const { toolKey, prompt, sourceText, isFullPage, pageNum, model, temperature, customKey, stream, systemInstruction } = req.body;
+      const { toolKey, prompt, sourceText, isFullPage, pageNum, model, temperature, customKey, stream, systemInstruction, json } = req.body;
       if (!prompt && !sourceText) {
         return res.status(400).json({ error: "Missing prompt or sourceText" });
       }
@@ -1825,6 +1825,7 @@ async function startServer() {
             temperature: typeof temperature === "number" ? temperature : 0.22,
             systemInstruction: studySysInstruction,
             customKey,
+            responseMimeType: json === true ? "application/json" : undefined,
           });
 
           if (result && result.text) {

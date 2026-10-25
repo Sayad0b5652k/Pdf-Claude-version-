@@ -8,6 +8,7 @@ export const AI_TOOLS = [
   {key:'important', label:'Key facts & dates', icon:'star'},
   {key:'meaning', label:'Word meaning', icon:'language'},
   {key:'revision', label:'Revision notes', icon:'edit'},
+  {key:'paper', label:'Question Paper', icon:'paper'},
 ];
 
 export async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
@@ -2043,6 +2044,7 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
 
 export async function runAIToolObj(tool, sel, isFullPage = false){
   if(!tool) return;
+  if (tool.key === 'paper') return window.openPaperView?.({ new: true });
   const pageNum = sel?.pageNum || window.State?.currentPage || 1;
   const rawText = typeof sel === 'string' ? sel : (sel?.text || '');
   const pageText = (rawText && rawText.trim()) ? rawText.trim() : (typeof window.getCurrentPageText === 'function' ? window.getCurrentPageText() : `Chapter content on Page ${pageNum}`);
