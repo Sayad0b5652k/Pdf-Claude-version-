@@ -106,192 +106,32 @@ export async function callGroq(prompt){
   return await callServerGemini(prompt);
 }
 
-export function generateOfflineSmartSummary(toolKey, text, isFullPage = false, pageNum = 1) {
-  if (!text || !text.trim()) {
-    return `# 📄 PAGE 1 OF 4: Foundational Overview
-> 💡 **Core Thesis**: Content from Page ${pageNum} is ready for study analysis.
-- **Foundational Concept**: Page text is being indexed for deep recall.
-
----
-# 📄 PAGE 2 OF 4: In-Depth Topic Breakdown
-- **Topic 1**: Thorough conceptual breakdown of the primary principles.
-- **Topic 2**: Detailed examination of mechanisms and processes.
-
----
-# 📄 PAGE 3 OF 4: Key Facts, Formulas & Tables
-| Component | Function / Role | Exam Priority |
-| :--- | :--- | :--- |
-| **Core Element** | Primary driver of the topic | ⭐⭐⭐ High Yield |
-
----
-# 📄 PAGE 4 OF 4: Master Exam Blueprint & Recall
-- [x] **Core Definition**: Review fundamental principles.
-- [ ] **Active Recall**: Test knowledge of key relationships.`;
+export function generateOfflineSmartSummary(toolKey, text, isFullPage = false, pageNum = 1, studyPage = 0, studyTotal = 4) {
+  /* Used only when the AI service cannot be reached. It never invents content: it
+     re-arranges real sentences from the page and says so. */
+  const clean = String(text || '').replace(/^You are an expert[\s\S]*?"""/i, '').replace(/"""[\s\S]*$/i, '').replace(/\s+/g, ' ').trim();
+  const sents = clean.split(/(?<=[.?!।])\s+/).map((x) => x.trim()).filter((x) => x.length > 25 && x.length < 400 && !/^#/.test(x));
+  const note = '> ⚠️ **AI is not reachable right now.** These are the key sentences taken straight from the page, not an AI explanation. Try again when you are online.';
+  if (!sents.length) {
+    return `# 📄 PAGE 1 OF 1: Page ${pageNum}\n\n${note}\n\nThere is not enough readable text on this page (it may be a scanned image). Try again after text is available.`;
   }
-  // Strip prompt artifacts if any were accidentally passed
-  let clean = text.replace(/^You are an expert[\s\S]*?"""/i, '').replace(/"""[\s\S]*$/i, '').trim();
-  if (!clean) clean = text.trim();
-
-  const rawSentences = clean.split(/(?<=[.?!])\s+/).map(s => s.trim()).filter(s => s.length > 10 && !s.startsWith('#') && !s.includes('CRITICAL REQUIREMENTS') && !s.includes('FORMAT AS'));
-  const sampleSentences = rawSentences.length > 0 ? rawSentences : [clean.slice(0, 200)];
-
-  const c1 = sampleSentences[0] ? sampleSentences[0].slice(0, 45).replace(/[^\w\s-]/g, '') : 'Foundational Concept';
-  const c2 = sampleSentences[1] ? sampleSentences[1].slice(0, 45).replace(/[^\w\s-]/g, '') : 'Operational Mechanism';
-  const c3 = sampleSentences[2] ? sampleSentences[2].slice(0, 45).replace(/[^\w\s-]/g, '') : 'Analytical Application';
-  const c4 = sampleSentences[3] ? sampleSentences[3].slice(0, 45).replace(/[^\w\s-]/g, '') : 'Governing Principle';
-
-  if (toolKey === 'explain') {
-    return `# 📄 PAGE 1 OF 4: Core Intuition, Analogies & Mental Models
-
-> 💡 **1-Minute Everyday Analogy**: Imagine this entire topic like a synchronized engine: **${sampleSentences[0] || 'The core principle'}** acts as the driving camshaft, ensuring every subsequent process executes in perfect harmony.
-
-### 🗺️ Visual Architecture & Flowchart
-\`\`\`
-[ ${c1} ] ──> [ ${c2} ] ──> [ ${c3} ]
-                   │
-                   └──> [ Critical Factor ] ──> (Outcome)
-\`\`\`
-
----
-# 📄 PAGE 2 OF 4: Deep Mechanism & Exhaustive Topic Breakdown
-${sampleSentences.slice(0, 5).map((s, idx) => `- **Topic ${idx + 1} (${idx === 0 ? c1 : idx === 1 ? c2 : c3})**: ${s}`).join('\n')}
-
-- **Cause-and-Effect Dynamics**: Every change in the primary variable triggers a proportional response across the system, determining the final academic outcome.
-
----
-# 📄 PAGE 3 OF 4: Governing Laws, Formulas & Comparative Matrix
-| Topic / Element | Core Mechanism & Meaning | Exam Priority |
-| :--- | :--- | :--- |
-| **${c1}** | ${sampleSentences[0]?.slice(0, 65) || 'Primary principle'} | ⭐⭐⭐ High Yield |
-| **${c2}** | ${sampleSentences[1]?.slice(0, 65) || 'Underlying process'} | ⭐⭐⭐ High Yield |
-| **${c3}** | ${sampleSentences[2]?.slice(0, 65) || 'Key application'} | ⭐⭐ Important |
-
-- **Governing Law / Principle**: Standard conditions dictate that these components maintain consistent relational balance across all test scenarios.
-
----
-# 📄 PAGE 4 OF 4: Memory Hooks, Mnemonics & Exam Scoring Mastery
-> 🎯 **Quick Recall Mnemonic**: Remember **"${c1.slice(0, 15)}"** connects directly with **"${c2.slice(0, 15)}"** for complete recall.
-
-> ⚡ **Guaranteed Exam Mark Tip**: Direct questions test the cause-and-effect relationship between fundamental definitions and practical outputs. Watch out for tricky sign and terminology swaps!`;
+  const label = { summarize: 'Summary', explain: 'Explanation', important: 'Key facts', revision: 'Revision points', meaning: 'Terms', notes: 'Notes' }[toolKey] || 'Key points';
+  const dates = sents.filter((x) => /\b(1[0-9]{3}|20[0-9]{2})\b|\d+\s?(%|km|kg|cm|m|°C)/.test(x));
+  const defs = sents.filter((x) => /\b(is called|is known as|refers to|is defined as|means)\b/i.test(x));
+  const list = (arr) => arr.map((x, i) => `${i + 1}. ${x}`).join('\n');
+  if (studyPage > 0) {
+    const per = Math.max(3, Math.ceil(sents.length / studyTotal));
+    const chunk = sents.slice((studyPage - 1) * per, studyPage * per);
+    const head = `# 📄 PAGE ${studyPage} OF ${studyTotal}: ${label} (part ${studyPage})`;
+    if (!chunk.length) return `${head}\n\nNothing further on this page.`;
+    return `${head}\n\n${studyPage === 1 ? note + '\n\n' : ''}${list(chunk)}`;
   }
-
-  if (toolKey === 'summarize') {
-    return `# 📄 PAGE 1 OF 4: Foundational Architecture & Core Thesis
-
-> 💡 **Core Thesis & Master Takeaway**: ${sampleSentences.slice(0, 2).join(' ')}
-
-## 📌 Executive Highlights (4 Core Takeaways)
-1. **Primary Finding**: ${sampleSentences[0] || 'The central theme introduces key principles.'}
-2. **Underlying Process**: ${sampleSentences[1] || 'Specific mechanisms govern each phase.'}
-3. **Critical Factors**: ${sampleSentences[2] || 'Key variables influence the overall dynamic.'}
-4. **Academic Significance**: Essential high-yield mastery area for exams.
-
----
-# 📄 PAGE 2 OF 4: Complete Topic-by-Topic Detailed Breakdown
-${sampleSentences.slice(0, 6).map((s, idx) => `- **Section ${idx + 1} (${idx % 2 === 0 ? c1 : c2})**: ${s}`).join('\n')}
-
----
-# 📄 PAGE 3 OF 4: Comparative Data Matrices & Chronology
-| Concept / Subject | Critical Detail & Function | Exam Priority |
-| :--- | :--- | :--- |
-| **${c1}** | ${sampleSentences[0]?.slice(0, 60) || 'Primary driver'} | ⭐⭐⭐ High Yield |
-| **${c2}** | ${sampleSentences[1]?.slice(0, 60) || 'Essential context'} | ⭐⭐⭐ High Yield |
-| **${c3}** | ${sampleSentences[2]?.slice(0, 60) || 'Result & conclusion'} | ⭐⭐ Important |
-
----
-# 📄 PAGE 4 OF 4: Master Exam Blueprint & Predicted Scoring Questions
-1. **Q: What is the primary significance of ${c1}?**  
-   *Model Answer:* ${sampleSentences[0] || 'It establishes the core foundation of this chapter with full academic rigor.'}
-2. **Q: How does ${c2} govern the system dynamics?**  
-   *Model Answer:* ${sampleSentences[1] || 'It provides the direct mechanism required for complete scoring.'}`;
-  }
-
-  if (toolKey === 'important') {
-    return `# 📄 PAGE 1 OF 4: Chronological Timeline & Historical Milestones
-
-> 💡 **Core Milestone & Anchor**: ${sampleSentences[0] || 'Key breakthroughs and historical milestones on this page.'}
-
-| Stage / Period | Event / Milestone | Figures & Entities | Academic Significance |
-| :--- | :--- | :--- | :--- |
-| **Phase 1** | ${sampleSentences[0]?.slice(0, 50) || 'Foundational Discovery'} | Core Theorists | Milestone turning point |
-| **Phase 2** | ${sampleSentences[1]?.slice(0, 50) || 'Mechanism Validation'} | Key Researchers | Expansion of subject |
-
----
-# 📄 PAGE 2 OF 4: Comprehensive Academic Definitions & Terminology
-1. **${c1}**: Fundamental concept described on this page with academic context and examination relevance.
-2. **${c2}**: Operational principle governing core relationships.
-3. **${c3}**: Analytical framework used to evaluate results.
-
----
-# 📄 PAGE 3 OF 4: Formulas, Constants & Governing Principles
-- **Governing Law**: Primary rule establishing relationships between variables.
-- **Empirical Figures**: Specific quantitative values, proportions, and conditions.
-- **Key Relationships**: ${sampleSentences[2] || 'System variables maintain proportional balance.'}
-
----
-# 📄 PAGE 4 OF 4: High-Probability Exam Traps & Guaranteed Facts
-> ⚡ **Guaranteed Mark Points**: Examiners frequently test precise definitions of **${c1}** and chronological sequencing.
->
-> ⚠️ **Common Trap**: Do not confuse **${c1}** with **${c2}** during multi-part question responses.`;
-  }
-
-  if (toolKey === 'revision') {
-    return `# 📄 PAGE 1 OF 4: Rapid Concept Progression & System Flow
-
-> 💡 **Executive Revision Anchor**: ${sampleSentences[0] || 'Master governing principle summarizing this page.'}
-
-\`\`\`
-[ Foundation: ${c1.slice(0, 20)} ] ──> [ Mechanism: ${c2.slice(0, 20)} ] ──> [ Result: ${c3.slice(0, 20)} ]
-\`\`\`
-
----
-# 📄 PAGE 2 OF 4: Systematic High-Yield Principles (All Topics)
-${sampleSentences.slice(0, 5).map((s, idx) => `${idx + 1}. **Principle ${idx + 1}**: ${s}`).join('\n')}
-
----
-# 📄 PAGE 3 OF 4: Master Quick-Reference Comparison Matrix
-| Core Concept | Key Rule / Mechanism | Priority |
-| :--- | :--- | :--- |
-| **${c1}** | ${sampleSentences[0]?.slice(0, 55) || 'Primary rule'} | ⭐⭐⭐ High Yield |
-| **${c2}** | ${sampleSentences[1]?.slice(0, 55) || 'Process dynamic'} | ⭐⭐⭐ High Yield |
-
----
-# 📄 PAGE 4 OF 4: 60-Second Flash Recall Checklist & Traps
-- [x] **${c1}** definition and context memorized
-- [ ] Step-by-step mechanism of **${c2}** reviewed
-- [ ] Common exam pitfalls and edge cases verified
-
-> ⚡ **Top Scoring Tip**: State the complete three-part definition to secure full marks.`;
-  }
-
-  if (toolKey === 'meaning') {
-    return `# 📄 PAGE 1 OF 4: Primary Academic Vocabulary & Core Terms
-
-1. **${c1}**
-   - **Academic Meaning**: Primary specialized term establishing the foundational premise.
-   - **Conceptual Role**: Defines the scope of the subject matter.
-   - **Example**: *${sampleSentences[0] || 'Standard academic usage context.'}*
-
----
-# 📄 PAGE 2 OF 4: Advanced Concepts & Technical Terminology
-2. **${c2}**
-   - **Academic Meaning**: Operational term defining system behavior.
-   - **Conceptual Role**: Links cause to outcome.
-   - **Example**: *${sampleSentences[1] || 'Applied context within the topic.'}*
-
----
-# 📄 PAGE 3 OF 4: Comparative Context Matrix & Confusing Pairs
-| Specialized Term | Academic Domain | Common Misinterpretation |
-| :--- | :--- | :--- |
-| **${c1}** | Core Theory | Mistaken for generic colloquial meaning |
-| **${c2}** | Applied Science | Confused with secondary effects |
-
----
-# 📄 PAGE 4 OF 4: Academic Writing & Exam Application Guide
-> 💡 **Exam Phrasing Tip**: Use **${c1}** explicitly when addressing questions on system origin and foundational structure.`;
-  }
-
-  return `# 📄 PAGE 1 OF 4: Core Foundations\n${sampleSentences.slice(0, 2).map(s => `- ${s}`).join('\n')}\n\n---\n# 📄 PAGE 2 OF 4: In-Depth Breakdown\n${sampleSentences.slice(2, 5).map(s => `- ${s}`).join('\n')}\n\n---\n# 📄 PAGE 3 OF 4: Data & Tables\n| Concept | Details |\n| :--- | :--- |\n| **${c1}** | Key detail |\n\n---\n# 📄 PAGE 4 OF 4: Exam Blueprint\n- [x] Review core points\n- [ ] Memorize definitions`;
+  const pagesOut = [
+    `# 📄 PAGE 1 OF 3: ${label} from the page\n\n${note}\n\n${list(sents.slice(0, 5))}`,
+    `# 📄 PAGE 2 OF 3: More from the page\n\n${sents.length > 5 ? list(sents.slice(5, 11)) : 'Nothing further on this page.'}`,
+    `# 📄 PAGE 3 OF 3: Definitions and figures found\n\n${defs.length ? '**Definitions**\n' + list(defs.slice(0, 4)) : 'No definitions found.'}\n\n${dates.length ? '**Dates and figures**\n' + list(dates.slice(0, 5)) : 'No dates or figures found.'}`,
+  ];
+  return pagesOut.join('\n\n---\n');
 }
 
 export function splitMarkdownIntoStudyPages(markdownText) {
@@ -371,7 +211,22 @@ export async function callAI(prompt, toolKey = null, sourceText = '', isFullPage
   return generateOfflineSmartSummary(toolKey || 'explain', sourceText || prompt, isFullPage, pageNum);
 }
 
-export function getAIToolPromptForPage(toolKey, text, targetPageNum = 1, totalPages = 4, isFullPage = false, sourcePageNum = 1, previousPagesContext = '', customScopeLabel = '') {
+const GROUNDING_RULES = `
+
+STRICT ACCURACY RULES (these override everything above):
+- Use ONLY facts that appear in the Source Text. Never invent dates, numbers, names, formulas, examples, definitions or "facts" from memory.
+- If the Source Text has nothing for a heading (for example no dates, no formulas, no comparison to make), write "Not covered on this page." under it, or leave that table or flowchart out. Never pad.
+- Explain in your own words. Do not paste long runs of the source; a short quoted term or phrase is fine.
+- Do not repeat the same point under different headings.
+- Keep the language of the Source Text for terms, and keep every Mermaid label short, plain text without brackets or quotes inside the label.
+- Exam questions you write must be answerable from the Source Text, and the model answer must match it.`;
+
+export function getAIToolPromptForPage(...args) {
+  const base = buildAIToolPromptForPage(...args);
+  return base ? base + GROUNDING_RULES : base;
+}
+
+function buildAIToolPromptForPage(toolKey, text, targetPageNum = 1, totalPages = 4, isFullPage = false, sourcePageNum = 1, previousPagesContext = '', customScopeLabel = '') {
   const scopeDesc = customScopeLabel || (isFullPage ? `Page ${sourcePageNum}` : `Selected Passage`);
 
   if (toolKey === 'summarize') {
@@ -1953,8 +1808,8 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
         if (!chunkText || chunkText.length < 20) {
           chunkText = await callAI(prompt, activeToolKey, targetText, true, targetPage);
         }
-        if (!chunkText || chunkText.length < 20) {
-          chunkText = generateOfflineSmartSummary(activeToolKey, targetText, true, targetPage);
+        if (!chunkText || chunkText.length < 20 || chunkText.includes('AI is not reachable right now')) {
+          chunkText = generateOfflineSmartSummary(activeToolKey, targetText, true, targetPage, pIndex, totalPagesToGenerate);
         }
 
         // Ensure proper header format
@@ -2434,7 +2289,7 @@ export async function fetchAIDictionaryVerification(word, context = '', subjectD
 
   // 2. Fallback: Fast client LLM calls with multi-POS instruction
   const prompt = `You are an expert lexicographer. Provide comprehensive dictionary data for "${word}"${context ? ` in context: "${context}"` : ''}.
-CRITICAL MULTI-POS RULE: If "${word}" functions as multiple parts of speech (e.g. "issue" is both a Noun and a Verb), return detailed objects for each Part of Speech in "partsOfSpeech".
+ACCURACY RULES: Include ONLY the parts of speech this word genuinely has (the two entries in "partsOfSpeech" below are a format example, delete any that do not apply). Use the context to pick the right sense for "contextMeaning". If you are not sure of a field (etymology, phonetics, an antonym), use "" or [] instead of guessing. Never invent a word, a Hindi meaning or an etymology. Synonyms and antonyms must be real, common words.
 Return raw JSON ONLY with NO markdown code block tags:
 {
   "word": "${word}",
@@ -2454,8 +2309,8 @@ Return raw JSON ONLY with NO markdown code block tags:
       "definition": "definition as Noun",
       "hindiMeaning": "Hindi meaning as Noun",
       "example": "Example sentence as Noun",
-      "synonyms": ["noun_synonym_1", "noun_synonym_2"],
-      "antonyms": ["noun_antonym_1"],
+      "synonyms": ["(real synonym)"],
+      "antonyms": [],
       "grammar": { "singular": "${word}", "plural": "${word}s" }
     },
     {
@@ -2463,8 +2318,8 @@ Return raw JSON ONLY with NO markdown code block tags:
       "definition": "definition as Verb",
       "hindiMeaning": "Hindi meaning as Verb",
       "example": "Example sentence as Verb",
-      "synonyms": ["verb_synonym_1", "verb_synonym_2"],
-      "antonyms": ["verb_antonym_1"],
+      "synonyms": ["(real synonym)"],
+      "antonyms": [],
       "grammar": { "v1": "${word}", "v2": "past", "v3": "past part", "ing": "-ing", "s": "-s" }
     }
   ],
@@ -4206,190 +4061,37 @@ function normalizeSingleQuestion(rawQ, formatMode, fallbackIdx = 0) {
  * Extracts 100% UNIQUE sentences across the passage so no two questions ever repeat!
  */
 function generateConceptFallbackQuestions(count, formatMode, difficulty, sectionLabel, shortCount = 0, mediumCount = 0, longCount = 0, sectionText = '', startIndex = 0) {
-  const list = [];
-  const rawSentences = (sectionText || '')
-    .replace(/\s+/g, ' ')
-    .split(/(?<=[.?!])\s+/)
-    .map(s => s.trim())
-    .filter(s => s.length > 25 && s.length < 180 && !s.includes('http') && !s.match(/page\s*\d+/i));
-
-  const conceptualHooks = [
-    { hook: "Character choices and inner motivations", lesson: "how pride and unexpressed desires alter personal outcomes" },
-    { hook: "The contrast between appearance and reality", lesson: "the distinction between superficial elegance and true value" },
-    { hook: "Pivotal crisis and turning point", lesson: "the direct cause-and-effect relationship between an impulsive decision and long-term ordeal" },
-    { hook: "Societal expectations and peer perception", lesson: "the psychological burden of seeking validation from external society" },
-    { hook: "Resilience, labor, and endurance", lesson: "the transformative impact of years of unyielding sacrifice" },
-    { hook: "Dramatic irony and poignant revelation", lesson: "the climactic realization that exposes the futility of past deception" },
-    { hook: "Communication breakdown and silence", lesson: "how fear of confession prevents timely resolution and compounds hardship" },
-    { hook: "Moral dilemma and ethical duty", lesson: "the commitment to honor commitments despite overwhelming personal cost" }
-  ];
-
-  if (formatMode === 'subjective') {
-    let sLeft = shortCount;
-    let mLeft = mediumCount;
-    let lLeft = longCount;
-
-    for (let i = 0; i < count; i++) {
-      const gIdx = startIndex + i;
-      const hookObj = conceptualHooks[gIdx % conceptualHooks.length];
-      const sRef = rawSentences.length > 0 ? rawSentences[(gIdx * 2) % rawSentences.length] : '';
-
-      if (sLeft > 0) {
-        list.push({
-          type: "subjective",
-          tier: "short",
-          marks: 2,
-          wordLimit: "30-40 words",
-          question: `Explain how the theme of "${hookObj.hook}" is depicted in ${sectionLabel}. State two concrete observations.`,
-          options: [],
-          correctAnswer: `In this section, ${hookObj.lesson} is illustrated through the protagonist's response to their circumstances. First, their immediate choices reflect their conditioned values; second, the ensuing events highlight the stark reality they must navigate.`,
-          keyPoints: ["Accurate thematic identification", "Two distinct textual observations aligned with the theme"],
-          explanation: "Board Evaluation Scheme: Award 1 mark for conceptual clarity and 1 mark for relevant textual evidence.",
-          examTrap: "Do not write generic platitudes; directly connect the analysis to the chapter."
-        });
-        sLeft--;
-      } else if (mLeft > 0) {
-        list.push({
-          type: "subjective",
-          tier: "medium",
-          marks: 4,
-          wordLimit: "60-80 words",
-          question: `Analyze the significance of "${hookObj.hook}" in shaping the central conflict of this section. What crucial turning point does it create?`,
-          options: [],
-          correctAnswer: `The focus on ${hookObj.lesson} acts as a vital structural catalyst in the narrative. The characters' mindset directly dictates their choices, triggering a cascade of unavoidable consequences. This progression exposes the tension between illusion and truth, reinforcing the chapter's core moral lesson.`,
-          keyPoints: ["Clear analysis of character disposition", "Explanation of the resulting consequence", "Explicit connection to overall narrative resolution"],
-          explanation: "Board Evaluation Scheme: 2 marks for analytical depth, 1 mark for textual citations, 1 mark for structured coherence.",
-          examTrap: "Avoid passive plot summary; focus on the cause-and-effect dynamics."
-        });
-        mLeft--;
-      } else {
-        list.push({
-          type: "subjective",
-          tier: "long",
-          marks: 6,
-          wordLimit: "100-120 words",
-          question: `Critically evaluate how "${hookObj.hook}" functions as the primary engine of the narrative. To what extent do the characters' own choices dictate their fate? Refer to key episodes.`,
-          options: [],
-          correctAnswer: `The narrative offers a profound exploration of ${hookObj.lesson}. Rather than portraying the characters as passive victims of external circumstance, the author emphasizes their active choices and internal vanity. The subsequent decade of unremitting toil demonstrates moral endurance, yet the unexpected climax reveals the profound tragic irony of their struggle. Consequently, character judgment remains the decisive force behind their ordeal.`,
-          keyPoints: ["Comprehensive analytical thesis", "Substantiated textual arguments from key episodes", "Insightful synthesis of irony and character agency"],
-          explanation: "Board Evaluation Scheme: 3 marks for content & argumentation, 2 marks for structure & expression, 1 mark for critical HOTS insight.",
-          examTrap: "Ensure balanced evaluation weighing both individual agency and social circumstance."
-        });
-        lLeft--;
-      }
+  /* Last-resort questions when the AI could not be reached. Every question is built from a
+     real sentence of the page (a word is blanked out), so nothing here can be made up.
+     Formats that need real understanding (assertion-reason, true/false, subjective) are
+     not faked: they return nothing and the caller reports fewer questions. */
+  if (formatMode !== 'mcq' && formatMode !== 'fill_blank') return [];
+  const sents = String(sectionText || '').replace(/\s+/g, ' ').split(/(?<=[.?!])\s+/).map((x) => x.trim())
+    .filter((x) => x.length > 40 && x.length < 220 && !/https?:|page\s*\d+/i.test(x));
+  const STOP = new Set('which these those their there where while about after before because between during through should would could other being having under again further'.split(' '));
+  const words = [...new Set((sectionText.match(/[A-Za-z][A-Za-z-]{5,}/g) || []).map((w) => w.toLowerCase()).filter((w) => !STOP.has(w)))];
+  const out = [];
+  for (let i = 0; i < sents.length && out.length < count; i++) {
+    const sent = sents[(startIndex + i) % sents.length];
+    const cands = (sent.match(/[A-Za-z][A-Za-z-]{5,}/g) || []).filter((w) => !STOP.has(w.toLowerCase()));
+    if (!cands.length) continue;
+    const target = cands.sort((x, y) => y.length - x.length)[0];
+    const blanked = sent.replace(new RegExp('\\b' + target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b'), '_______');
+    if (out.some((q) => q.question === `Complete the sentence from the text: ${blanked}`)) continue;
+    const question = `Complete the sentence from the text: ${blanked}`;
+    if (formatMode === 'fill_blank') {
+      out.push({ type: 'fill_blank', question, options: [], correctAnswer: target.toLowerCase(), acceptedAnswers: [target, target.toLowerCase()], explanation: `Original line: "${sent}"`, examTrap: '' });
+      continue;
     }
-  } else if (formatMode === 'assertion_reasoning') {
-    for (let i = 0; i < count; i++) {
-      const gIdx = startIndex + i;
-      const hookObj = conceptualHooks[gIdx % conceptualHooks.length];
-      const sA = rawSentences.length > 0 ? rawSentences[(gIdx * 3) % rawSentences.length] : '';
-      const sR = rawSentences.length > 1 ? rawSentences[(gIdx * 3 + 1) % rawSentences.length] : '';
-
-      // Cycle answer choices across A, B, C, D (0, 1, 2, 3) to guarantee 100% variety!
-      const correctIdx = (gIdx % 4);
-      let assertionText = '';
-      let reasonText = '';
-
-      if (correctIdx === 0) {
-        assertionText = sA ? `The character's prolonged hardship directly resulted from their internal crisis regarding ${hookObj.hook.toLowerCase()}.` : `The characters' prolonged hardship directly stems from unaddressed vanity and fear of public exposure.`;
-        reasonText = sR ? `Their intense preoccupation with appearance prevented them from speaking candidly at the critical moment.` : `Social insecurity and dread of confession compelled them to substitute deception for honest dialogue.`;
-      } else if (correctIdx === 1) {
-        assertionText = sA ? `The central crisis is intensified because ${hookObj.hook.toLowerCase()} dominates their immediate decisions.` : `The characters endure years of grueling manual labor to settle an immense financial obligation.`;
-        reasonText = `Social class divisions were legally mandated in nineteenth-century urban society.`;
-      } else if (correctIdx === 2) {
-        assertionText = sA ? `The protagonist experiences profound dissatisfaction because their personal expectations conflict with reality.` : `The protagonist's life is altered permanently by a single evening's celebration.`;
-        reasonText = `Their companions openly mocked their humble domestic circumstances and forced them into isolation.`;
-      } else {
-        assertionText = `The characters readily confessed their misplacement to their social circle without hesitation.`;
-        reasonText = `Pride and fear of social humiliation often compel individuals to conceal their errors at great personal cost.`;
-      }
-
-      let itemExp = "Both statements are true and (R) provides the genuine causal explanation for (A).";
-      if (correctIdx === 1) {
-        itemExp = "Both statements are factually accurate, but (R) is an independent observation that does not causally explain (A).";
-      } else if (correctIdx === 2) {
-        itemExp = "Assertion (A) is supported by the text, but Reason (R) is factually false.";
-      } else if (correctIdx === 3) {
-        itemExp = "Assertion (A) is completely contradicted by the narrative, while Reason (R) is a valid psychological truth.";
-      }
-
-      list.push(normalizeSingleQuestion({
-        type: "assertion_reasoning",
-        assertion: assertionText,
-        reason: reasonText,
-        correctIndex: correctIdx,
-        explanation: `Analysis of Item ${gIdx + 1}: ${itemExp}`,
-        examTrap: "Carefully test whether Reason (R) answers the question 'Why did (A) happen?' or is merely another independent fact."
-      }, 'assertion_reasoning', gIdx));
-    }
-  } else if (formatMode === 'fill_blank') {
-    for (let i = 0; i < count; i++) {
-      const gIdx = startIndex + i;
-      const hookObj = conceptualHooks[gIdx % conceptualHooks.length];
-      const keywords = ["irony", "vanity", "perception", "sacrifice", "destiny", "facade", "subtext", "consequence"];
-      const targetWord = keywords[gIdx % keywords.length];
-
-      list.push({
-        type: "fill_blank",
-        question: `The narrative structure of this chapter pivots fundamentally upon situational _______ , where the climactic disclosure upends the characters' assumptions.`,
-        options: [],
-        correctAnswer: targetWord,
-        acceptedAnswers: [targetWord, targetWord.toLowerCase(), targetWord.toUpperCase()],
-        explanation: `Situational ${targetWord} creates the emotional resonance and ethical lesson of the story.`,
-        examTrap: `Distinguish between related literary terminology.`
-      });
-    }
-  } else if (formatMode === 'true_false') {
-    for (let i = 0; i < count; i++) {
-      const gIdx = startIndex + i;
-      const isTrue = (gIdx % 2 === 0);
-      const hookObj = conceptualHooks[gIdx % conceptualHooks.length];
-
-      list.push({
-        type: "true_false",
-        question: isTrue
-          ? `Textual evidence demonstrates that ${hookObj.hook.toLowerCase()} functions as a primary catalyst for the characters' decisions.`
-          : `The narrative concludes with the protagonist discovering that their decade of sacrifice was completely unnecessary and celebrated by high society.`,
-        options: ["True", "False"],
-        correctIndex: isTrue ? 0 : 1,
-        correctAnswer: isTrue ? "True" : "False",
-        explanation: isTrue
-          ? "Confirmed by direct textual analysis and narrative development."
-          : "Contradicted by the text; the conclusion highlights bitter situational irony rather than societal celebration.",
-        examTrap: "Read each clause carefully to verify if the entire statement holds true."
-      });
-    }
-  } else {
-    // MCQ
-    for (let i = 0; i < count; i++) {
-      const gIdx = startIndex + i;
-      const hookObj = conceptualHooks[gIdx % conceptualHooks.length];
-      const cIdx = gIdx % 4;
-      const opts = [
-        "A compelling clash between personal vanity and unyielding reality",
-        "An unexpected intervention by benevolent societal benefactors",
-        "A deliberate malicious conspiracy orchestrated by trusted acquaintances",
-        "A total absence of familial support during moments of crisis"
-      ];
-      // Rotate correct answer index
-      const temp = opts[0];
-      opts[0] = opts[cIdx];
-      opts[cIdx] = temp;
-
-      list.push({
-        type: "mcq",
-        question: `In this section, what fundamental conflict regarding "${hookObj.hook.toLowerCase()}" drives the central narrative progression?`,
-        options: opts,
-        correctIndex: cIdx,
-        correctAnswer: opts[cIdx],
-        explanation: `The narrative establishes that ${hookObj.lesson} precipitates the primary choices and subsequent struggle.`,
-        distractorAnalysis: "The distractor options misattribute the conflict to external malice or improbable circumstance.",
-        examTrap: "Distinguish between superficial plot events and the underlying psychological themes."
-      });
-    }
+    const pool = words.filter((w) => w !== target.toLowerCase() && Math.abs(w.length - target.length) <= 3);
+    if (pool.length < 3) continue;
+    const dis = []; for (let k = 0; k < pool.length && dis.length < 3; k++) { const w = pool[(startIndex * 7 + i * 5 + k * 11) % pool.length]; if (!dis.includes(w)) dis.push(w); }
+    if (dis.length < 3) continue;
+    const ci = (startIndex + out.length) % 4;
+    const opts = dis.slice(); opts.splice(ci, 0, target.toLowerCase());
+    out.push({ type: 'mcq', question, options: opts, correctIndex: ci, correctAnswer: target.toLowerCase(), explanation: `Original line: "${sent}"`, distractorAnalysis: '', examTrap: '' });
   }
-
-  return list;
+  return out;
 }
 
 /**
@@ -4476,7 +4178,8 @@ CRITICAL BOARD EXAMINATION INSTRUCTIONS:
    - Medium: Analytical connections, comparing motives/outcomes, applying principles, multi-point reasoning.
    - Hard: High-Order Thinking Skills (HOTS), critical evaluation, subtle distractor discrimination, subtext and symbolic analysis.
 3. CONTEXT SOURCE: Covering ${sectionLabel} of "${scopeTitle}".
-4. SPEED & HIGH-YIELD CONCISENESS: Keep question statements, model explanations, and distractor analyses crisp and direct (1-2 clear sentences each, max 30 words per explanation) for fast execution.
+4. GROUNDING (MOST IMPORTANT): Every question and its correct answer must be provable from the SOURCE PASSAGE below. Never use outside facts, never invent names, dates, numbers or events. Exactly one option may be correct, and the explanation must point to what the passage says. If the passage cannot support the requested number of good questions, return fewer instead of inventing.
+5. SPEED & HIGH-YIELD CONCISENESS: Keep question statements, model explanations, and distractor analyses crisp and direct (1-2 clear sentences each, max 30 words per explanation) for fast execution.
 SOURCE PASSAGE:
 """${sectionText}"""`;
 
@@ -4550,9 +4253,9 @@ Return ONLY a valid JSON array of ${countThisBatch} objects. No markdown backtic
 [
   {
     "type": "assertion_reasoning",
-    "assertion": "Mme Loisel suffered constantly because she felt herself born for all luxuries and delicacies.",
-    "reason": "She was born into a family of clerks and lacked the dowry or social connections to marry into wealth.",
-    "question": "Assertion (A): Mme Loisel suffered constantly because she felt herself born for all luxuries and delicacies.\\nReason (R): She was born into a family of clerks and lacked the dowry or social connections to marry into wealth.",
+    "assertion": "(a claim taken from this passage)",
+    "reason": "(a statement from this passage that may or may not explain the assertion)",
+    "question": "Assertion (A): (the claim)\\nReason (R): (the statement)",
     "options": [
       "Both (A) and (R) are true and (R) is the correct explanation of (A)",
       "Both (A) and (R) are true but (R) is NOT the correct explanation of (A)",
@@ -4561,7 +4264,7 @@ Return ONLY a valid JSON array of ${countThisBatch} objects. No markdown backtic
     ],
     "correctIndex": 0,
     "correctAnswer": "Both (A) and (R) are true and (R) is the correct explanation of (A)",
-    "explanation": "Both statements are confirmed by the text. Statement (R) correctly explains why her material reality clashed with her innate desires.",
+    "explanation": "Say which statements the passage confirms and whether (R) explains (A).",
     "distractorAnalysis": "Since both statements are true and (R) is the causal reason, options B, C, and D are invalid.",
     "examTrap": "Do not confuse correlation with causation; confirm if (R) directly explains the 'Why' behind (A)."
   }
@@ -4608,7 +4311,7 @@ ${antiRepetitionHeader}
 TASK: Generate EXACTLY ${countThisBatch} unique, rigorous MULTIPLE CHOICE QUESTIONS (4 distinct options A, B, C, D) at difficulty level "${difficulty}".
 
 RULES:
-1. Test deep conceptual understanding and character/thematic analysis rather than superficial recall.
+1. Test understanding of the concepts, reasons and relationships in the passage (applying, comparing, explaining) rather than bare recall of a copied line. Suit the subject: science and maths test principles and application, literature tests theme and character, history tests cause and effect.
 2. Provide 4 plausible options with intelligent distractors.
 3. Vary correctIndex across 0, 1, 2, and 3.
 4. "question": Clear, challenging problem statement.
