@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { fixLegacyHindi, fixLegacyItems } from './hindi_fix.js';
 import { callAI, callServerGemini, callGeminiFast, callGroqFast, callGroq70b, speakWithElevenLabs, stopElevenAudio } from './ai.js';
 
 /* ============================================================
@@ -281,7 +282,7 @@ export async function getPdfPageText(doc, pageNum, fileId = null) {
   try {
     const page = await doc.getPage(pageNum);
     const textContent = await page.getTextContent();
-    const text = textContent.items.map(item => item.str || '').join(' ').replace(/\s+/g, ' ').trim();
+    const text = fixLegacyItems(textContent.items.map(item => item.str || '')).replace(/\s+/g, ' ').trim();
     pdfPageTextCache.set(cacheKey, text);
 
     // Save to IndexedDB asynchronously in background

@@ -1,4 +1,18 @@
 // @ts-nocheck
+import { fixLegacyHindi, pageIsLegacyHindi } from './hindi_fix.js';
+
+// Whether this page holds legacy-font Hindi (cached on the page element), so even one selected word converts.
+function pageLegacyHint(pageWrap) {
+  try {
+    if (!pageWrap) return false;
+    if (pageWrap.dataset.legacyHi === undefined) {
+      const tl = pageWrap.querySelector('.textLayer');
+      if (!tl || !tl.textContent) return false;
+      pageWrap.dataset.legacyHi = pageIsLegacyHindi(tl.innerText || tl.textContent) ? '1' : '0';
+    }
+    return pageWrap.dataset.legacyHi === '1';
+  } catch (e) { return false; }
+}
 
 export const COLORS = ['#FF6A2B','#2FC6BC','#FF4D6D','#8FD24B','#B48EE0'];
 export let pendingSelection = null;
@@ -122,8 +136,9 @@ export function handleSelection(){
   }
   const sel = window.getSelection();
   if (!sel || sel.rangeCount === 0) return;
-  const text = sel.toString().trim();
-  if (!text) return;
+  const rawText = sel.toString().trim();
+  if (!rawText) return;
+  const text = rawText;
   const range = sel.getRangeAt(0);
   
   let rawRects = [...range.getClientRects()];
@@ -160,9 +175,9 @@ export function handleSelection(){
   window.lastSelectionTime = Date.now();
   const contextSentence = extractContextSentence(range, pageWrap);
   pendingSelection = {
-    text, rects, relRects, normRects, pageNum, pageWrap,
-    context: contextSentence,
-    sentence: contextSentence,
+    text: fixLegacyHindi(rawText, { pageLegacy: pageLegacyHint(pageWrap) }), rects, relRects, normRects, pageNum, pageWrap,
+    context: fixLegacyHindi(contextSentence, { pageLegacy: pageLegacyHint(pageWrap) }),
+    sentence: fixLegacyHindi(contextSentence, { pageLegacy: pageLegacyHint(pageWrap) }),
     startNode: range.startContainer, startOffset: range.startOffset,
     endNode: range.endContainer, endOffset: range.endOffset
   };
@@ -338,8 +353,9 @@ export function snapRangeToWholeWords(range){
 
 export function updateLiveSelectionRange(range, pageWrap, keepHandles){
   range = snapRangeToWholeWords(range);
-  const text = range.toString();
-  if(!text) return;
+  const rawText = range.toString();
+  if(!rawText) return;
+  const text = rawText;
   const rawRects = [...range.getClientRects()];
   const rects = mergeLineRects(rawRects);
   if(!rects.length) return;
@@ -357,9 +373,9 @@ export function updateLiveSelectionRange(range, pageWrap, keepHandles){
   window.lastSelectionTime = Date.now();
   const contextSentence = extractContextSentence(range, pageWrap);
   pendingSelection = {
-    text, rects, relRects, normRects, pageNum, pageWrap,
-    context: contextSentence,
-    sentence: contextSentence,
+    text: fixLegacyHindi(rawText, { pageLegacy: pageLegacyHint(pageWrap) }), rects, relRects, normRects, pageNum, pageWrap,
+    context: fixLegacyHindi(contextSentence, { pageLegacy: pageLegacyHint(pageWrap) }),
+    sentence: fixLegacyHindi(contextSentence, { pageLegacy: pageLegacyHint(pageWrap) }),
     startNode: range.startContainer, startOffset: range.startOffset,
     endNode: range.endContainer, endOffset: range.endOffset
   };

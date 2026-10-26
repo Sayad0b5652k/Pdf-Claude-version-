@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { fixLegacyHindi, fixLegacyItems } from './hindi_fix.js';
 
 export const AI_TOOLS = [
   {key:'summarize', label:'Summarize', icon:'fileText'},
@@ -3844,7 +3845,7 @@ export async function extractRangeText(doc, startPage, endPage, onProgress) {
     try {
       const page = await doc.getPage(pg);
       const textContent = await page.getTextContent({ normalizeWhitespace: true });
-      const text = (textContent?.items || []).map(it => it.str).join(' ').replace(/\s+/g, ' ').trim();
+      const text = fixLegacyItems((textContent?.items || []).map(it => it.str)).replace(/\s+/g, ' ').trim();
       if (text) {
         pageChunks.push({ page: pg, text });
       }
@@ -7204,7 +7205,7 @@ export async function getCurrentPageText(pageNum) {
   try {
     const page = await window.State.currentDoc.getPage(pgNum);
     const content = await page.getTextContent();
-    const str = content.items.map(item => item.str).join(' ').replace(/\s+/g, ' ').trim();
+    const str = fixLegacyItems(content.items.map(item => item.str)).replace(/\s+/g, ' ').trim();
     return str;
   } catch(e) {
     return '';
@@ -7786,7 +7787,7 @@ export async function openTopicAIChat(prefillQuestion, selectedContext = '') {
     if (window.State.currentDoc) {
       const page = await window.State.currentDoc.getPage(pageNum);
       const content = await page.getTextContent();
-      pageText = content.items.map(i => i.str).join(' ').trim();
+      pageText = fixLegacyItems(content.items.map(i => i.str)).trim();
     }
   } catch (e) {
     console.warn('Could not extract current page text for topic chat', e);

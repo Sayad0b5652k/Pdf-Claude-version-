@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { fixLegacyHindi, pageIsLegacyHindi } from './hindi_fix.js';
 
 export let pageEls = {};
 let tesseractWorker = null;
@@ -218,7 +219,7 @@ export function getCurrentPageText() {
   if (pe && pe.wrap) {
     const textLayer = pe.wrap.querySelector('.text-layer') || pe.wrap;
     const txt = textLayer.innerText || textLayer.textContent || '';
-    if (txt.trim()) return txt.trim();
+    if (txt.trim()) return fixLegacyHindi(txt.trim(), { pageLegacy: pageIsLegacyHindi(txt) });
   }
   return '';
 }
