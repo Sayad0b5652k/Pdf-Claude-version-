@@ -2903,7 +2903,7 @@ export function setupReaderInteractions(scrollEl){
 
 /* ============================================================
    PAGE RENDER PIPELINE (virtualised)
-   - at most MAX_PARALLEL_RENDERS pages paint at once, nearest-to-viewport first, so a fast
+   - at most maxParallelRenders pages paint at once, nearest-to-viewport first, so a fast
      scroll can no longer pile up dozens of canvases
    - every render carries a token: a page that is unloaded or re-mounted while its render is
      still in flight can never come back to life (that race used to keep 30+ canvases alive)
@@ -2912,8 +2912,19 @@ export function setupReaderInteractions(scrollEl){
    ============================================================ */
 // iOS Safari silently draws nothing past ~16.7M pixels per canvas and phones run out of GPU
 // memory long before that, so very large (zoomed) pages are rendered at a reduced resolution.
-const MAX_CANVAS_PIXELS = 12 * 1024 * 1024;
-const MAX_PARALLEL_RENDERS = 2;
+/* Device tier. Chrome only reports RAM in steps (2, 4, 8 GB), so a 6 GB budget phone reads as "8".
+   The pixel caps below are chosen so even the biggest tier never needs more than ~32 MB per page canvas,
+   and a page at 250% zoom still renders at full sharpness on its own tier. */
+const DEVICE_MEM = (typeof navigator !== 'undefined' && navigator.deviceMemory) || 4;
+const DEVICE_CORES = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4;
+const RENDER_TIER = DEVICE_MEM <= 2 || (DEVICE_CORES <= 4 && DEVICE_MEM <= 4) ? 'low' : DEVICE_MEM <= 4 ? 'mid' : 'high';
+const MAX_CANVAS_PIXELS = { low: 4, mid: 6, high: 8 }[RENDER_TIER] * 1024 * 1024;
+// Native sharpness on every phone: budget screens are dpr 2, so nobody is rendered below their screen's resolution.
+// Memory is protected by the pixel cap above, not by blurring normal pages.
+const MAX_DPR = 2.5;
+window.RENDER_TIER = RENDER_TIER;
+let maxParallelRenders = RENDER_TIER === 'low' ? 1 : 2;   // slow phones paint one page at a time so scrolling stays smooth
+const slowRenderTimes = [];
 const MAX_RENDER_FAILURES = 3;
 let activeRenders = 0;
 let renderQueue = [];
@@ -3002,7 +3013,7 @@ export function getSpanRects(pe){
 window.getSpanRects = getSpanRects;
 
 function pumpRenderQueue(){
-  while(activeRenders < MAX_PARALLEL_RENDERS && renderQueue.length){
+  while(activeRenders < maxParallelRenders && renderQueue.length){
     const n = renderQueue.shift();
     const pe = pageEls[n];
     if(!pe || pe.rendered || pe.rendering) continue;
@@ -3024,8 +3035,8 @@ export function setupVirtualRender(){
   const viewH = scrollEl.clientHeight;
   const bottom = top + viewH;
   const mid = top + viewH / 2;
-  const renderMargin = Math.max(900, viewH);                          // paint about one screen ahead/behind
-  const unloadMargin = renderMargin + Math.max(1400, viewH * 1.5);    // release memory a bit further out
+  const renderMargin = Math.max(RENDER_TIER === 'low' ? 600 : 900, viewH);        // paint about one screen ahead/behind
+  const unloadMargin = renderMargin + Math.max(RENDER_TIER === 'low' ? 700 : 1400, viewH * (RENDER_TIER === 'low' ? 0.8 : 1.5));    // release memory a bit further out
 
   const wanted = [];
   for(const [num, pe] of Object.entries(pageEls)){
@@ -3061,6 +3072,7 @@ export async function renderPage(num){
 }
 
 async function renderPageNow(num, pe, token){
+  const tStart = performance.now();
   const doc = window.State.currentDoc;
   // True once this render was superseded: page unloaded, reader re-mounted or document closed.
   const isStale = () => pe._renderToken !== token || pageEls[num] !== pe || window.State.currentDoc !== doc;
@@ -3073,7 +3085,7 @@ async function renderPageNow(num, pe, token){
     const viewport = page.getViewport({scale: pe.scale});
 
     // High-performance crystal-clear rendering (Retina grade clarity without GPU memory bloat)
-    const dpr = Math.min(window.devicePixelRatio || 2, 2.5);
+    const dpr = Math.min(window.devicePixelRatio || 2, MAX_DPR);
     let renderViewport = page.getViewport({ scale: pe.scale * dpr });
     const pixels = renderViewport.width * renderViewport.height;
     if(pixels > MAX_CANVAS_PIXELS){
@@ -3175,6 +3187,12 @@ async function renderPageNow(num, pe, token){
     pe.rendered = true;
     pe.rendering = false;
     pe._renderPromise = null;
+    // A phone that needs long to paint a page (slow CPU, 6GB RAM report) switches itself to one page at a time.
+    if (maxParallelRenders > 1) {
+      slowRenderTimes.push(performance.now() - tStart);
+      if (slowRenderTimes.length > 4) slowRenderTimes.shift();
+      if (slowRenderTimes.length === 4 && slowRenderTimes.reduce((a, b) => a + b, 0) / 4 > 450) maxParallelRenders = 1;
+    }
 
     try {
       if (typeof window.paintAnnotations === 'function') {
