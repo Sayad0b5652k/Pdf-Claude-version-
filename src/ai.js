@@ -3192,7 +3192,7 @@ export async function fetchHybridDictionary(word, context = '', subjectDomain = 
   if (!primGroup.senses.length) {
     primGroup.senses.push({
       pos: primaryPos || 'General',
-      def: `Definition for "${cleanWord}": standard vocabulary word.`,
+      def: `Could not fetch a definition for "${cleanWord}" right now. Check your internet and search again.`,
       example: '',
       source: ''
     });
@@ -5337,6 +5337,23 @@ export async function runMCQGeneratorModal(sel){
             window.Sheet.close();
           };
         }
+      }
+
+      let aborted = false;
+      const generated = await generateQuizInChunks({
+        targetText, scopeTitle, formatMode, rawQType, totalCount: selectedCount, difficulty: selectedDiff, targetPage,
+        shouldAbort: () => aborted || !document.getElementById('mcq-interactive-container') || !document.body.contains(container),
+        onBatchProgress: (b, n, done, total, label) => {
+          const bar = document.getElementById('mcq-batch-progress'); if (bar) bar.style.width = Math.max(8, Math.round((done / Math.max(1, total)) * 100)) + '%';
+          const sub = document.getElementById('mcq-status-sub'); if (sub && label) sub.textContent = label;
+        },
+        onBatchQuestionsReady: (qs) => { questions = qs; }
+      });
+      if (Array.isArray(generated) && generated.length) questions = generated;
+      if (!questions.length) {
+        container.innerHTML = `<div style="padding:18px 0; text-align:center; color:var(--text-dim); font-size:13.5px; line-height:1.6;">Could not make questions right now. Check your internet or try again, or choose a page with more text.<div style="margin-top:12px;"><button class="btn btn-primary" id="mcq-retry-btn" style="padding:10px 20px; font-weight:700;">Try again</button></div></div>`;
+        const rb = document.getElementById('mcq-retry-btn'); if (rb) rb.onclick = () => document.getElementById('start-mcq-gen')?.click();
+        return;
       }
 
       renderQuiz();
