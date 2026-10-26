@@ -715,9 +715,10 @@ function syncCapsule() {
   }
   if (running.length) {
     const r = PaperJobs.get(running[0]).rec; const p = r.progress?.total ? Math.round((r.progress.done / r.progress.total) * 100) : 0;
-    cap.innerHTML = `<span class="pp-capring" style="--p:${p}"></span><span class="pp-capt"><b>Paper ${p}%</b><small>${esc((r.progress?.label || 'Generating').slice(0, 34))}</small></span>`;
+    const html = `<span class="pp-capring" style="--p:${p}"></span><span class="pp-capt"><b>Paper ${p}%</b><small>${esc((r.progress?.label || 'Generating').slice(0, 34))}</small></span>`;
+    if (cap.dataset.sig !== html) { cap.innerHTML = html; cap.dataset.sig = html; }
     cap.dataset.state = 'run';
-  } else { cap.innerHTML = `<span class="pp-capok">${ic('check', 'icon icon-sm')}</span><span class="pp-capt"><b>Paper ready</b><small>Tap to open</small></span>`; cap.dataset.state = 'done'; }
+  } else if (cap.dataset.state !== 'done') { cap.innerHTML = `<span class="pp-capok">${ic('check', 'icon icon-sm')}</span><span class="pp-capt"><b>Paper ready</b><small>Tap to open</small></span>`; cap.dataset.state = 'done'; cap.dataset.sig = ''; }
 }
 
 export async function initPaperModule() {
