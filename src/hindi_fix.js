@@ -223,4 +223,28 @@ export function fixLegacyHindi(text, opts = {}) {
   }).join('');
 }
 
-if (typeof window !== 'undefined') { window.fixLegacyHindi = fixLegacyHindi; window.pageIsLegacyHindi = pageIsLegacyHindi; window.fixLegacyItems = fixLegacyItems; }
+/**
+ * True when text is neither readable English, Unicode Hindi nor Hindi we can convert: typically a PDF in a
+ * legacy font we have no table for (Chanakya, Shusha, ...). The app then says so instead of feeding gibberish to the AI.
+ */
+export function looksGarbled(text) {
+  const t = String(text || '').trim();
+  if (t.length < 80 || /[\u0900-\u097F]/.test(t) || LOOKS_LIKE_CODE.test(t)) return false;
+  if (looksLegacyHindi(t)) return false;
+  if ((t.match(/[|@~=<>_\\\/#*]/g) || []).length > t.length * 0.02) return false;       // tables, code, markup
+  const nonSpace = t.replace(/\s/g, '');
+  const accented = (nonSpace.match(/[\u00C0-\u017F\u2018-\u203A\u0192\u02C6\u02DC]/g) || []).length;
+  if (accented / nonSpace.length > 0.15) return true;                                   // Latin-1 symbol soup, not a real language
+  const words = t.split(/\s+/).filter((w) => /[A-Za-z]{2,}/.test(w));
+  if (words.length < 25) return false;
+  let english = 0, odd = 0;
+  for (const w of words) {
+    const core = w.replace(/[^A-Za-z']/g, '');
+    if (ENGLISH_COMMON.has(core.toLowerCase())) english++;
+    const vowels = (core.match(/[aeiouy]/gi) || []).length;
+    if (/[a-z][A-Z]/.test(core) || /[^\w\s.,;:!?()'"\-/%]/.test(w) || (core.length >= 3 && vowels === 0)) odd++;
+  }
+  return english / words.length < 0.04 && odd / words.length > 0.25;
+}
+
+if (typeof window !== 'undefined') { window.fixLegacyHindi = fixLegacyHindi; window.pageIsLegacyHindi = pageIsLegacyHindi; window.fixLegacyItems = fixLegacyItems; window.looksGarbled = looksGarbled; }

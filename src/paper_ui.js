@@ -586,8 +586,9 @@ async function onGenerate(btn) {
   ps.busy = 'Reading your chapters…'; mount(true);
   let sources;
   try { sources = await prepareSources(ps.docInfo.doc, chapters, (i, n, title) => { ps.busy = `Reading chapter ${i} of ${n}…`; const el = $('.pp-busy div:last-child'); if (el) el.textContent = ps.busy; }); } catch (e) { sources = []; }
-  const good = sources.filter((s) => s.words >= 60);
-  if (!good.length) { ps.busy = null; mount(true); return toast('No readable text found. This looks like a scanned PDF. Run OCR on it first.'); }
+  const garbled = sources.filter((s) => window.looksGarbled && window.looksGarbled(String(s.text || '').slice(0, 3000)));
+  const good = sources.filter((s) => s.words >= 60 && !garbled.includes(s));
+  if (!good.length) { ps.busy = null; mount(true); return toast(garbled.length ? 'This book uses an old Hindi font the app cannot read yet, so a paper would be wrong. Try a book with Unicode text.' : 'No readable text found. This looks like a scanned PDF. Run OCR on it first.'); }
   if (good.length < sources.length) toast(`${sources.length - good.length} chapter(s) had no readable text and were skipped.`);
   const words = good.reduce((a, s) => a + s.words, 0); const t = C.totals(c.sections);
   if (words / Math.max(1, t.questions) < 45) toast('Selected chapters are quite short for this many questions. Some topics may repeat.');

@@ -1,5 +1,16 @@
 // @ts-nocheck
-import { fixLegacyHindi, pageIsLegacyHindi } from './hindi_fix.js';
+import { fixLegacyHindi, pageIsLegacyHindi, looksGarbled } from './hindi_fix.js';
+
+// Tells the user once per page when the text inside is unreadable gibberish (an old font we cannot convert).
+function warnIfGarbled(pageWrap) {
+  try {
+    if (!pageWrap || pageWrap.dataset.garbledWarned) return;
+    const tl = pageWrap.querySelector('.textLayer');
+    const txt = tl ? (tl.innerText || tl.textContent || '') : '';
+    pageWrap.dataset.garbledWarned = '1';
+    if (window.looksGarbled && window.looksGarbled(txt)) window.toast?.('Is page ka text purane font mein hai jo app abhi padh nahi paati. AI ka jawab galat ho sakta hai.');
+  } catch (e) {}
+}
 
 // Whether this page holds legacy-font Hindi (cached on the page element), so even one selected word converts.
 function pageLegacyHint(pageWrap) {
@@ -182,6 +193,7 @@ export function handleSelection(){
     endNode: range.endContainer, endOffset: range.endOffset
   };
   window.pendingSelection = pendingSelection;
+  warnIfGarbled(pageWrap);
   sel.removeAllRanges();
   paintPendingOverlay(pendingSelection);
   showSelToolbar();
@@ -380,6 +392,7 @@ export function updateLiveSelectionRange(range, pageWrap, keepHandles){
     endNode: range.endContainer, endOffset: range.endOffset
   };
   window.pendingSelection = pendingSelection;
+  warnIfGarbled(pageWrap);
   paintPendingOverlay(pendingSelection, keepHandles);
   showSelToolbar();
 }
