@@ -822,9 +822,11 @@ export async function getTeacherContext(options = {}, userQuery = '', chatHistor
 
   // Load PDF.js document handle to extract real text
   let doc = (window.State?.currentFile?.id === activeFileId) ? window.State?.currentDoc : null;
+  let ownedDoc = null; // temporary handle we opened ourselves and must destroy
   if (!doc && fileRecord?.data && typeof pdfjsLib !== 'undefined') {
     try {
       doc = await pdfjsLib.getDocument({ data: fileRecord.data.slice(0), ...window.PDFJS_LOAD_OPTS }).promise;
+      ownedDoc = doc;
     } catch(err) {
       console.warn('Could not load PDF document for AI grounding:', err);
     }
@@ -1148,6 +1150,8 @@ export async function getTeacherContext(options = {}, userQuery = '', chatHistor
     }
   }
 
+  if (ownedDoc) { try { ownedDoc.destroy(); } catch (e) {} }
+
   return {
     docTitle: fileRecord?.name || 'Academic Document',
     docId: activeFileId,
@@ -1209,6 +1213,7 @@ export async function searchCrossPdfLibrary(filesList, query) {
         if (matchedSnippets.length >= 6) break;
       }
     }
+    try { doc.destroy(); } catch (e) {}
     if (matchedSnippets.length >= 6) break;
   }
 
@@ -1644,15 +1649,20 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
           window.toast(ok ? 'Copied explanation to clipboard' : 'Could not copy');
         } else if (action === 'save-notes') {
           const curPage = window.State?.currentPage || 1;
-          await window.DB.put('notes', {
-            id: window.uid(),
-            fileId,
-            page: curPage,
-            kind: 'AI Tutor Note (' + (activeTeacherMode.toUpperCase()) + ')',
-            content: msg.text,
-            createdAt: Date.now()
-          });
-          window.toast('Saved to Notes! 📝');
+          try {
+            await window.DB.put('notes', {
+              id: window.uid(),
+              fileId,
+              page: curPage,
+              kind: 'AI Tutor Note (' + (activeTeacherMode.toUpperCase()) + ')',
+              content: msg.text,
+              createdAt: Date.now()
+            });
+            window.toast('Saved to Notes! 📝');
+          } catch (noteErr) {
+            console.warn('Could not save note', noteErr);
+            window.toast('Could not save note');
+          }
         } else if (action === 'make-flashcard') {
           const frontPrompt = `Create ONE clean study flashcard from this educational explanation:\n"${(msg?.text || '').slice(0, 500)}"\n\nReturn strictly valid JSON: {"front": "question", "back": "answer"}`;
           try {
@@ -2443,6 +2453,8 @@ Provide the complete academic answer now:`;
   if (backBtn) {
     backBtn.onclick = () => {
       stopElevenAudio();
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch(e) {}
+      window._activeTeacherSpeech = null;
       if (isVoiceListening) stopVoiceRecognition();
       if (isDictating && dictationRecognition) {
         try { dictationRecognition.stop(); } catch(e) {}

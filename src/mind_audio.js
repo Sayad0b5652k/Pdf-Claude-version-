@@ -125,6 +125,7 @@ let ambientVolume = 0.40;
 let timerMinutes = 0; // 0 = infinite
 let timerRemainingSeconds = 0;
 let timerInterval = null;
+let stopNodesTimer = null; // pending delayed teardown after a fade-out (pause / stop)
 
 // Floating Widget State
 let widgetDocked = false; // true if minimized to pill dock
@@ -197,6 +198,8 @@ export function startMindWaves(presetId = 'alpha', customCarrier = null, notify 
     const baseFreq = carrierFreq || preset.carrier || 432.0;
 
     // Clean up previous active audio nodes cleanly
+    // (cancel any pending fade-out teardown first so it cannot kill the nodes created below)
+    if (stopNodesTimer) { clearTimeout(stopNodesTimer); stopNodesTimer = null; }
     stopAllAudioNodes();
 
     const ct = ctx.currentTime;
@@ -383,6 +386,7 @@ function initAmbientLayer(ctx) {
     const fundamental = 216.0;
     const overtones = [fundamental, fundamental * 2.76, fundamental * 5.4];
 
+    const tremNodes = [];
     ambientOscNodes = overtones.map((f, i) => {
       const osc = ctx.createOscillator();
       osc.type = 'sine';
@@ -399,12 +403,14 @@ function initAmbientLayer(ctx) {
       trem.connect(tremG);
       tremG.connect(g.gain);
       trem.start();
+      tremNodes.push(trem); // tracked so stopAllAudioNodes() can stop it (otherwise it runs forever)
 
       osc.connect(g);
       g.connect(ambientGain);
       osc.start();
       return osc;
     });
+    ambientOscNodes = ambientOscNodes.concat(tremNodes);
   }
 
   ambientGain.connect(masterGain);
@@ -429,7 +435,9 @@ export function pauseMindWaves(notify = true) {
       const ct = audioCtx.currentTime;
       masterGain.gain.setValueAtTime(masterGain.gain.value, ct);
       masterGain.gain.exponentialRampToValueAtTime(0.0001, ct + 0.3);
-      setTimeout(() => {
+      if (stopNodesTimer) clearTimeout(stopNodesTimer);
+      stopNodesTimer = setTimeout(() => {
+        stopNodesTimer = null;
         stopAllAudioNodes();
       }, 320);
     } catch (e) {
@@ -482,7 +490,9 @@ export function stopMindWaves(notify = true) {
       const ct = audioCtx.currentTime;
       masterGain.gain.setValueAtTime(masterGain.gain.value, ct);
       masterGain.gain.exponentialRampToValueAtTime(0.0001, ct + 0.4);
-      setTimeout(() => {
+      if (stopNodesTimer) clearTimeout(stopNodesTimer);
+      stopNodesTimer = setTimeout(() => {
+        stopNodesTimer = null;
         stopAllAudioNodes();
       }, 420);
     } catch (e) {
@@ -1360,6 +1370,7 @@ function setupPillDraggable() {
 
 let oledOverlay = null;
 let oledAnimId = null;
+let oledKeyHandler = null;
 
 export function isOledBlackoutActive() {
   return Boolean(document.getElementById('oled-blackout-visualizer'));
@@ -1395,9 +1406,9 @@ export function openOledBlackoutVisualizer(modeOverride) {
   const keyHandler = (e) => {
     if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') {
       closeOledBlackoutVisualizer();
-      window.removeEventListener('keydown', keyHandler);
     }
   };
+  oledKeyHandler = keyHandler;
   window.addEventListener('keydown', keyHandler);
 
   if (mode === 'bouncing') {
@@ -1411,6 +1422,10 @@ export function closeOledBlackoutVisualizer() {
   if (oledAnimId) {
     cancelAnimationFrame(oledAnimId);
     oledAnimId = null;
+  }
+  if (oledKeyHandler) {
+    window.removeEventListener('keydown', oledKeyHandler);
+    oledKeyHandler = null;
   }
   const overlay = document.getElementById('oled-blackout-visualizer');
   if (overlay) {

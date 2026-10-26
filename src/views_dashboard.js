@@ -14,6 +14,8 @@ export async function renderDashboard(preserveScroll = true){
   const totalSize = files.reduce((a,f)=>a+(f.size||0),0);
   const readingStats = await window.getReadingStats();
   const chatHistories = await window.DB.all('chathistory').catch(() => []);
+  // The user may have navigated away (e.g. opened a book) while the awaits above were pending
+  if (window.State.view !== 'dashboard') return;
 
   const existingDash = document.getElementById('dashboard-drop');
   if (existingDash) {
@@ -675,6 +677,9 @@ export function fmtBytes(b){
 export function setupDropzone(){
   const zone = document.getElementById('dashboard-drop');
   if (!zone) return;
+  // renderDashboard() re-runs this on the same persistent element; bind only once or every drop imports N times
+  if (zone._dropzoneBound) return;
+  zone._dropzoneBound = true;
   ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev, e=>{ e.preventDefault(); document.body.classList.add('dropzone-active'); }));
   ['dragleave','drop'].forEach(ev=>zone.addEventListener(ev, e=>{ e.preventDefault(); document.body.classList.remove('dropzone-active'); }));
   zone.addEventListener('drop', e=>{

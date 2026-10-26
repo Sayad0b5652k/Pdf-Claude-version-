@@ -369,9 +369,10 @@ export function renderMarkdown(raw){
 
   const createVisualCardHtml = (cleanAlt, safeUrl) => {
     const escapedAlt = escapeHtml(cleanAlt || 'Educational Visual');
-    const escapedSafeAltParam = (cleanAlt || 'Educational Visual').replace(/['"\\]/g, ' ');
+    const escapedSafeAltParam = (cleanAlt || 'Educational Visual').replace(/['"\\&<>]/g, ' ');
     const downloadFilename = (cleanAlt || 'visual').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const cleanUrl = (safeUrl || '').trim();
+    // Percent-encode characters that could break out of the inline attribute / JS string contexts below
+    const cleanUrl = (safeUrl || '').trim().replace(/['"<>\\`\s]/g, (c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'));
     // Default to proxied URL for 100% reliable bypass of carrier blocks, CORS, and referer restrictions
     const initialSrc = (cleanUrl.startsWith('/api/') || cleanUrl.startsWith('data:'))
       ? cleanUrl
@@ -498,7 +499,7 @@ export function renderMarkdown(raw){
                   <button class="btn btn-download-diagram" onclick="window.downloadDiagram && window.downloadDiagram(this)" title="Download Diagram as Image" style="height:24px; padding:0 8px; font-size:11px; font-weight:600; border-radius:6px; background:var(--accent-soft); border:1px solid var(--accent); color:var(--accent); cursor:pointer; display:inline-flex; align-items:center; gap:3px; flex-shrink:0; white-space:nowrap;">
                     <span>⬇️ Save</span>
                   </button>
-                  <button class="btn btn-copy-diagram" onclick="window.copyToClipboard && window.copyToClipboard('${escapeHtml(rawDiagram).replace(/'/g, "\\'")}', this)" style="height:24px; padding:0 7px; font-size:11px; font-weight:600; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); cursor:pointer; flex-shrink:0; white-space:nowrap;">
+                  <button class="btn btn-copy-diagram" onclick="window.copyToClipboard && window.copyToClipboard(this.getAttribute('data-code'), this)" data-code="${escapeHtml(rawDiagram).replace(/"/g, '&quot;')}" style="height:24px; padding:0 7px; font-size:11px; font-weight:600; border-radius:6px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); cursor:pointer; flex-shrink:0; white-space:nowrap;">
                     <span>📋 Code</span>
                   </button>
                 </div>
@@ -629,7 +630,8 @@ export function escapeHtml(s){
   if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
     const d = document.createElement('div');
     d.textContent = str;
-    return d.innerHTML;
+    // innerHTML leaves quotes alone; escape them so the result is also safe inside attribute values
+    return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
@@ -972,7 +974,10 @@ export function renderMathFormulas(container) {
 
 export function openImageLightbox(src, caption, options = {}) {
   const existing = document.getElementById('ai-image-lightbox');
-  if (existing) existing.remove();
+  if (existing) { if (typeof existing._close === 'function') existing._close(); else existing.remove(); }
+  // Neutralise characters that could break out of the attribute / inline-JS contexts in the template below
+  src = String(src || '').replace(/['"<>\\`\s]/g, (c) => '%' + c.charCodeAt(0).toString(16).padStart(2, '0'));
+  caption = caption ? String(caption).replace(/['"\\&<>]/g, ' ') : caption;
 
   let zoom = 1.0;
   let panX = 0;
@@ -1156,6 +1161,7 @@ export function openImageLightbox(src, caption, options = {}) {
     if (e.key === '-' || e.key === '_') setZoom(zoom - 0.25, true);
   };
   window.addEventListener('keydown', handleKey);
+  modal._close = closeModal;
 
   modal.querySelector('#close-lightbox-btn').onclick = closeModal;
 }
@@ -1260,6 +1266,7 @@ export function downloadDiagram(buttonEl) {
           a.remove();
           window.toast('Flowchart downloaded as HD Image! 📊');
         }
+        URL.revokeObjectURL(url);
       } catch (canvasErr) {
         // Fallback: download SVG directly
         const a = document.createElement('a');
@@ -1269,8 +1276,10 @@ export function downloadDiagram(buttonEl) {
         a.click();
         a.remove();
         window.toast('Flowchart downloaded as SVG! 📊');
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
       }
     };
+    img.onerror = () => { URL.revokeObjectURL(url); window.toast('Failed to download flowchart image.'); };
     img.src = url;
   } catch (err) {
     console.warn('Download diagram error:', err);
@@ -1366,6 +1375,7 @@ export async function fetchSSEStream(url, bodyData, onChunk) {
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
   let fullText = '';
+  let streamError = null;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -1395,7 +1405,7 @@ export async function fetchSSEStream(url, bodyData, onChunk) {
           }
         }
         if (parsed.error) {
-          throw new Error(parsed.error);
+          streamError = new Error(parsed.error);
         }
       } catch (e) {
         if (e.message && e.message.includes('SSE HTTP error')) throw e;
@@ -1403,6 +1413,7 @@ export async function fetchSSEStream(url, bodyData, onChunk) {
     }
   }
 
+  if (streamError && !fullText) throw streamError;
   return fullText;
 }
 window.fetchSSEStream = fetchSSEStream;

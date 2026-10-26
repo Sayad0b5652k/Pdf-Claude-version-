@@ -815,11 +815,13 @@ export async function renderSettings(){
     const blob = new Blob([JSON.stringify({annots,bms,notes,files:window.State.files.map(f=>({id:f.id,name:f.name,folder:f.folder,subject:f.subject}))},null,2)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'strata-backup.json'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
     window.toast('Backup exported');
   };
   document.getElementById('btn-import-backup').onclick = ()=>{
     const inp = document.createElement('input'); inp.type='file'; inp.accept='application/json';
     inp.onchange = async ()=>{
+      if (!inp.files || !inp.files[0]) return;
       const text = await inp.files[0].text();
       try{
         const data = JSON.parse(text);
