@@ -212,14 +212,29 @@ export function buildPrintDocument(rec, o = {}) {
   const title = `${rec.title || rec.subject}`.replace(/[\\/:*?"<>|]+/g, ' ').trim();
   return `<!doctype html><html lang="${rec.lang === 'hi' ? 'hi' : 'en'}"><head><meta charset="utf-8"><title>${esc(title)}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Noto+Serif+Devanagari:wght@400;600;700&display=swap" rel="stylesheet">
+<base href="${esc(o.baseHref || '')}">
+${o.fontCss || ''}
 <style>@page{size:A4;margin:16mm 14mm 16mm}*{box-sizing:border-box}html,body{margin:0;background:#fff}body{padding:0}${PAPER_CSS}
 @media print{.pp-tools,.pp-ver{display:none!important}}</style></head><body class="pp-sheet">${parts.join('')}</body></html>`;
 }
 
 /* Prints through a hidden iframe so the user can "Save as PDF" (works for Hindi too). */
+/* The app bundles its fonts; copy the @font-face rules for the paper fonts into the print frame. */
+function collectPaperFontCss() {
+  let css = '';
+  try {
+    for (const sheet of document.styleSheets) {
+      let rules; try { rules = sheet.cssRules; } catch (e) { continue; }
+      for (const r of rules || []) {
+        if (r.type === 5 && /Newsreader|Noto Serif Devanagari/i.test(r.cssText)) css += r.cssText + '\n';
+      }
+    }
+  } catch (e) {}
+  return css ? `<style>${css}</style>` : '';
+}
+
 export async function printPaper(rec, o = {}) {
-  const html = buildPrintDocument(rec, o);
+  const html = buildPrintDocument(rec, { ...o, baseHref: location.origin + '/', fontCss: collectPaperFontCss() });
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none';
