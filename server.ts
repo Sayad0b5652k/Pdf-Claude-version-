@@ -1424,6 +1424,9 @@ process.on("uncaughtException", (err) => {
   console.error("[Server] Uncaught exception (kept running):", err);
 });
 
+// True on serverless hosts (Netlify/Vercel/AWS Lambda): no dev server, no static files, no listen().
+const IS_SERVERLESS = !!(process.env.SAYAD_SERVERLESS || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.VERCEL);
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -2854,7 +2857,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
   });
 
   // Vite development middleware vs production static files
-  if (process.env.SAYAD_SERVERLESS) {
+  if (IS_SERVERLESS) {
     // Serverless host: the CDN serves static files; this app only handles /api/*.
   } else if (process.env.NODE_ENV !== "production") {
     const viteId = "vite"; // computed so bundlers never pull vite (dev-only) into the production/serverless bundle
@@ -2886,7 +2889,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
     });
   }
 
-  if (!process.env.SAYAD_SERVERLESS) {
+  if (!IS_SERVERLESS) {
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`S.A.Y.A.D. Server running on http://localhost:${PORT}`);
     });
