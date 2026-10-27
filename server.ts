@@ -2857,7 +2857,8 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
   if (process.env.SAYAD_SERVERLESS) {
     // Serverless host: the CDN serves static files; this app only handles /api/*.
   } else if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
+    const viteId = "vite"; // computed so bundlers never pull vite (dev-only) into the production/serverless bundle
+    const { createServer: createViteServer } = await import(/* @vite-ignore */ viteId);
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
