@@ -2053,19 +2053,31 @@ Return ONLY a valid raw JSON object with this exact structure:
         return res.status(400).json({ valid: false, error: "Please enter a valid Gemini API key" });
       }
 
-      const client = keyPool.getClient(apiKey.trim());
-      const testResp = await client.models.generateContent({
-        model: "gemini-3.1-flash-lite",
-        contents: "Respond with 'OK' only.",
-      });
-
-      if (testResp && testResp.text) {
+      // Validate by listing models (works for any valid key, independent of model availability).
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 15000);
+      let gr: Response;
+      try {
+        gr = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", {
+          headers: { "x-goog-api-key": apiKey.trim() },
+          signal: ctl.signal,
+        });
+      } finally { clearTimeout(timer); }
+      if (gr.ok) {
         return res.json({ valid: true, message: "Key verified successfully!" });
       }
-      return res.status(400).json({ valid: false, error: "Invalid response from Gemini" });
+      let detail = "";
+      try { const j: any = await gr.json(); detail = j?.error?.message || ""; } catch {}
+      const bad = gr.status === 400 || gr.status === 401 || gr.status === 403;
+      return res.status(bad ? 400 : 502).json({
+        valid: false,
+        error: bad
+          ? `Google ne key reject ki (${gr.status}): ${detail || "invalid key"}`
+          : `Google se jawab nahi mila (${gr.status}): ${detail || "try again"}`,
+      });
     } catch (err: any) {
       console.warn("Key validation failed:", err.message);
-      return res.status(400).json({ valid: false, error: err.message || "Failed to validate key with Google Gemini." });
+      return res.status(502).json({ valid: false, error: `Server se Google tak pahunch nahi paaya: ${err?.name === "AbortError" ? "timeout" : (err?.message || err?.cause?.message || "network error")}` });
     }
   });
 
