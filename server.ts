@@ -7,7 +7,6 @@ import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { MICROSOFT_NEURAL_VOICES, synthesizeMicrosoftTTS } from "./server/microsoft_tts.ts";
 
@@ -2843,7 +2842,10 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
   });
 
   // Vite development middleware vs production static files
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.SAYAD_SERVERLESS) {
+    // Serverless host: the CDN serves static files; this app only handles /api/*.
+  } else if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -2871,11 +2873,14 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`S.A.Y.A.D. Server running on http://localhost:${PORT}`);
-  });
+  if (!process.env.SAYAD_SERVERLESS) {
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`S.A.Y.A.D. Server running on http://localhost:${PORT}`);
+    });
+  }
+  return app;
 }
 
-startServer();
+export const appPromise = startServer();
 
 
