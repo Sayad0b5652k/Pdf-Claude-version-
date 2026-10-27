@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import dns from "node:dns/promises";
 import net from "node:net";
 import path from "path";
+import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { MICROSOFT_NEURAL_VOICES, synthesizeMicrosoftTTS } from "./server/microsoft_tts.ts";
 
@@ -1424,9 +1425,6 @@ process.on("uncaughtException", (err) => {
   console.error("[Server] Uncaught exception (kept running):", err);
 });
 
-// True on serverless hosts (Netlify/Vercel/AWS Lambda): no dev server, no static files, no listen().
-const IS_SERVERLESS = !!(process.env.SAYAD_SERVERLESS || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.LAMBDA_TASK_ROOT || process.env.VERCEL);
-
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -2056,31 +2054,19 @@ Return ONLY a valid raw JSON object with this exact structure:
         return res.status(400).json({ valid: false, error: "Please enter a valid Gemini API key" });
       }
 
-      // Validate by listing models (works for any valid key, independent of model availability).
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 15000);
-      let gr: Response;
-      try {
-        gr = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", {
-          headers: { "x-goog-api-key": apiKey.trim() },
-          signal: ctl.signal,
-        });
-      } finally { clearTimeout(timer); }
-      if (gr.ok) {
+      const client = keyPool.getClient(apiKey.trim());
+      const testResp = await client.models.generateContent({
+        model: "gemini-3.1-flash-lite",
+        contents: "Respond with 'OK' only.",
+      });
+
+      if (testResp && testResp.text) {
         return res.json({ valid: true, message: "Key verified successfully!" });
       }
-      let detail = "";
-      try { const j: any = await gr.json(); detail = j?.error?.message || ""; } catch {}
-      const bad = gr.status === 400 || gr.status === 401 || gr.status === 403;
-      return res.status(bad ? 400 : 502).json({
-        valid: false,
-        error: bad
-          ? `Google ne key reject ki (${gr.status}): ${detail || "invalid key"}`
-          : `Google se jawab nahi mila (${gr.status}): ${detail || "try again"}`,
-      });
+      return res.status(400).json({ valid: false, error: "Invalid response from Gemini" });
     } catch (err: any) {
       console.warn("Key validation failed:", err.message);
-      return res.status(502).json({ valid: false, error: `Server se Google tak pahunch nahi paaya: ${err?.name === "AbortError" ? "timeout" : (err?.message || err?.cause?.message || "network error")}` });
+      return res.status(400).json({ valid: false, error: err.message || "Failed to validate key with Google Gemini." });
     }
   });
 
@@ -2857,11 +2843,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
   });
 
   // Vite development middleware vs production static files
-  if (IS_SERVERLESS) {
-    // Serverless host: the CDN serves static files; this app only handles /api/*.
-  } else if (process.env.NODE_ENV !== "production") {
-    const viteId = "vite"; // computed so bundlers never pull vite (dev-only) into the production/serverless bundle
-    const { createServer: createViteServer } = await import(/* @vite-ignore */ viteId);
+  if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -2889,14 +2871,11 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
     });
   }
 
-  if (!IS_SERVERLESS) {
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`S.A.Y.A.D. Server running on http://localhost:${PORT}`);
-    });
-  }
-  return app;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`S.A.Y.A.D. Server running on http://localhost:${PORT}`);
+  });
 }
 
-export const appPromise = startServer();
+startServer();
 
 

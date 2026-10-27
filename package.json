@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs && esbuild server.ts --bundle --platform=node --format=cjs --external:fsevents --outfile=dist/server-fn.cjs",
+    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit"
@@ -19,7 +19,6 @@
     "@fontsource/plus-jakarta-sans": "^5.3.0",
     "@fontsource/space-grotesk": "^5.3.0",
     "@google/genai": "^2.4.0",
-    "@netlify/functions": "^6.0.3",
     "@tailwindcss/vite": "^4.1.14",
     "@types/compression": "^1.8.1",
     "@vitejs/plugin-react": "^5.0.4",
