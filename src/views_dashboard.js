@@ -331,7 +331,7 @@ export function bindBooksSectionEvents(){
 export function paperEntryCard() {
   return `<button class="pp-entry" onclick="window.openPaperView && window.openPaperView({screen:'home'})">
     <span class="pp-entry-ic">${window.icon('paper','icon')}</span>
-    <span class="pp-entry-t"><b>Question Papers</b><small>Board-pattern papers from your books, with history</small></span>
+    <span class="pp-entry-t"><i class="pp-kick">PRACTICE</i><b>Question Papers</b><small>Board-pattern papers from your books, with history</small></span>
     <span class="pp-entry-go">${window.icon('chevRight','icon icon-sm')}</span></button>`;
 }
 
@@ -983,14 +983,14 @@ export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
   };
 
   return `
-    <div style="background:var(--surface); border:1px solid var(--border); border-radius:18px; padding:20px; box-shadow:var(--shadow-sm);">
+    <div class="sy-aihist">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
         <div style="display:flex; align-items:center; gap:10px;">
           <div style="width:38px; height:38px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
             ${window.icon('teacher', 'icon icon-md')}
           </div>
           <div>
-            <div class="font-display" style="font-size:16px; font-weight:800; color:var(--text); line-height:1.2;">
+            <i class="pp-kick">AI TUTOR</i><div class="font-display" style="font-size:16px; font-weight:800; color:var(--text); line-height:1.2;">
               AI Study Assistant &amp; Chat History
             </div>
             <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">
@@ -1001,12 +1001,12 @@ export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
 
         <button class="btn btn-primary" id="btn-start-general-ai-chat" style="padding:8px 14px; font-size:12.5px; font-weight:700; border-radius:10px; gap:6px;">
           ${window.icon('sparkle', 'icon icon-xs')}
-          <span>+ New General Chat</span>
+          <span>New General Chat</span>
         </button>
       </div>
 
       ${validChats.length === 0 ? `
-        <div style="text-align:center; padding:24px 16px; background:var(--surface-2); border-radius:14px; border:1px dashed var(--border);">
+        <div class="sy-aiempty">
           <div style="color:var(--text-dim); margin-bottom:8px;">${window.icon('messages', 'icon icon-lg')}</div>
           <div style="font-size:14px; font-weight:700; color:var(--text); margin-bottom:4px;">No AI chats yet</div>
           <div style="font-size:12.5px; color:var(--text-dim); max-width:380px; margin:0 auto 14px;">
@@ -1030,7 +1030,7 @@ export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
             const timeStr = formatRelativeTime(chat.updatedAt);
 
             return `
-              <div class="card ai-chat-history-item" data-file-id="${chat.fileId}" style="padding:12px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; transition:border-color 0.15s, transform 0.15s;">
+              <div class="card ai-chat-history-item sy-aiitem" data-file-id="${chat.fileId}" style="padding:12px 14px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:12px; transition:border-color 0.15s, transform 0.15s;">
                 <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
                   <div style="width:34px; height:34px; border-radius:8px; background:${isGlobal ? 'var(--accent-soft)' : 'var(--surface-3)'}; color:${isGlobal ? 'var(--accent)' : 'var(--text)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
                     ${window.icon(isGlobal ? 'sparkle' : 'book', 'icon icon-sm')}

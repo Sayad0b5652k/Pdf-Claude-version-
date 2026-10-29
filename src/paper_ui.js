@@ -278,7 +278,7 @@ function buildHtml() {
       <button class="pp-link pp-addr" data-act="radd">+ Add a page range</button>`;
   }
   /* --- pattern --- */
-  const pattern = c.sections.map((s) => `<div class="pp-psec"><div class="pp-pl"><span class="pp-pk">${esc(s.key)}</span><div><div class="pp-pt">${esc(s.title)}</div><div class="pp-ps">${esc(s.blurb || '')}</div></div></div>
+  const pattern = c.sections.map((s) => `<div class="pp-psec"><div class="pp-pl"><span class="pp-pk">${esc(s.key)}</span><div><div class="pp-pt">${esc(s.title)}</div><div class="pp-ps">${esc(s.blurb || '')}</div></div>${(() => { const tt = C.totals([s]); return tt.questions ? `<span class="pp-psum">${tt.questions} Q · ${marksStr(tt.marks)} marks</span>` : ''; })()}</div>
     ${s.parts.map((p, pi) => {
       const off = p.enabled === false && p.count > 0;
       const meta = [`${p.marks} mark${p.marks > 1 ? 's' : ''}${p.count > 1 && !C.TYPE_META[p.type]?.composite ? ' each' : ''}`, p.attempt != null && p.attempt < p.count ? `attempt any ${p.attempt}` : '', p.or && c.internalChoice ? `${Math.min(p.or, p.count)} with OR` : '', p.topic ? p.topic.slice(0, 40) : ''].filter(Boolean).join(' · ');
@@ -286,12 +286,12 @@ function buildHtml() {
         <div class="pp-step"><button data-act="dec" data-s="${esc(s.key)}" data-p="${pi}" ${p.count <= 0 || off ? 'disabled' : ''} aria-label="Fewer">−</button><b>${p.count}</b><button data-act="inc" data-s="${esc(s.key)}" data-p="${pi}" ${off ? 'disabled' : ''} aria-label="More">+</button></div></div>`;
     }).join('')}</div>`).join('');
   const total = ps.cfg.sel.size + ps.cfg.ranges.filter((r) => r.from && r.to).length;
-  const reason = !total ? 'Select at least one chapter' : !t.questions ? 'Add some questions to the pattern' : '';
-  return `${topbar('New paper', ps.docInfo ? esc(ps.docInfo.name) : 'Pick a book and chapters', ps.list.length ? `<button class="pp-link pp-toplink" data-act="home">History · ${ps.list.length}</button>` : '')}
+  const reason = !total ? 'Select a chapter' : !t.questions ? 'Add some questions' : '';
+  return `${topbar('New paper', ps.docInfo ? esc(ps.docInfo.name) : 'Pick a book and chapters', ps.list.length ? `<button class="pp-hist" data-act="home" aria-label="History">${ic('clock', 'icon icon-xs')}History<b>${ps.list.length}</b></button>` : '')}
   <div class="pp-scroll"><div class="pp-pad pp-build">
     ${PaperJobs.runningIds().length ? `<button class="pp-banner" data-act="openrun">${ic('zap', 'icon icon-xs')} A paper is being generated. Tap to view.</button>` : ''}
 
-    <section class="pp-card"><div class="pp-stepno">01</div><h3>Exam</h3>
+    <section class="pp-card"><div class="pp-stepno">01</div><h3>Exam</h3><p class="pp-sub">Pick the board, class and subject.</p>
       <div class="pp-seg">${C.BOARDS.map((x) => `<button class="${c.board === x.id ? 'on' : ''}" data-act="board" data-v="${x.id}">${x.name}</button>`).join('')}</div>
       <div class="pp-seg pp-seg-sm">${levels.map((l) => `<button class="${c.level === l.id ? 'on' : ''}" data-act="level" data-v="${l.id}">${l.name}</button>`).join('')}</div>
       <div class="pp-subjects">${subjects.map((x) => `<button class="pp-subj ${x.id === c.blueprintId ? 'on' : ''}" data-act="subject" data-v="${x.id}">${esc(x.subject)}</button>`).join('')}</div>
@@ -299,14 +299,14 @@ function buildHtml() {
         <div class="pp-pat-src ${verifiedCls}"><span class="pp-dot"></span>${esc(C.VERIFIED_LABEL[b.verified])}</div></div>
     </section>
 
-    <section class="pp-card"><div class="pp-stepno">02</div><h3>Chapters <small>pick one or many</small></h3>${chap}</section>
+    <section class="pp-card"><div class="pp-stepno">02</div><h3>Chapters</h3><p class="pp-sub">Pick one or many chapters to cover.</p>${chap}</section>
 
-    <section class="pp-card"><div class="pp-stepno">03</div><h3>Paper pattern <span class="pp-badge ${official ? 'ok' : 'warn'}">${official ? 'Official' : 'Custom'}</span></h3>
+    <section class="pp-card"><div class="pp-stepno">03</div><h3>Paper pattern <span class="pp-badge ${official ? 'ok' : 'warn'}">${official ? 'Official' : 'Custom'}</span></h3><p class="pp-sub">Questions per section. Use + and − to adjust.</p>
       <div class="pp-presets">${[['official', 'Official'], ['short', 'More short'], ['long', 'More long'], ['objective', 'Objective only'], ['mini', 'Mini test']].map(([k, l]) => `<button class="pp-pre" data-act="preset" data-v="${k}">${l}</button>`).join('')}</div>
       ${pattern}
     </section>
 
-    <section class="pp-card"><div class="pp-stepno">04</div><h3>Options</h3>
+    <section class="pp-card"><div class="pp-stepno">04</div><h3>Options</h3><p class="pp-sub">Difficulty, language and extras.</p>
       <div class="pp-opt"><div><b>Difficulty</b><small>Mix of easy, average and hard questions</small></div></div>
       <div class="pp-seg pp-seg-sm">${[['easy', 'Easy'], ['balanced', 'Balanced'], ['hard', 'Hard']].map(([k, l]) => `<button class="${c.difficulty === k ? 'on' : ''}" data-act="diff" data-v="${k}">${l}</button>`).join('')}</div>
       <div class="pp-opt"><div><b>Paper language</b><small>Auto follows the book</small></div></div>
@@ -330,7 +330,7 @@ function toggleRow(key, title, sub, on) {
 }
 function bookPickerHtml() {
   const files = (window.State.files || []).slice().sort((a, b) => (b.lastOpened || 0) - (a.lastOpened || 0));
-  return `<div class="pp-pick"><button class="pp-link" data-act="back">Cancel</button>${files.length ? files.map((f) => `<button class="pp-pickrow" data-act="usebook" data-id="${esc(f.id)}">${ic('book', 'icon icon-sm')}<span>${esc(f.name)}</span></button>`).join('') : '<div class="pp-note">Your library is empty. Add a PDF first.</div>'}</div>`;
+  return `<div class="pp-pick"><div class="pp-pickhead"><span>Choose a book</span><button class="pp-link" data-act="back">Cancel</button></div>${files.length ? files.map((f) => `<button class="pp-pickrow" data-act="usebook" data-id="${esc(f.id)}">${ic('book', 'icon icon-sm')}<span>${esc(f.name)}</span></button>`).join('') : '<div class="pp-note">Your library is empty. Add a PDF first.</div>'}</div>`;
 }
 
 /* ============================== PROGRESS ============================== */
