@@ -86,7 +86,7 @@ export async function renderSettings(){
     <!-- 4. Pro Design Theme -->
     <div class="section-title" style="margin-bottom:10px;">Pro Design Theme (Design Architecture)</div>
     <div class="card" style="padding:14px; margin-bottom:22px;">
-      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:6px;">
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
         <button data-set-pro-theme="classic" class="btn" style="flex-direction:column; padding:10px 4px; height:74px; gap:3px; font-size:10.5px; font-weight:700; border-radius:10px;
           background:${((window.State.proTheme||'classic')==='classic')?'var(--accent-soft)':'var(--surface-2)'};
           color:${((window.State.proTheme||'classic')==='classic')?'var(--accent)':'var(--text)'};
@@ -102,6 +102,14 @@ export async function renderSettings(){
           <span style="font-size:17px;">📖</span>
           <span>Editorial</span>
           <span style="font-size:9px; opacity:0.75; font-weight:500;">Swiss Minimal</span>
+        </button>
+        <button data-set-pro-theme="notebook" class="btn" style="flex-direction:column; padding:10px 4px; height:74px; gap:3px; font-size:10.5px; font-weight:700; border-radius:10px;
+          background:${window.State.proTheme==='notebook'?'var(--accent-soft)':'var(--surface-2)'};
+          color:${window.State.proTheme==='notebook'?'var(--accent)':'var(--text)'};
+          border:1.5px solid ${window.State.proTheme==='notebook'?'var(--accent)':'var(--border)'};">
+          <span style="font-size:17px;">📓</span>
+          <span>Notebook</span>
+          <span style="font-size:9px; opacity:0.75; font-weight:500;">Doodle Study</span>
         </button>
       </div>
       <div style="font-size:11.5px; color:var(--text-faint); margin-top:10px; line-height:1.4;">
@@ -564,7 +572,7 @@ export async function renderSettings(){
       if (window.DB && window.DB.setting) {
         await window.DB.setting('proTheme', chosen);
       }
-      const label = chosen === 'editorial' ? '📖 Editorial Luxe' : '🏛️ Classic';
+      const label = chosen === 'editorial' ? '📖 Editorial Luxe' : chosen === 'notebook' ? '📓 Notebook' : '🏛️ Classic';
       window.toast(`Pro Theme set: ${label}`);
       updateProThemeButtonsDOM(chosen);
     };

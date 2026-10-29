@@ -423,7 +423,7 @@ export async function boot(){
   document.documentElement.dataset.theme = window.State.theme;
   try { localStorage.setItem('sayad_theme', window.State.theme); } catch(e){}
   window.State.proTheme = await window.DB.getSetting('proTheme','classic');
-  if (window.State.proTheme !== 'editorial') window.State.proTheme = 'classic'; // retired themes fall back to Classic
+  if (window.State.proTheme !== 'editorial' && window.State.proTheme !== 'notebook') window.State.proTheme = 'classic'; // retired themes fall back to Classic
   document.documentElement.dataset.proTheme = window.State.proTheme;
   try { localStorage.setItem('sayad_pro_theme', window.State.proTheme); } catch(e){}
   syncThemeColorMeta();
