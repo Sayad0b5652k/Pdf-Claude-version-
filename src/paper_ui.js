@@ -249,7 +249,7 @@ function homeHtml() {
   <div class="pp-scroll"><div class="pp-pad">
     <button class="pp-hero" data-act="new"><div><div class="pp-hero-k">NEW</div><div class="pp-hero-t">Generate a board paper</div><div class="pp-hero-s">${ps.docInfo ? 'From “' + esc(ps.docInfo.name) + '”' : 'CBSE · NIOS · pick chapters from any book'}</div></div><span class="pp-hero-go">${ic('plus', 'icon')}</span></button>
     <div class="pp-sechead"><span>History</span><span class="pp-count">${ps.list.length}</span></div>
-    ${rows || `<div class="pp-empty"><div class="pp-empty-mark">№</div><div>No papers yet.</div><small>Your generated papers, answers and scores are saved here.</small></div>`}
+    ${rows || `${window.emptyState ? window.emptyState('paper', 'No papers yet', 'Your generated papers, answers and scores are saved here.') : '<div class="pp-empty"><div>No papers yet.</div></div>'}`}
   </div></div>`;
 }
 
