@@ -423,6 +423,7 @@ export async function boot(){
   document.documentElement.dataset.theme = window.State.theme;
   try { localStorage.setItem('sayad_theme', window.State.theme); } catch(e){}
   window.State.proTheme = await window.DB.getSetting('proTheme','classic');
+  if (window.State.proTheme !== 'editorial') window.State.proTheme = 'classic'; // retired themes fall back to Classic
   document.documentElement.dataset.proTheme = window.State.proTheme;
   try { localStorage.setItem('sayad_pro_theme', window.State.proTheme); } catch(e){}
   syncThemeColorMeta();
@@ -479,9 +480,7 @@ export async function boot(){
 
 export function getThemeCrestUrl() {
   const proTheme = (window.State && window.State.proTheme) || (typeof localStorage !== 'undefined' ? localStorage.getItem('sayad_pro_theme') : null) || 'classic';
-  if (proTheme === 'titanium') return '/icons/theme-titanium-512.png';
   if (proTheme === 'editorial') return '/icons/theme-editorial-512.png';
-  if (proTheme === 'glass') return '/icons/theme-glass-512.png';
   return '/icons/theme-classic-512.png'; // Universal Silver Pure Luxury Default
 }
 window.getThemeCrestUrl = getThemeCrestUrl;

@@ -20,7 +20,7 @@
       try {
         var savedTheme = localStorage.getItem('sayad_theme') || 'light';
         document.documentElement.dataset.theme = savedTheme;
-        var savedProTheme = localStorage.getItem('sayad_pro_theme') || 'classic';
+        var savedProTheme = localStorage.getItem('sayad_pro_theme') === 'editorial' ? 'editorial' : 'classic';
         document.documentElement.dataset.proTheme = savedProTheme;
         var metaTheme = document.querySelector('meta[name="theme-color"]');
         if (metaTheme) {

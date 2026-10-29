@@ -29,8 +29,6 @@ const PRECACHE_URLS = [
   '/screenshots/screenshot-mobile-2.png',
   '/screenshots/screenshot-desktop-1.png',
   '/icons/theme-classic-512.png',
-  '/icons/theme-titanium-512.png',
-  '/icons/theme-glass-512.png',
   '/icons/theme-editorial-512.png'
 ];
 
