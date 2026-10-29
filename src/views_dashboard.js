@@ -25,7 +25,6 @@ export async function renderDashboard(preserveScroll = true){
     if (widgetsEl) {
       widgetsEl.innerHTML = `
         ${renderAnalyticsCard(files, readingStats)}
-        ${paperEntryCard()}
 
         ${recents.length? `
         <div id="continue-reading-section" style="margin-bottom:24px;">
@@ -100,7 +99,6 @@ export async function renderDashboard(preserveScroll = true){
     <div style="padding:6px 20px;">
       <div id="dash-widgets">
         ${renderAnalyticsCard(files, readingStats)}
-        ${paperEntryCard()}
 
         ${recents.length? `
         <div id="continue-reading-section" style="margin-bottom:24px;">
@@ -1001,7 +999,7 @@ export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
 
         <button class="btn btn-primary" id="btn-start-general-ai-chat" style="padding:8px 14px; font-size:12.5px; font-weight:700; border-radius:10px; gap:6px;">
           ${window.icon('sparkle', 'icon icon-xs')}
-          <span>New General Chat</span>
+          <span>+ New General Chat</span>
         </button>
       </div>
 

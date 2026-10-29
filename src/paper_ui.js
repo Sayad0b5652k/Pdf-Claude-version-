@@ -286,7 +286,7 @@ function buildHtml() {
         <div class="pp-step"><button data-act="dec" data-s="${esc(s.key)}" data-p="${pi}" ${p.count <= 0 || off ? 'disabled' : ''} aria-label="Fewer">−</button><b>${p.count}</b><button data-act="inc" data-s="${esc(s.key)}" data-p="${pi}" ${off ? 'disabled' : ''} aria-label="More">+</button></div></div>`;
     }).join('')}</div>`).join('');
   const total = ps.cfg.sel.size + ps.cfg.ranges.filter((r) => r.from && r.to).length;
-  const reason = !total ? 'Select a chapter' : !t.questions ? 'Add some questions' : '';
+  const reason = !total ? 'Select at least one chapter' : !t.questions ? 'Add some questions to the pattern' : '';
   return `${topbar('New paper', ps.docInfo ? esc(ps.docInfo.name) : 'Pick a book and chapters', ps.list.length ? `<button class="pp-hist" data-act="home" aria-label="History">${ic('clock', 'icon icon-xs')}History<b>${ps.list.length}</b></button>` : '')}
   <div class="pp-scroll"><div class="pp-pad pp-build">
     ${PaperJobs.runningIds().length ? `<button class="pp-banner" data-act="openrun">${ic('zap', 'icon icon-xs')} A paper is being generated. Tap to view.</button>` : ''}

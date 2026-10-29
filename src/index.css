@@ -29,12 +29,6 @@ html[data-theme="dark"] {
   --teal: #2FC6BC;
   --shadow: 0 10px 0 0 rgba(0,0,0,.28), 0 16px 30px -16px rgba(0,0,0,.7);
   --canvas-filter: invert(0.93) hue-rotate(190deg) contrast(0.95) brightness(1.05);
-  --border-subtle: #1B2833;
-  --border-hover: #34495B;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.45);
-  --text-muted: #8CA1AF;
-  --danger-soft: rgba(255,77,109,.14);
-  --teal-soft: rgba(47,198,188,.15);
 }
 
 html[data-theme="light"] {
@@ -52,12 +46,6 @@ html[data-theme="light"] {
   --teal: #0E7A8C;
   --shadow: 0 6px 0 0 rgba(20,30,25,.06), 0 16px 26px -18px rgba(20,30,25,.22);
   --canvas-filter: none;
-  --border-subtle: #E0E6DA;
-  --border-hover: #B9C3B2;
-  --shadow-sm: 0 1px 2px rgba(20,30,25,.07);
-  --text-muted: #57666A;
-  --danger-soft: rgba(255,77,109,.12);
-  --teal-soft: rgba(14,122,140,.12);
 }
 
 html[data-theme="sepia"] {
@@ -75,12 +63,6 @@ html[data-theme="sepia"] {
   --teal: #3C7A6A;
   --shadow: 0 6px 0 0 rgba(56,44,26,.08), 0 16px 28px -18px rgba(56,44,26,.28);
   --canvas-filter: sepia(0.3) contrast(0.97);
-  --border-subtle: #D9C9A2;
-  --border-hover: #B49F6F;
-  --shadow-sm: 0 1px 2px rgba(56,44,26,.10);
-  --text-muted: #6A5738;
-  --danger-soft: rgba(200,60,60,.13);
-  --teal-soft: rgba(60,122,106,.14);
 }
 
 * {
@@ -8667,45 +8649,6 @@ html[data-pro-theme="glass"] .delivery-card-option {
 .sy-aiitem:hover{border-color:var(--accent)}
 .sy-aiempty{text-align:center;padding:24px 16px;background:var(--surface-2);border-radius:var(--radius-md);border:1px dashed var(--border)}
 
-/* =====================================================================
-   EDITORIAL THEME - ONE TYPE SYSTEM
-   Titles: Playfair Display. Everything else (labels, meta, controls):
-   IBM Plex Sans, upright, on a fixed 12 / 14 / 16 scale. Newsreader
-   stays only for long reading text. No italics for UI chrome.
-   ===================================================================== */
-html[data-pro-theme="editorial"]{--ed-ui:'IBM Plex Sans',system-ui,sans-serif;--ed-title:'Playfair Display','Newsreader',Georgia,serif}
-html[data-pro-theme="editorial"] .section-title{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:12px!important;font-weight:700!important;letter-spacing:.14em!important;text-transform:uppercase}
-html[data-pro-theme="editorial"] .section-title::before{font-family:var(--ed-title);font-size:13px}
-html[data-pro-theme="editorial"] .chip,
-html[data-pro-theme="editorial"] .chip.active{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:13px!important}
-html[data-pro-theme="editorial"] .badge-pages{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:10.5px!important}
-html[data-pro-theme="editorial"] .bottom-nav button,
-html[data-pro-theme="editorial"] .bottom-nav button.active{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:11px!important}
-html[data-pro-theme="editorial"] .view > div:first-child div[style*="font-size:12px"],
-html[data-pro-theme="editorial"] .view > div:first-child div[style*="font-size: 12px"]{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:12px!important}
-html[data-pro-theme="editorial"] .view > div:first-child .font-mono,
-html[data-pro-theme="editorial"] .view > div:first-child div[style*="border-radius:12px"][style*="font-size:11px"],
-html[data-pro-theme="editorial"] .view > div:first-child [style*="border-radius:12px"][style*="font-size:11px"]{font-family:'IBM Plex Mono',monospace!important;font-style:normal!important;font-size:11px!important}
-html[data-pro-theme="editorial"] .view > div:first-child .font-display{font-family:var(--ed-title)!important;font-size:22px!important;line-height:1.15;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-html[data-pro-theme="editorial"] #dash-search,
-html[data-pro-theme="editorial"] #dash-search::placeholder{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:14px!important}
-html[data-pro-theme="editorial"] #btn-import{font-family:var(--ed-ui)!important;font-size:13px!important}
-html[data-pro-theme="editorial"] .opt-row > div > div:first-child{font-family:var(--ed-ui)!important;font-size:14px!important;font-weight:600!important}
-html[data-pro-theme="editorial"] .opt-row > div > div:last-child{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:12px!important}
-html[data-pro-theme="editorial"] button[data-theme-btn],
-html[data-pro-theme="editorial"] button[data-theme-btn] span{font-family:var(--ed-ui)!important;font-size:13px!important}
-html[data-pro-theme="editorial"] button[data-reading-mode] span:first-child{font-family:var(--ed-ui)!important;font-size:14px!important;font-weight:600}
-html[data-pro-theme="editorial"] button[data-reading-mode] span:last-child{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:12px!important}
-html[data-pro-theme="editorial"] button[data-set-pro-theme] span:first-child{font-family:var(--ed-ui)!important;font-size:12px!important}
-html[data-pro-theme="editorial"] button[data-set-pro-theme] span:last-child{font-family:var(--ed-ui)!important;font-style:normal!important;font-size:10px!important}
-html[data-pro-theme="editorial"] #dash-analytics-card div[style*="font-size:11px"],
-html[data-pro-theme="editorial"] #dash-analytics-card div[style*="font-size:12px"]{font-family:var(--ed-ui)!important;font-style:normal!important}
-html[data-pro-theme="editorial"] .view .card [style*="border-radius:12px"] div[style*="font-weight:700"]{font-family:var(--ed-ui)!important;font-size:14px!important}
-html[data-pro-theme="editorial"] .view .card [style*="display:grid;gap:4px"],
-html[data-pro-theme="editorial"] .view .card [style*="display:grid; gap:4px"]{font-family:var(--ed-ui)!important;font-size:14px!important}
-html[data-pro-theme="editorial"] .view .card .font-mono[style*="border-top"]{font-family:'IBM Plex Mono',monospace!important;font-style:normal!important;font-size:12px!important}
-html[data-pro-theme="editorial"] .pp-entry-t b,html[data-pro-theme="editorial"] .pp-card h3,html[data-pro-theme="editorial"] .pp-hero-t,html[data-pro-theme="editorial"] .pp-topn{font-family:var(--ed-title)}
-html[data-pro-theme="editorial"] .pp-entry,html[data-pro-theme="editorial"] .pp-card,html[data-pro-theme="editorial"] .pp-hcard,html[data-pro-theme="editorial"] .sy-aihist{border-radius:var(--radius-lg)}
 
 .pp-app .pp-link{color:var(--accent)}
 .pp-app .pp-pickhead .pp-link{color:var(--text)}
