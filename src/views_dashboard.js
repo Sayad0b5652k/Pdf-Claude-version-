@@ -487,6 +487,7 @@ export function filterLabel(f){
   return 'Books';
 }
 
+function bookHue(id){ let h=0; const s=String(id||''); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return h%6; }
 export function bookCard(f, wide){
   const pct = f.pageCount? Math.round(((f.lastPage||1)/f.pageCount)*100) : 0;
   let tagText = '';
@@ -498,7 +499,7 @@ export function bookCard(f, wide){
     tagText = `📖 ${window.escapeHtml(f.subject)}`;
   }
 
-  return `<div class="book" ${wide ? `data-recents-card="${f.id}"` : `data-book-card="${f.id}"`} style="${wide?'width:132px; min-width:132px; flex-shrink:0;':'width:100%;'}" data-open="${f.id}">
+  return `<div class="book" data-hue="${bookHue(f.id)}" ${wide ? `data-recents-card="${f.id}"` : `data-book-card="${f.id}"`} style="${wide?'width:132px; min-width:132px; flex-shrink:0;':'width:100%;'}" data-open="${f.id}">
     ${f.pinned? `<div class="pin-dot"></div>`:''}
     <div class="thumbwrap">
       ${f.thumb? `<img src="${f.thumb}">` : `<div class="skel" style="position:absolute; inset:0;"></div>`}
@@ -527,7 +528,7 @@ export function bookCardList(f){
     pathText = ` · 📖 ${window.escapeHtml(f.subject)}`;
   }
 
-  return `<div class="card" data-book-card="${f.id}" data-open="${f.id}" style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:10px; cursor:pointer; position:relative;">
+  return `<div class="card" data-hue="${bookHue(f.id)}" data-book-card="${f.id}" data-open="${f.id}" style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:10px; cursor:pointer; position:relative;">
     ${f.pinned? `<span class="pin-dot-list" style="position:absolute; top:8px; left:8px; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); z-index:2;"></span>`:''}
     <div class="card-thumb-wrap" style="width:44px; height:58px; border-radius:4px; overflow:hidden; flex-shrink:0; background:var(--surface-2); position:relative;">
       ${f.thumb? `<img class="card-thumb-img" src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">` : ''}
