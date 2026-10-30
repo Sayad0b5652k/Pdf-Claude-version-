@@ -1,6 +1,30 @@
 // @ts-nocheck
 import { fixLegacyHindi, pageIsLegacyHindi } from './hindi_fix.js';
 
+/* Is this whole book legacy-font (Kruti Dev) Hindi? Sampled once per document; used so bookmarks and contents lines get converted too. */
+async function docIsLegacyHindi(doc) {
+  if (!doc) return false;
+  if (doc.__legacyHindi !== undefined) return doc.__legacyHindi;
+  let txt = '';
+  try {
+    const n = doc.numPages || 1;
+    const pages = [...new Set([1, 2, 3, 4, 5, Math.ceil(n / 2), Math.ceil(n / 2) + 1].filter((x) => x >= 1 && x <= n))];
+    for (const p of pages) {
+      const tc = await (await doc.getPage(p)).getTextContent({ normalizeWhitespace: true });
+      txt += ' ' + tc.items.map((i) => i.str).join(' ');
+      if (txt.length > 6000) break;
+    }
+  } catch (e) {}
+  doc.__legacyHindi = pageIsLegacyHindi(txt);
+  return doc.__legacyHindi;
+}
+function fixTocText(str, legacy) {
+  if (!str) return str;
+  if (!legacy) return fixLegacyHindi(str);
+  // Kruti Dev writes the colon after "पाठ 1" as a percent sign
+  return fixLegacyHindi(str, { pageLegacy: true, force: true }).replace(/\s*%\s*/g, ' : ').replace(/\s{2,}/g, ' ').trim();
+}
+
 export let pageEls = {};
 let tesseractWorker = null;
 let wakeLockRef = null;
@@ -3484,6 +3508,8 @@ export async function resolveDestToPage(doc, dest) {
  */
 export async function getPageFirstHeading(doc, pageNum, outlineTitle = '') {
   if (!doc || !pageNum || pageNum < 1 || pageNum > doc.numPages) return '';
+  const legacyDoc = await docIsLegacyHindi(doc);
+  outlineTitle = fixTocText(outlineTitle, legacyDoc);
   try {
     const page = await doc.getPage(pageNum);
     const textContent = await page.getTextContent({ normalizeWhitespace: true });
@@ -3510,7 +3536,7 @@ export async function getPageFirstHeading(doc, pageNum, outlineTitle = '') {
 
     for (const b of lineBuckets.slice(0, 10)) {
       b.items.sort((a, b) => a.x - b.x);
-      const lineStr = b.items.map(it => it.str).join(' ').trim();
+      const lineStr = fixTocText(b.items.map(it => it.str).join(' ').trim(), legacyDoc);
       if (lineStr.length < 3) continue;
       // Skip pure digits (like page numbers)
       if (/^\d+$/.test(lineStr)) continue;
@@ -3524,8 +3550,8 @@ export async function getPageFirstHeading(doc, pageNum, outlineTitle = '') {
       }
 
       // Check if line starts with Chapter / Lesson marker
-      if (/^(ch|chap|chapter|lesson|unit|module)\s*[-.:]?\s*\d+\b/i.test(lineStr)) {
-        const afterMarker = lineStr.replace(/^(ch|chap|chapter|lesson|unit|module)\s*[-.:]?\s*\d+\s*[-.:]?\s*/i, '').trim();
+      if (/^(ch|chap|chapter|lesson|unit|module|पाठ|अध्याय|इकाई)\s*[-.:]?\s*\d+/i.test(lineStr)) {
+        const afterMarker = lineStr.replace(/^(ch|chap|chapter|lesson|unit|module|पाठ|अध्याय|इकाई)\s*[-.:]?\s*\d+\s*[-.:]?\s*/i, '').trim();
         if (afterMarker.length >= 3 && !/^\d+$/.test(afterMarker)) {
           return afterMarker;
         }
@@ -3533,7 +3559,7 @@ export async function getPageFirstHeading(doc, pageNum, outlineTitle = '') {
       }
 
       // Valid heading candidate (not a long body paragraph ending with period)
-      if (lineStr.length >= 3 && lineStr.length <= 75 && !lineStr.endsWith('.')) {
+      if (lineStr.length >= 3 && lineStr.length <= 75 && !lineStr.endsWith('.') && !lineStr.endsWith('।')) {
         return lineStr;
       }
     }
@@ -3561,6 +3587,7 @@ export async function resolveAndCacheTOC(doc, fileId) {
 
   // Tier 1: Embedded Native PDF Bookmarks Outline
   try {
+    const legacyDoc = await docIsLegacyHindi(doc);
     const rawOutline = await doc.getOutline();
     if (rawOutline && rawOutline.length > 0) {
       async function resolveItems(items) {
@@ -3573,7 +3600,7 @@ export async function resolveAndCacheTOC(doc, fileId) {
             subItems = await resolveItems(item.items);
           }
           list.push({
-            title: item.title || `Section ${i + 1}`,
+            title: fixTocText(item.title, legacyDoc) || `Section ${i + 1}`,
             subtitle: '',
             pageNum: pageNum,
             dest: item.dest,
@@ -3663,6 +3690,7 @@ export async function resolveAndCacheTOC(doc, fileId) {
  */
 export async function extractInTextTOC(doc, fileId) {
   if (!doc) return [];
+  const legacyDoc = await docIsLegacyHindi(doc);
   const totalPages = doc.numPages || 1;
   const maxScan = Math.min(totalPages, 30);
   const entries = [];
@@ -3689,7 +3717,7 @@ export async function extractInTextTOC(doc, fileId) {
       lineBuckets.sort((a, b) => b.y - a.y);
       const lines = lineBuckets.map(b => {
         b.items.sort((a, b) => a.x - b.x);
-        return b.items.map(it => it.str).join(' ').trim();
+        return fixTocText(b.items.map(it => it.str).join(' ').trim(), legacyDoc);
       }).filter(Boolean);
 
       const pageJoined = lines.join(' ').toLowerCase();
@@ -3709,7 +3737,7 @@ export async function extractInTextTOC(doc, fileId) {
         }
 
         // Pattern 1: Module/Lesson/Chapter X: Title ... Page
-        const m1 = line.match(/^(?:(chapter|lesson|unit|module|paath|adhyaye?)\s*[:.\-_]?\s*)?(\d{1,3}|[ivxlcdm]+)\s*[:.\-_–—]\s*(.+?)(?:[\s.·…\-_]{2,}|\t|\s{2,}|page|pg\s*)(\d{1,4})\s*$/i);
+        const m1 = line.match(/^(?:(chapter|lesson|unit|module|paath|adhyaye?|पाठ|अध्याय|इकाई)\s*[:.\-_]?\s*)?(\d{1,3}|[ivxlcdm]+)\s*[:.\-_–—]\s*(.+?)(?:[\s.·…\-_]{2,}|\t|\s{2,}|page|pg\s*)(\d{1,4})\s*$/i);
         if (m1) {
           const prefix = m1[1] || 'Chapter';
           const num = m1[2];
@@ -3731,7 +3759,7 @@ export async function extractInTextTOC(doc, fileId) {
         }
 
         // Pattern 2: 21. Functions of Travel Agencies ... 14
-        const m2 = line.match(/^(\d{1,3})\s*[:.\-_]\s*([A-Za-z0-9\s,–'’"&\-\/]+?)(?:[\s.·…\-_]{2,}|\t|\s{2,}|page|pg\s*)(\d{1,4})\s*$/i);
+        const m2 = line.match(/^(\d{1,3})\s*[:.\-_]\s*([A-Za-z0-9\u0900-\u097F\s,–'’"&\-\/]+?)(?:[\s.·…\-_]{2,}|\t|\s{2,}|page|pg\s*)(\d{1,4})\s*$/i);
         if (m2) {
           const num = m2[1];
           const rawTitle = m2[2].replace(/[\s.·…\-_]+$/, '').trim();
@@ -3752,7 +3780,7 @@ export async function extractInTextTOC(doc, fileId) {
         }
 
         // Pattern 3: Chapter/Lesson without dot: "Lesson 21 Functions of Travel ... 14"
-        const m3 = line.match(/^(?:chapter|lesson|unit|module)\s+(\d{1,3})\s+([A-Za-z0-9\s,–'’"&\-\/]+?)(?:[\s.·…\-_]{2,}|\t|\s{2,}|page|pg\s*)(\d{1,4})\s*$/i);
+        const m3 = line.match(/^(?:chapter|lesson|unit|module)\s+(\d{1,3})\s+([A-Za-z0-9\u0900-\u097F\s,–'’"&\-\/]+?)(?:[\s.·…\-_]{2,}|\t|\s{2,}|page|pg\s*)(\d{1,4})\s*$/i);
         if (m3) {
           const num = m3[1];
           const rawTitle = m3[2].replace(/[\s.·…\-_]+$/, '').trim();
@@ -3792,6 +3820,7 @@ export async function extractInTextTOC(doc, fileId) {
  */
 export async function scanDocumentForChapters(doc, fileId) {
   if (!doc) return [];
+  const legacyDoc = await docIsLegacyHindi(doc);
   const totalPages = doc.numPages || 1;
   const entries = [];
   let currentModule = '';
@@ -3822,7 +3851,7 @@ export async function scanDocumentForChapters(doc, fileId) {
       lineBuckets.sort((a, b) => b.y - a.y);
       const topLines = lineBuckets.slice(0, 8).map(b => {
         b.items.sort((a, b) => a.x - b.x);
-        return b.items.map(it => it.str).join(' ').trim();
+        return fixTocText(b.items.map(it => it.str).join(' ').trim(), legacyDoc);
       }).filter(Boolean);
 
       for (const line of topLines) {
@@ -3834,7 +3863,7 @@ export async function scanDocumentForChapters(doc, fileId) {
 
       for (let i = 0; i < topLines.length; i++) {
         const line = topLines[i];
-        const match = line.match(/\b(module|chapter|unit|lesson|paath|adhyaye?)\s*[:.\-_—–]?\s*0*(\d+|[ivxlcdm]+)\b\s*[:.\-_—–]?\s*([^\n\r]+)?/i);
+        const match = line.match(/(?:\b|^|\s)(module|chapter|unit|lesson|paath|adhyaye?|पाठ|अध्याय|इकाई)\s*[:.\-_—–]?\s*0*(\d+|[ivxlcdm]+)\b\s*[:.\-_—–]?\s*([^\n\r]+)?/i);
         if (match) {
           const type = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
           const num = match[2];

@@ -196,7 +196,7 @@ export function fixLegacyHindi(text, opts = {}) {
   if (!words.length) return text;
   const ev = words.map((i) => wordEvidence(toks[i]));
   const anyEvidence = ev.some((e) => e > 0);
-  const short = words.length <= 3;
+  const short = words.length <= 3 || !!opts.force;   // force: a heading/bookmark we already know is legacy Hindi
   if (!anyEvidence && !(opts.pageLegacy && short)) return text;
   const RADIUS = 6;
   const mark = new Array(words.length).fill(false);
