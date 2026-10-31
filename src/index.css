@@ -7356,3 +7356,34 @@ html[data-pro-theme="notebook"][data-theme="dark"] .book::before{background:url(
 html[data-pro-theme="notebook"] .book .thumbwrap::after{display:none}
 
 html[data-pro-theme="notebook"] #continue-reading-track{padding-left:14px;padding-right:8px;margin-left:-6px}
+
+/* =====================================================================
+   NOTEBOOK v3: softer colours, washi tape, wavy titles, sticky notes
+   ===================================================================== */
+html[data-pro-theme="notebook"][data-theme="light"]{--nb-hi:#FFF1B0;--nb-rule:rgba(90,120,220,.4)}
+html[data-pro-theme="notebook"][data-theme="dark"]{--nb-hi:#FFE9A0;--nb-rule:rgba(143,162,255,.22)}
+html[data-pro-theme="notebook"][data-theme="sepia"]{--nb-rule:rgba(150,110,60,.32)}
+/* nav: each tab gets a pastel, pink only on the active badge */
+html[data-pro-theme="notebook"] .bottom-nav button.active{background:#FFF1B0;color:#1C2455;box-shadow:var(--nb-shadow-sm)}
+/* section titles get a hand-drawn wavy underline */
+html[data-pro-theme="notebook"] .section-title,html[data-pro-theme="notebook"] .pp-sechead span:first-child{text-decoration:underline wavy;text-decoration-color:color-mix(in srgb,currentColor 55%,transparent);text-decoration-thickness:2px;text-underline-offset:6px}
+/* washi tape on the hero cards */
+html[data-pro-theme="notebook"] #dash-widgets > .card:first-child,html[data-pro-theme="notebook"] .sy-aihist,html[data-pro-theme="notebook"] .pp-hero{position:relative}
+html[data-pro-theme="notebook"] #dash-widgets > .card:first-child::before,html[data-pro-theme="notebook"] #dash-analytics-card::before,html[data-pro-theme="notebook"] .sy-aihist::before,html[data-pro-theme="notebook"] .pp-hero::before{content:'';position:absolute;top:-11px;left:50%;width:84px;height:22px;transform:translateX(-50%) rotate(-3deg);background:repeating-linear-gradient(135deg,rgba(255,79,154,.55) 0 7px,rgba(255,255,255,.35) 7px 14px);border:1px solid rgba(28,36,85,.15);box-shadow:0 1px 2px rgba(0,0,0,.12);z-index:5;pointer-events:none}
+html[data-pro-theme="notebook"] .sy-aihist::before{background:repeating-linear-gradient(135deg,rgba(20,184,138,.55) 0 7px,rgba(255,255,255,.35) 7px 14px);transform:translateX(-50%) rotate(2deg)}
+html[data-pro-theme="notebook"] .pp-hero::before{left:24px;transform:rotate(-5deg);background:repeating-linear-gradient(135deg,rgba(245,163,0,.6) 0 7px,rgba(255,255,255,.35) 7px 14px)}
+/* empty states: a tilted sticky note instead of a dashed box */
+html[data-pro-theme="notebook"] .empty-ic{border:2px solid var(--border)!important;border-style:solid!important;background:var(--nb-hi);color:#1C2455!important;transform:rotate(-5deg);box-shadow:var(--nb-shadow-sm);border-radius:4px!important}
+html[data-pro-theme="notebook"] .empty-state .font-display{font-size:20px!important}
+/* notes become sticky notes in rotating pastels */
+html[data-pro-theme="notebook"] .card.note-jump{border:2px solid var(--border)!important;border-radius:4px 4px 14px 4px!important;box-shadow:var(--nb-shadow-sm)!important;background:#FFF3B8!important;color:#1C2455}
+html[data-pro-theme="notebook"] .card.note-jump *{color:inherit}
+html[data-pro-theme="notebook"] .card.note-jump:nth-child(4n+1){transform:rotate(-1deg)}
+html[data-pro-theme="notebook"] .card.note-jump:nth-child(4n+2){background:#FFD6E8!important;transform:rotate(.8deg)}
+html[data-pro-theme="notebook"] .card.note-jump:nth-child(4n+3){background:#D3F5E6!important;transform:rotate(-.6deg)}
+html[data-pro-theme="notebook"] .card.note-jump:nth-child(4n+4){background:#DCE6FF!important;transform:rotate(1deg)}
+/* less pink text on selected options */
+html[data-pro-theme="notebook"] button[data-reading-mode].active,html[data-pro-theme="notebook"] button[data-theme-btn].active{color:var(--text)!important}
+html[data-pro-theme="notebook"] .card.note-jump,html[data-pro-theme="notebook"] .card.note-jump *{color:#1C2455!important}
+html[data-pro-theme="notebook"] .card.note-jump [style*="background:var(--surface-2)"]{background:rgba(255,255,255,.65)!important}
+html[data-pro-theme="notebook"][data-theme="dark"] .pp-card .pp-subj.on,html[data-pro-theme="notebook"][data-theme="dark"] .pp-card .pp-ch.on{color:var(--text)!important}

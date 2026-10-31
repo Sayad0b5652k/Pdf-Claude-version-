@@ -658,8 +658,8 @@ export function renderBookCards(files, wide){
 }
 
 export function emptyState(iconName,title,sub){
-  return `<div style="text-align:center; padding:50px 20px; color:var(--text-dim);">
-    <div style="width:64px; height:64px; margin:0 auto 16px; border:1.5px dashed var(--border); border-radius: var(--radius-md); display:flex; align-items:center; justify-content:center; color:var(--text-faint);">
+  return `<div class="empty-state" style="text-align:center; padding:50px 20px; color:var(--text-dim);">
+    <div class="empty-ic" style="width:64px; height:64px; margin:0 auto 16px; border:1.5px dashed var(--border); border-radius: var(--radius-md); display:flex; align-items:center; justify-content:center; color:var(--text-faint);">
       ${window.icon(iconName,'icon icon-lg')}
     </div>
     <div class="font-display" style="font-size:17px; color:var(--text); margin-bottom:4px;">${title}</div>
