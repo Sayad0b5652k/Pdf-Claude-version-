@@ -3321,10 +3321,12 @@ export async function runOCROnPage(pageNum, canvas, btnEl){
     const { data } = await worker.recognize(canvas.toDataURL('image/png'));
     const text = (data.text||'').trim();
     await window.DB.put('ocrcache', {id:window.State.currentFile.id+'_'+pageNum, fileId:window.State.currentFile.id, page:pageNum, text});
-    if(window.State.searchIndex[window.State.currentFile.id]){
-      const p = window.State.searchIndex[window.State.currentFile.id].find(p=>p.page===pageNum);
-      if(p) p.text = text;
-    }
+    try {
+      const idx = window.State.searchIndex[window.State.currentFile.id];
+      const list = idx && (Array.isArray(idx) ? idx : idx.pages);
+      const p = list && list.find(p=>p.page===pageNum);
+      if(p) p.text = text.normalize('NFC').replace(/\s+/g,' ').toLowerCase();
+    } catch(e) {}
     btnEl.remove();
     showOCRResult(pageNum, text);
   }catch(err){

@@ -22,6 +22,7 @@ export const TEACHER_MODES = [
 export let activeTeacherMode = 'professional';
 export let examTargetMarks = 3; // 2, 3, or 5
 export let crossPdfActive = false;
+let webSearchOn = (() => { try { return localStorage.getItem('sayad_chat_web') === '1'; } catch (e) { return false; } })();
 export let isVoiceListening = false;
 export let speechRecognitionInstance = null;
 export let activeFileId = null;
@@ -248,8 +249,8 @@ export function getInitialWelcomeMessage(fileId) {
   return {
     role: 'assistant',
     text: isGlobal 
-      ? `### 👨‍🏫 Universal Academic Assistant\nConnected to your entire digital library. Query concepts across multiple textbooks, solve step-by-step problems, and evaluate exam answers.`
-      : `### 📚 Grounded in "${docName}"\n**Page ${curP} of ${totalP}** • Ready to break down derivations, explain complex theorems, or evaluate exam questions.`,
+      ? `### 👋 Hey! Kya padhna hai aaj?\nPoori library mein se sawaal poochh sakte ho — concept samjhana ho, problem solve karni ho, ya bas gup-shup. Main yahin hu.`
+      : `### 📚 "${docName}"\nPage ${curP} of ${totalP} khula hai. Kuch bhi poochho — is page ka matlab, kisi chapter ka summary, ya book ke kisi bhi topic ka jawab. Main book ke andar dhoondh ke page number ke saath bataunga.`,
     mode: 'professional',
     timestamp: Date.now()
   };
@@ -780,6 +781,32 @@ export async function detectChapterBoundaries(doc, activePage, requestedChapterN
 }
 
 // Full-Book Dynamic Semantic Index & Cross-PDF Universal RAG Engine
+
+const RETRIEVAL_STOP = new Set(('the a an and or of to in on for is are was were what which who how why when where this that these those with from about explain tell me give does did kya hai hain ka ki ke ko se me mein par aur batao bataiye samjhao samjha kaise kyun kyu kaun kaunsa yeh ye woh wo mujhe isko iske uska please chapter page book pdf').split(' '));
+
+/* Rank pages of a book/chapter by how well they match a question, using the in-document search index. */
+export async function findRelevantPages(query, fileId, doc, lo, hi, limit = 4) {
+  const terms = [...new Set(String(query).toLowerCase().normalize('NFC').split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 3 && !RETRIEVAL_STOP.has(t)))];
+  if (!terms.length || typeof window.buildSearchIndex !== 'function') return [];
+  if (window.State.currentFile?.id !== fileId || window.State.currentDoc !== doc) return [];
+  const job = window.buildSearchIndex();
+  const t0 = Date.now();
+  while (!job.done && job.pages.length < hi && Date.now() - t0 < 3500) await new Promise(r => setTimeout(r, 120));
+  const scored = [];
+  for (const p of job.pages) {
+    if (p.page < lo || p.page > hi || !p.text) continue;
+    let score = 0, distinct = 0;
+    for (const t of terms) {
+      let n = 0, from = 0;
+      while (n < 20) { const k = p.text.indexOf(t, from); if (k < 0) break; n++; from = k + t.length; }
+      if (n) { distinct++; score += 1 + Math.log2(1 + n); }
+    }
+    if (distinct) scored.push({ page: p.page, score: score * (1 + distinct / terms.length) });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
+}
+
 export async function getTeacherContext(options = {}, userQuery = '', chatHistory = []) {
   let fileRecord = window.State?.files?.find(f => f.id === activeFileId) || window.State?.currentFile;
   const isGlobal = activeFileId === 'global_chat' || (!fileRecord && !activeFileId);
@@ -1065,6 +1092,21 @@ export async function getTeacherContext(options = {}, userQuery = '', chatHistor
       }
       matchedPagesMap.set(item.page, { text: item.text, label });
     }
+  }
+
+  // Keyword retrieval: the pages that actually talk about what was asked (the chapter/page picker alone
+  // only grabs start, current and end pages, so answers from the middle of a long chapter were missed).
+  if (doc && userQuery && userQuery.trim().length > 3 && !targetIntextNum) {
+    try {
+      const lo = selectedScope === 'book' ? 1 : Math.max(1, boundaries?.startPage || 1);
+      const hi = selectedScope === 'book' ? totalPages : Math.min(totalPages, boundaries?.endPage || totalPages);
+      const hits = await findRelevantPages(userQuery, activeFileId, doc, lo, hi, 4);
+      for (const h of hits) {
+        if (matchedPagesMap.has(h.page)) continue;
+        const pTxt = await getPdfPageText(doc, h.page, activeFileId);
+        if (pTxt && pTxt.trim()) matchedPagesMap.set(h.page, { text: pTxt, label: '🔎 MATCHES THE QUESTION' });
+      }
+    } catch (e) { console.warn('retrieval skipped', e); }
   }
 
   // Always ensure anchor page & its immediate neighbor pages are seeded
@@ -1388,6 +1430,7 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
 
       <!-- Minimalist Docked Input Capsule with Voice Mic -->
       <div class="chat-input-capsule" id="teacher-input-wrapper">
+        <button class="btn btn-icon" id="teacher-web-btn" title="Web search: off" aria-pressed="false" style="display:none; width:32px; height:32px; border-radius:50%; background:transparent; border:none; color:var(--text-dim); flex-shrink:0; align-items:center; justify-content:center; font-size:16px;">🌐</button>
         <button class="btn btn-icon" id="teacher-input-mic-btn" title="Voice Input (Hindi / English)" style="width:32px; height:32px; border-radius:50%; background:transparent; border:none; color:var(--text-dim); flex-shrink:0; display:flex; align-items:center; justify-content:center;">
           ${window.icon('mic','icon icon-sm')}
         </button>
@@ -1413,6 +1456,26 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
   const customToggle = document.getElementById('teacher-custom-toggle');
   const inputMicBtn = document.getElementById('teacher-input-mic-btn');
   const inputWrapper = document.getElementById('teacher-input-wrapper');
+
+  // Live web search toggle (only offered when the server has a Tavily / Firecrawl key).
+  const webBtn = document.getElementById('teacher-web-btn');
+  if (webBtn) {
+    const paintWeb = () => {
+      webBtn.title = 'Web search: ' + (webSearchOn ? 'on — answers use live results' : 'off');
+      webBtn.setAttribute('aria-pressed', String(webSearchOn));
+      webBtn.style.background = webSearchOn ? 'var(--accent-soft)' : 'transparent';
+      webBtn.style.boxShadow = webSearchOn ? '0 0 0 1.5px var(--accent) inset' : 'none';
+    };
+    fetch('/api/web/status').then(r => r.ok ? r.json() : null).then(d => {
+      if (d && d.enabled) { webBtn.style.display = 'flex'; paintWeb(); }
+    }).catch(() => {});
+    webBtn.onclick = () => {
+      webSearchOn = !webSearchOn;
+      try { localStorage.setItem('sayad_chat_web', webSearchOn ? '1' : '0'); } catch (e) {}
+      paintWeb();
+      if (window.toast) window.toast(webSearchOn ? 'Web search ON — live results use honge' : 'Web search OFF');
+    };
+  }
 
   if (inputEl && inputWrapper) {
     inputEl.onfocus = () => { inputWrapper.style.borderColor = 'var(--accent)'; };
@@ -1993,6 +2056,17 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
     return s.slice(0, 26);
   };
 
+  // Chips written by the model for this exact conversation.
+  function renderFollowupChips(list) {
+    const bar = document.getElementById('chat-quick-chips-bar');
+    if (!bar || !list.length) return;
+    bar.innerHTML = list.map(q => `<button class="chat-quick-chip" data-query="${window.escapeHtml(q)}" style="white-space:nowrap; flex-shrink:0;"><span>${window.escapeHtml(q)}</span></button>`).join('');
+    bar.scrollLeft = 0;
+    bar.querySelectorAll('.chat-quick-chip').forEach(chip => {
+      chip.onclick = () => { const q = chip.dataset.query; if (q && inputEl) { inputEl.value = q; sendUserMessage(); } };
+    });
+  }
+
   function updateDynamicQuickChips(detectedTopic) {
     const bar = document.getElementById('chat-quick-chips-bar');
     if (!bar) return;
@@ -2282,7 +2356,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         detectedChapterType: ctx.detectedChapterType || 'Chapter',
         chapterStartPage: ctx.startPage,
         chapterEndPage: ctx.endPage,
-        needsClarification: Boolean(ctx.needsClarification)
+        needsClarification: Boolean(ctx.needsClarification),
+        webSearch: webSearchOn
       };
 
       // 1. True Real-Time Word-By-Word Streaming Mode (SSE)
@@ -2367,6 +2442,15 @@ Provide the complete academic answer now:`;
         }
       }
 
+      // Pull the model's suggested follow-ups out of the reply (they become the chips under the chat).
+      let followups = [];
+      {
+        const m = replyText.match(/\[\[\s*FOLLOWUPS\s*:([^\]]*)\]\]/i);
+        if (m) followups = m[1].split('|').map(x => x.trim()).filter(x => x.length > 2 && x.length < 70).slice(0, 3);
+        replyText = replyText.replace(/\s*\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]?\s*$/i, '').replace(/\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]/gi, '').trim();
+      }
+      window.__lastFollowups = followups;
+
       if (!replyText) {
         replyText = `Mujhe aapki request process karne me thodi problem aayi. Kripya apna sawaal dobara poochhein ya question yahan paste karein, main turant madad karunga!`;
       }
@@ -2430,8 +2514,13 @@ Provide the complete academic answer now:`;
 
     // Dynamically refresh quick chips with contextually relevant follow-up suggestions
     try {
-      const candidateTopic = cleanSubjectForChips(userText) || lastKnownSubject;
-      if (candidateTopic) updateDynamicQuickChips(candidateTopic);
+      const fu = window.__lastFollowups || [];
+      window.__lastFollowups = [];
+      if (fu.length) renderFollowupChips(fu);
+      else {
+        const candidateTopic = cleanSubjectForChips(userText) || lastKnownSubject;
+        if (candidateTopic) updateDynamicQuickChips(candidateTopic);
+      }
     } catch(e) {}
   }
 
@@ -2721,3 +2810,4 @@ window.getTeacherContext = getTeacherContext;
 window.loadTeacherChatHistory = loadTeacherChatHistory;
 window.saveTeacherChatHistory = saveTeacherChatHistory;
 window.clearTeacherChatHistory = clearTeacherChatHistory;
+window.findRelevantPages = findRelevantPages;

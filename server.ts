@@ -921,6 +921,74 @@ function extractAcademicSubject(rawQuery: string, chatHistory?: any[], docTitle?
   return clean || "";
 }
 
+
+/* ---------- Live web search (keys come from server env / AI Studio Secrets, never from the client) ---------- */
+function webProviders() {
+  const tavily = !!process.env.TAVILY_API_KEY;
+  const firecrawl = !!process.env.FIRECRAWL_API_KEY;
+  return { tavily, firecrawl, any: tavily || firecrawl };
+}
+function looksTimeSensitive(q: string): boolean {
+  return /\b(latest|aaj|abhi|filhaal|current(?:ly)?|today|tonight|yesterday|news|recent(?:ly)?|trending|breaking|live|price|rate|score|result|results|election|who\s+is\s+the\s+(?:current|new)|is\s+saal|this\s+(?:year|week|month)|202[5-9])\b/i.test(q || "");
+}
+type WebItem = { title: string; url: string; content: string };
+async function fetchJsonWithTimeout(url: string, init: any, ms: number): Promise<any> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { ...init, signal: ctrl.signal });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+async function runWebSearch(question: string, chatHistory: any[]): Promise<{ items: WebItem[] }> {
+  const pv = webProviders();
+  const items: WebItem[] = [];
+  const urlMatch = (question || "").match(/https?:\/\/[^\s)>\]]+/i);
+  // A pasted link: read that page.
+  if (urlMatch && pv.firecrawl) {
+    try {
+      const d = await fetchJsonWithTimeout("https://api.firecrawl.dev/v1/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
+        body: JSON.stringify({ url: urlMatch[0], formats: ["markdown"], onlyMainContent: true }),
+      }, 15000);
+      const md = d?.data?.markdown || "";
+      if (md) items.push({ title: d?.data?.metadata?.title || urlMatch[0], url: urlMatch[0], content: md.slice(0, 6000) });
+    } catch (e: any) { console.warn("Firecrawl scrape failed:", e?.message); }
+  }
+  // A follow-up like "aur uska price?" should search for the topic, so prepend the last student message.
+  let q = (question || "").replace(/https?:\/\/\S+/gi, " ").trim();
+  if (q.split(/\s+/).length < 4 && Array.isArray(chatHistory)) {
+    const prev = [...chatHistory].reverse().find((m: any) => m?.role === "user" && m.text);
+    if (prev) q = `${String(prev.text).slice(0, 120)} ${q}`;
+  }
+  q = q.slice(0, 300);
+  if (q.length > 3) {
+    if (pv.tavily) {
+      try {
+        const d = await fetchJsonWithTimeout("https://api.tavily.com/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.TAVILY_API_KEY}` },
+          body: JSON.stringify({ query: q, max_results: 5, search_depth: "basic", include_answer: false, topic: looksTimeSensitive(q) ? "news" : "general" }),
+        }, 9000);
+        for (const r of d?.results || []) if (r?.url) items.push({ title: r.title || r.url, url: r.url, content: String(r.content || "").slice(0, 900) });
+      } catch (e: any) { console.warn("Tavily failed:", e?.message); }
+    }
+    if (items.length < 2 && pv.firecrawl) {
+      try {
+        const d = await fetchJsonWithTimeout("https://api.firecrawl.dev/v1/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
+          body: JSON.stringify({ query: q, limit: 5 }),
+        }, 12000);
+        for (const r of d?.data || []) if (r?.url) items.push({ title: r.title || r.url, url: r.url, content: String(r.description || r.markdown || "").slice(0, 900) });
+      } catch (e: any) { console.warn("Firecrawl search failed:", e?.message); }
+    }
+  }
+  return { items: items.slice(0, 6) };
+}
+
 async function fetchLiveInternetGrounding(query: string): Promise<string> {
   if (!query || query.trim().length < 4) return "";
   // Do NOT search internet on casual greetings or conversational pleasantries
@@ -2132,6 +2200,8 @@ Return ONLY a valid raw JSON object with this exact structure:
   });
 
   // S.A.Y.A.D. AI - Intelligent, Conversational, and Document-Aware Super AI
+  app.get("/api/web/status", (_req, res) => { const p = webProviders(); res.json({ tavily: p.tavily, firecrawl: p.firecrawl, enabled: p.any }); });
+
   app.post("/api/ai/hybrid-tutor", async (req, res) => {
     try {
       const {
@@ -2153,12 +2223,15 @@ Return ONLY a valid raw JSON object with this exact structure:
         detectedChapterType,
         chapterStartPage,
         chapterEndPage,
-        needsClarification
+        needsClarification,
+        webSearch
       } = req.body;
 
       if (!userQuestion) {
         return res.status(400).json({ error: "Missing userQuestion" });
       }
+      let webSourcesMd = "";
+      const finishReply = (t: string) => sanitizeAIResponse(t) + webSourcesMd;
 
       const hasChatHistory = Array.isArray(chatHistory) && chatHistory.length > 0;
       const lastAssistantMsg = hasChatHistory ? [...chatHistory].reverse().find((m: any) => m && m.role === 'assistant' && m.text) : null;
@@ -2175,7 +2248,7 @@ Return ONLY a valid raw JSON object with this exact structure:
       // If user asks to summarize/teach without explicit context, let Gemini answer with whatever chapter/document context is provided.
 
       // 1. Check if user is sending a casual greeting / pleasantry
-      if (!isContinuationRequest && isGreeting(userQuestion, hasChatHistory)) {
+      if (false && isGreeting(userQuestion, hasChatHistory)) {
         let greetingReply = "";
         if (userLang === "Hinglish") {
           greetingReply = "Hey! Main bilkul badhiya hoon. Aap batao, aaj kya padhna ya discuss karna chahte ho — koi concept samajhna hai, questions solve karne hain, ya koi topic detail me dekhna hai?";
@@ -2203,7 +2276,7 @@ Return ONLY a valid raw JSON object with this exact structure:
 
       // 1.1. Check if user is sending an acknowledgement / pleasantry (e.g. "theek hai", "ok", "samajh gaya")
       // Do NOT hijack answers when user is responding to an active conversation thread or continuation prompt!
-      if (!isContinuationRequest && isConversationalPleasantry(userQuestion, hasContinuationPrompt, hasChatHistory)) {
+      if (false && isConversationalPleasantry(userQuestion, hasContinuationPrompt, hasChatHistory)) {
         let ackReply = "";
         if (userLang === "Hinglish") {
           ackReply = "Badhiya! Aur koi concept samajhna ho ya koi specific question/diagram dekhna ho, toh batao — main yahin hoon.";
@@ -2280,7 +2353,7 @@ MANDATORY RULES:
             );
 
             if (streamResult && streamedFlowchart.trim().length > 0) {
-              res.write(`data: ${JSON.stringify({ done: true, fullText: sanitizeAIResponse(streamedFlowchart.trim()), engine: "flowchart-generator" })}\n\n`);
+              res.write(`data: ${JSON.stringify({ done: true, fullText: finishReply(streamedFlowchart.trim()), engine: "flowchart-generator" })}\n\n`);
               return res.end();
             }
           }
@@ -2301,7 +2374,7 @@ MANDATORY RULES:
 
           if (flowchartResult) {
             return res.json({
-              text: sanitizeAIResponse(flowchartResult),
+              text: finishReply(flowchartResult),
               status: "success",
               engine: "flowchart-generator"
             });
@@ -2368,7 +2441,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
             const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(netImg.imageUrl)}&subject=${encodeURIComponent(netImg.title)}`;
             const combinedText = `![${netImg.title}](${proxyUrl})\n\n${explanation}`;
             return res.json({
-              text: sanitizeAIResponse(combinedText),
+              text: finishReply(combinedText),
               status: "success",
               engine: "authentic-educational-archive",
               hasImage: true
@@ -2391,7 +2464,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
               const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(imgResult.imageUrl)}&subject=${encodeURIComponent(resolvedSubject)}`;
               const combinedText = `![${imgResult.description || resolvedSubject}](${proxyUrl})\n\n${explanation}`;
               return res.json({
-                text: sanitizeAIResponse(combinedText),
+                text: finishReply(combinedText),
                 status: "success",
                 engine: "openrouter-gemini-image",
                 hasImage: true
@@ -2433,8 +2506,23 @@ ${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}
       const isDocQuery = isDocumentSpecificQuery(userQuestion, docTitle) || Boolean(docTitle && docTitle !== 'global_chat' && (chapterText || fullContext));
       const resolvedSubject = extractAcademicSubject(userQuestion, chatHistory, docTitle);
       const liveInternetGrounding = !isDocQuery ? await fetchLiveInternetGrounding(resolvedSubject || userQuestion) : "";
+      // Live web (Tavily / Firecrawl): when the student turns it on, asks about something current, or pastes a link.
+      let webResultsBlock = "";
+      try {
+        const wantsWeb = webSearch === true || looksTimeSensitive(userQuestion) || /https?:\/\/\S+/i.test(userQuestion);
+        if (wantsWeb && webProviders().any) {
+          const web = await runWebSearch(userQuestion, chatHistory);
+          if (web.items.length) {
+            webResultsBlock = web.items.map((r, i) => `[W${i + 1}] ${r.title} (${r.url})\n${r.content}`).join("\n\n");
+            webSourcesMd = "\n\n---\n**Sources:** " + web.items.map((r, i) => `[${i + 1}] [${r.title.slice(0, 60)}](${r.url})`).join(" · ");
+          }
+        }
+      } catch (webErr: any) { console.warn("Web search skipped:", webErr?.message); }
 
       const hybridPrompt = `You are an elite, state-of-the-art AI Super-Intelligence and Universal Academic Professor — operating with the exact intelligence, sharp intuition, and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5).
+
+### HOW YOU TALK (most important):
+You are a warm, sharp study partner chatting with a friend — not a lecture machine. Sound like a person: short natural sentences, light humour when it fits, no robotic headings on simple answers. Match the length to the question: a quick question gets a quick answer (2-5 lines); go deep, with structure, only when the student asks for depth or the topic needs it. Answer first, then add the one detail that matters. Occasionally end with a short, genuine follow-up question or a next step (not every time). If the student greets you or says thanks/ok, reply like a human would, using what you were just talking about. Remember everything said earlier in this chat and refer back to it naturally. If you are unsure or the book does not say, say so honestly instead of bluffing.
 
 ${persona ? `### ACTIVE PERSONA / STYLE:\n${persona}\n` : ''}
 ### CRITICAL: STRICT LANGUAGE & SCRIPT MIRRORING (CHATGPT / CLAUDE / GEMINI FEEL):
@@ -2460,9 +2548,9 @@ YOU MUST STRICTLY MIRROR THE STUDENT'S EXACT LANGUAGE AND SCRIPT:
 
 ### ABSOLUTE CONVERSATIONAL DIRECTIVES:
 
-1. **ZERO INTRODUCTORY FLUFF & ZERO PREAMBLES**:
-   - NEVER start responses with filler like: "Certainly!", "That's a great question!", "I'd be happy to explain...", "It seems you'd like to dive deeper...", or meta-commentary.
-   - Start IMMEDIATELY with the core substance and high-impact knowledge.
+1. **NO CANNED OPENERS**:
+   - Don't start with stock filler like "Certainly!", "That's a great question!" or "I'd be happy to explain...". A natural human lead-in ("Haan, dekho…", "Good one —", "Short answer:") is fine.
+   - Get to the substance fast.
    - When the student says "Detail me", "aur batao", "explain more", or asks a follow-up, jump DIRECTLY into the deeper breakdown without any filler.
 
 2. **EXTERNAL KNOWLEDGE & ZERO BOOK APOLOGIES (FOR GENERAL QUESTIONS)**:
@@ -2600,6 +2688,7 @@ The student signaled to continue ("${userQuestion}"):
 ${(chapterText || fullContext) ? `${chapterText || fullContext}` : '(General/External Academic Inquiry — Answer authoritatively using complete intelligence and verified internet grounding)'}
 
 ${liveInternetGrounding ? `### 🌐 LIVE VERIFIED INTERNET KNOWLEDGE & ENCYCLOPEDIC GROUNDING:\n${liveInternetGrounding}\n` : ''}
+${webResultsBlock ? `### 🌍 LIVE WEB RESULTS (fetched just now — newer than your training data):\n${webResultsBlock}\n\nWhen you use these, say so naturally and cite like [W1]. Prefer them over memory for anything time-sensitive (news, prices, scores, who currently holds a role). If they don't answer the question, say that plainly instead of guessing.\n` : ''}
 
 =======================================================
 ### 💬 ACTIVE MULTI-TURN CONVERSATION THREAD:
@@ -2620,20 +2709,22 @@ STUDENT INQUIRY:
    - Zero boilerplate, zero generic excuses — just clear, intelligent, transparent recovery!
 4. Strictly mirror the student's language (${userLang}).
 
-Provide the complete, direct, exhaustive high-intelligence answer now in ${userLang}:`;
+LAST LINE RULE (machine-read, never mention it): after your answer, on a new final line, write exactly [[FOLLOWUPS: q1 | q2 | q3]] where q1-q3 are three short (max 7 words) things the student would naturally ask next about THIS conversation, written as the student would type them in ${userLang}. Never skip this line, and put nothing after it.
+
+Now reply in ${userLang}, in a natural conversational voice, with only as much depth as the question deserves:`;
 
       // Specific user engine preference handling
       if ((preferredEngine === 'deepseek' || preferredEngine === 'openrouter-deepseek') && (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI)) {
         const orResult = await executeWithOpenRouter(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.25, "deepseek/deepseek-chat");
         if (orResult && orResult.text) {
-          return res.json({ text: sanitizeAIResponse(orResult.text), status: "success", engine: "deepseek-v3", provider: "openrouter" });
+          return res.json({ text: finishReply(orResult.text), status: "success", engine: "deepseek-v3", provider: "openrouter" });
         }
       }
 
       if ((preferredEngine === 'llama' || preferredEngine === 'openrouter-llama') && (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI)) {
         const orResult = await executeWithOpenRouter(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.25, "meta-llama/llama-3.3-70b-instruct");
         if (orResult && orResult.text) {
-          return res.json({ text: sanitizeAIResponse(orResult.text), status: "success", engine: "openrouter-llama-3.3-70b", provider: "openrouter" });
+          return res.json({ text: finishReply(orResult.text), status: "success", engine: "openrouter-llama-3.3-70b", provider: "openrouter" });
         }
       }
 
@@ -2646,12 +2737,22 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
         if (typeof res.flushHeaders === "function") res.flushHeaders();
 
         let streamedHybridText = "";
+        let holdTail = false;
+        let pendingTail = "";
         const streamResult = await executeWithGeminiPoolStream(
           'chat',
           hybridPrompt,
           (chunk) => {
             streamedHybridText += chunk;
-            res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+            // Never show the machine-read [[FOLLOWUPS: …]] line while streaming.
+            if (holdTail) return;
+            pendingTail += chunk;
+            const k = pendingTail.indexOf("[[");
+            let out = "";
+            if (k >= 0) { out = pendingTail.slice(0, k); holdTail = true; pendingTail = ""; }
+            else if (pendingTail.endsWith("[")) { out = pendingTail.slice(0, -1); pendingTail = "["; }
+            else { out = pendingTail; pendingTail = ""; }
+            if (out) res.write(`data: ${JSON.stringify({ chunk: out })}\n\n`);
           },
           {
             systemInstruction: `You are an elite, state-of-the-art AI Super-Intelligence operating with the exact intelligence, sharp intuition, and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Strictly match the student's language: Hinglish if they talk in Hinglish, Hindi if in Hindi, and English if in English.`,
@@ -2661,8 +2762,9 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
           }
         );
 
+        if (!holdTail && pendingTail) res.write(`data: ${JSON.stringify({ chunk: pendingTail })}\n\n`);
         if (streamResult && streamedHybridText.trim().length > 0) {
-          res.write(`data: ${JSON.stringify({ done: true, fullText: sanitizeAIResponse(streamedHybridText.trim()), engine: streamResult.model })}\n\n`);
+          res.write(`data: ${JSON.stringify({ done: true, fullText: finishReply(streamedHybridText.trim()), engine: streamResult.model })}\n\n`);
           return res.end();
         }
 
@@ -2674,7 +2776,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
           customKey,
         });
 
-        const fallbackText = sanitizeAIResponse(fallbackRes?.text || "");
+        const fallbackText = finishReply(fallbackRes?.text || "");
         if (fallbackText) {
           res.write(`data: ${JSON.stringify({ chunk: fallbackText })}\n\n`);
           res.write(`data: ${JSON.stringify({ done: true, fullText: fallbackText, engine: fallbackRes?.model })}\n\n`);
@@ -2686,7 +2788,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
           try {
             const groqReply = await executeWithGroq(hybridPrompt, "You are an elite academic professor.", 0.25);
             if (groqReply) {
-              const cleanGroq = sanitizeAIResponse(groqReply);
+              const cleanGroq = finishReply(groqReply);
               res.write(`data: ${JSON.stringify({ chunk: cleanGroq })}\n\n`);
               res.write(`data: ${JSON.stringify({ done: true, fullText: cleanGroq, engine: "groq-llama-3.3-70b" })}\n\n`);
               return res.end();
@@ -2699,7 +2801,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
           try {
             const orResult = await executeWithOpenRouter(hybridPrompt, "You are an elite academic professor.", 0.25);
             if (orResult && orResult.text) {
-              const cleanOr = sanitizeAIResponse(orResult.text);
+              const cleanOr = finishReply(orResult.text);
               res.write(`data: ${JSON.stringify({ chunk: cleanOr })}\n\n`);
               res.write(`data: ${JSON.stringify({ done: true, fullText: cleanOr, engine: "openrouter" })}\n\n`);
               return res.end();
@@ -2723,7 +2825,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
 
           if (result && result.text) {
             return res.json({
-              text: sanitizeAIResponse(result.text),
+              text: finishReply(result.text),
               status: "success",
               engine: result.model.startsWith("gemini-") ? result.model : `gemini-${result.model}`,
               keySlot: result.keyTag,
@@ -2744,7 +2846,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
         );
         if (orResult && orResult.text) {
           return res.json({
-            text: sanitizeAIResponse(orResult.text),
+            text: finishReply(orResult.text),
             status: "success",
             engine: `openrouter-${orResult.model.split('/').pop()}`,
             provider: "openrouter"
@@ -2756,7 +2858,7 @@ Provide the complete, direct, exhaustive high-intelligence answer now in ${userL
       if (process.env.GROQ_API_KEY) {
         const groqText = await executeWithGroq(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.3);
         if (groqText) {
-          return res.json({ text: sanitizeAIResponse(groqText), status: "success", engine: "groq-gpt-oss-120b" });
+          return res.json({ text: finishReply(groqText), status: "success", engine: "groq-gpt-oss-120b" });
         }
       }
 
