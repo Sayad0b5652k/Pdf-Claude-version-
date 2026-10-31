@@ -452,12 +452,7 @@ function scheduleSave() { clearTimeout(ps.saveT); ps.saveT = setTimeout(flushSav
 function flushSave() { clearTimeout(ps.saveT); const r = currentRec(); if (r) PaperStore.save(r); }
 
 /* ============================== RESULT ============================== */
-function resultHtml() {
-  const r = currentRec(); if (!r) { ps.screen = 'home'; return homeHtml(); }
-  const at = r.attempt; const self = mergedSelf(r);
-  const sc = C.scorePaper(r, at.answers, self);
-  const pct = sc.max ? Math.round((sc.got / sc.max) * 100) : 0;
-  const circ = 2 * Math.PI * 52;
+function resultRows(r, at) {
   const units = C.flattenUnits(r);
   const altById = {}; units.filter((u) => u.alt).forEach((u) => { altById[u.id.replace('o', '')] = u; });
   const rows = [];
@@ -471,6 +466,15 @@ function resultHtml() {
     const state = !unitHasAnswer(at.answers, u.id) ? 'skip' : isAuto ? (g > 0 ? 'ok' : 'bad') : 'written';
     rows.push({ u, u0, a, g, state, isAuto, flagged: !!at.flags[u0.qNo] });
   }
+  return rows;
+}
+function resultHtml() {
+  const r = currentRec(); if (!r) { ps.screen = 'home'; return homeHtml(); }
+  const at = r.attempt; const self = mergedSelf(r);
+  const sc = C.scorePaper(r, at.answers, self);
+  const pct = sc.max ? Math.round((sc.got / sc.max) * 100) : 0;
+  const circ = 2 * Math.PI * 52;
+  const rows = resultRows(r, at);
   const f = ps.filter;
   const shown = rows.filter((x) => f === 'all' || (f === 'wrong' && x.state === 'bad') || (f === 'skip' && x.state === 'skip') || (f === 'written' && !x.isAuto) || (f === 'flag' && x.flagged));
   const counts = { ok: rows.filter((x) => x.state === 'ok').length, bad: rows.filter((x) => x.state === 'bad').length, skip: rows.filter((x) => x.state === 'skip').length };
@@ -483,6 +487,7 @@ function resultHtml() {
     <div class="pp-secres">${Object.entries(sc.bySection).map(([k, s]) => `<div class="pp-sr"><span class="pp-pk">${esc(k)}</span><div class="pp-bar"><i style="width:${s.max ? Math.round((s.got / s.max) * 100) : 0}%"></i></div><span class="pp-srn">${marksStr(s.got)}/${marksStr(s.max)}</span></div>`).join('')}</div>
     ${writtenPending ? `<div class="pp-warn"><div><b>${writtenPending} written answer${writtenPending > 1 ? 's' : ''} not marked yet.</b> Mark them yourself against the scheme, or let the AI check them.</div><button class="btn btn-primary" data-act="aigrade" ${ps.busy ? 'disabled' : ''}>${ic('sparkle')} Check with AI</button></div>` : ''}
     <div class="pp-actions pp-actions3"><button class="btn btn-ghost" data-act="download">${ic('upload')} Download with my answers</button><button class="btn btn-ghost" data-act="attempt">${ic('rotateCcw')} Retry</button></div>
+    ${counts.bad + counts.skip ? `<button class="btn btn-primary pp-revbtn" data-act="revise">${ic('cards')} Make ${counts.bad + counts.skip} revision card${counts.bad + counts.skip > 1 ? 's' : ''} from my mistakes</button>` : ''}
     <div class="pp-filters no-scrollbar">${[['all', 'All'], ['wrong', 'Wrong'], ['skip', 'Skipped'], ['written', 'Written'], ['flag', 'Flagged']].map(([k, l]) => `<button class="pp-pre ${f === k ? 'on' : ''}" data-act="filter" data-v="${k}">${l}</button>`).join('')}</div>
     ${shown.map((x) => reviewCard(x, r, self)).join('') || '<div class="pp-empty"><small>Nothing in this filter.</small></div>'}
   </div></div>`;
@@ -560,6 +565,7 @@ async function onClick(e) {
     case 'resume': if (r) { r.status = 'queued'; ps.screen = 'progress'; await resumePaper(r); mount(); } return;
     case 'viewpaper': ps.screen = 'paper'; return mount();
     case 'download': return openDownload();
+    case 'revise': return makeRevisionCards();
     case 'attempt': return startAttempt();
     case 'result': ps.screen = 'result'; ps.filter = 'all'; return mount();
     case 'altsel': { const card = cardsOf(r)[ps.ci]; ps.altSel[card.no] = el.dataset.v; return mount(true); }
@@ -649,6 +655,23 @@ async function replaceQuestion(no) {
   ps.replacing.delete(no); ps.busy = null; mount(true);
 }
 
+/* ------------------------------ Revision cards ------------------------------ */
+async function makeRevisionCards() {
+  const r = currentRec(); if (!r?.attempt) return;
+  const rows = resultRows(r, r.attempt).filter((x) => x.state === 'bad' || x.state === 'skip');
+  if (!rows.length) return toast('No mistakes to revise. Nice!');
+  let n = 0;
+  for (const x of rows) {
+    const q = x.u.q;
+    const opts = Array.isArray(q.options) ? '\n' + q.options.map((o, i) => `${'ABCD'[i]}. ${o}`).join('\n') : '';
+    const ans = Array.isArray(q.options) && typeof q.correct === 'number' ? `${'ABCD'[q.correct]}. ${q.options[q.correct]}` : (q.answer || '');
+    const page = (q.source && q.source.page) || q.page || 1;
+    await window.DB.put('flashcards', { id: `pp-${r.id}-${x.u.id}`, fileId: r.fileId || 'global', page, category: 'Paper mistakes', front: q.q + opts, back: String(ans) + (q.explanation ? `\n\n${q.explanation}` : ''), due: Date.now(), stability: 0.5, difficulty: 5, reps: 0, lapses: 1, createdAt: Date.now() });
+    n++;
+  }
+  toast(`Added ${n} card${n > 1 ? 's' : ''} to Review.`);
+}
+
 /* ------------------------------ Download ------------------------------ */
 function openDownload() {
   const r = currentRec(); if (!r) return;
@@ -659,8 +682,8 @@ function openDownload() {
     ${dlRow('mine', 'My answers & result', attempted ? 'Your written answers with marks' : 'Attempt the paper first', false, !attempted)}
     ${dlRow('refs', 'Book page references', 'Adds chapter, page and source line in the marking scheme', false)}
     ${dlRow('roll', 'Name and roll number line', 'Printed under the paper heading', true)}
-    <button class="btn btn-primary pp-dlgo" id="pp-dlgo">${ic('upload')} Download</button>
-    <div class="pp-dln">In the print window choose <b>Save as PDF</b>.</div></div>`);
+    <button class="btn btn-primary pp-dlgo" id="pp-dlgo">${ic('upload')} Save as PDF</button>
+    <div class="pp-dln">A print window opens. Set the printer to <b>Save as PDF</b>, then tap Save. Hindi text and fonts stay intact.</div></div>`);
   const state = { paper: true, key: false, mine: false, refs: false, roll: true };
   document.querySelectorAll('.pp-dl [data-dl]').forEach((row) => {
     row.onclick = () => { if (row.dataset.disabled) return; const k = row.dataset.dl; state[k] = !state[k]; row.querySelector('.pp-sw').classList.toggle('on', state[k]); row.setAttribute('aria-checked', state[k]); };

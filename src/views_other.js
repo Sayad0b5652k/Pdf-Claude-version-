@@ -1274,8 +1274,10 @@ export async function renderNotesView(preserveScroll = true){
             </div>
           </div>
         </div>
-        <div class="font-mono" style="padding:4px 10px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); font-size:11px; font-weight:700;">
+        <div style="display:flex; align-items:center;"><div class="font-mono" style="padding:4px 10px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); font-size:11px; font-weight:700;">
           ${notes.length} Saved
+        </div>
+        ${notes.length ? `<button id="notes-export" class="btn btn-ghost" style="padding:5px 10px; font-size:11.5px; border-radius:10px; gap:5px; margin-left:8px;">${window.icon('upload','icon icon-xs')} Export</button>` : ''}
         </div>
       </div>
 
@@ -1308,6 +1310,24 @@ export async function renderNotesView(preserveScroll = true){
   </div>
   ${window.bottomNavHtml('notes')}`;
   window.bindBottomNav();
+
+  const expBtn = document.getElementById('notes-export');
+  if (expBtn) expBtn.onclick = () => {
+    const groups = {};
+    for (const n of notes) { const f = fileMap[n.fileId]; const k = f ? f.name : 'General'; (groups[k] ||= []).push(n); }
+    let md = '# My Study Notes\n\n_Exported from S.A.Y.A.D. on ' + new Date().toLocaleDateString() + '_\n';
+    for (const [book, list] of Object.entries(groups)) {
+      md += `\n## ${book}\n`;
+      for (const n of list.sort((a, b) => (a.page || 0) - (b.page || 0))) {
+        const info = getNoteCategoryInfo(n.kind);
+        md += `\n### ${info.label} · page ${n.page || '-'}\n${(n.content || n.text || '').trim()}\n`;
+      }
+    }
+    const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
+    const a = document.createElement('a'); a.href = url; a.download = 'sayad-notes.md'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    window.toast('Notes exported');
+  };
 
   document.querySelectorAll('.note-filter').forEach(el => {
     el.onclick = () => {

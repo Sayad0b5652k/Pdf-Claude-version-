@@ -416,6 +416,7 @@ export function renderAnalyticsCard(files, readingStats) {
         <div style="font-size:12px; font-weight:500; color:var(--text-dim, #637066); margin-top:3px;">
           Weekly Activity &amp; Memory Overview
         </div>
+        ${readingStats.streak >= 3 ? `<span class="streak-sticker">🔥 ${readingStats.streak}-day streak${readingStats.streak >= 7 ? ' · Perfect week!' : ''}</span>` : ''}
       </div>
 
       <!-- 4 Metric Cards in 1 Row -->
