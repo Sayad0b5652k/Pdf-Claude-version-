@@ -714,7 +714,6 @@ export function buildSearchIndex(onProgress) {
         const legacy = pageIsLegacyHindi(raw);
         if (legacy) raw = tc.items.map((it) => fixLegacyHindi(it.str, { pageLegacy: true, force: true })).join(' ');
         job.pages.push({ page: i, text: normSearch(raw), legacy });
-        page.cleanup && page.cleanup();
       } catch (e) { job.pages.push({ page: i, text: '', legacy: false }); }
       if (i % 4 === 0) { job.listeners.forEach((fn) => { try { fn(job); } catch (e) {} }); await new Promise((r) => setTimeout(r, 0)); }
     }

@@ -3037,6 +3037,12 @@ export function getSpanRects(pe){
 }
 window.getSpanRects = getSpanRects;
 
+// Real top of a page inside the scroller. The layout estimate in pe._top can drift (gap/padding differ per
+// device), and after a long scroll or a chapter jump that drift made far pages look "out of view" so they never painted.
+function pageTopOf(pe){
+  if(pe.wrap && pe.wrap.offsetParent !== null) return pe.wrap.offsetTop;   // laid out: trust the browser
+  return pe._top !== undefined ? pe._top : 0;                              // hidden (single-page mode): estimate
+}
 function pumpRenderQueue(){
   while(activeRenders < maxParallelRenders && renderQueue.length){
     const n = renderQueue.shift();
@@ -3066,7 +3072,7 @@ export function setupVirtualRender(){
   const wanted = [];
   for(const [num, pe] of Object.entries(pageEls)){
     const n = Number(num);
-    const relTop = pe._top !== undefined ? pe._top : (pe.wrap ? pe.wrap.offsetTop : 0);
+    const relTop = pageTopOf(pe);
     const relHeight = pe._height || (pe.nativeVp ? pe.nativeVp.height * pe.scale : 800);
     const relBottom = relTop + relHeight;
 
@@ -3399,7 +3405,7 @@ export function updateCurrentPageFromScroll(){
   const mid = scrollEl.scrollTop + scrollEl.clientHeight*0.35;
   let closest = window.State.currentPage;
   for(const [num, pe] of Object.entries(pageEls)){
-    const top = pe._top !== undefined ? pe._top : (pe.wrap ? pe.wrap.offsetTop : 0);
+    const top = pageTopOf(pe);
     if(top <= mid) closest = Number(num);
   }
   if(closest !== window.State.currentPage){
