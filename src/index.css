@@ -7406,8 +7406,6 @@ html[data-pro-theme="notebook"] .toc-item.toc-item-active{background:var(--nb-hi
 html[data-pro-theme="notebook"] .toc-item.toc-item-active *{color:#1C2455!important}
 html[data-pro-theme="notebook"] .toc-item.toc-item-active .toc-page-badge{background:#fff!important;border-color:#1C2455!important}
 .pp-revbtn{width:100%;margin:0 0 14px;padding:13px}
-.streak-sticker{display:inline-block;margin-top:8px;padding:3px 10px;border-radius:var(--pill-r,8px);background:var(--accent-soft);color:var(--accent);border:1px solid var(--accent);font-size:11.5px;font-weight:700}
-html[data-pro-theme="notebook"] .streak-sticker{background:var(--nb-hi);color:#1C2455;border:2px solid var(--border);box-shadow:var(--nb-shadow-sm);transform:rotate(-2deg);font-family:var(--nb-display)}
 
 /* ---- in-document search: result list, on-page highlights, match bar ---- */
 .sx-hl{position:absolute;background:rgba(255,196,0,.38);border-radius:3px;mix-blend-mode:multiply;pointer-events:none}
