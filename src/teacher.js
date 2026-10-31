@@ -22,6 +22,7 @@ export const TEACHER_MODES = [
 export let activeTeacherMode = 'professional';
 export let examTargetMarks = 3; // 2, 3, or 5
 export let crossPdfActive = false;
+let quizActive = false;
 let webSearchOn = (() => { try { return localStorage.getItem('sayad_chat_web') === '1'; } catch (e) { return false; } })();
 export let isVoiceListening = false;
 export let speechRecognitionInstance = null;
@@ -1408,6 +1409,9 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
           <span>📖 Summarise Chapter</span>
         </button>
         ` : ''}
+        <button class="chat-quick-chip" data-query="Quiz me — 5 questions from this book, one at a time">
+          <span>🧠 Quiz me</span>
+        </button>
         <button class="chat-quick-chip" data-query="⚡ Detail me samjhao — key concepts, causes, aur deep breakdown ke saath">
           <span>⚡ Detail me samjhao</span>
         </button>
@@ -2057,12 +2061,24 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
   };
 
   // Chips written by the model for this exact conversation.
-  function renderFollowupChips(list) {
+  function renderFollowupChips(list, cards) {
     const bar = document.getElementById('chat-quick-chips-bar');
-    if (!bar || !list.length) return;
-    bar.innerHTML = list.map(q => `<button class="chat-quick-chip" data-query="${window.escapeHtml(q)}" style="white-space:nowrap; flex-shrink:0;"><span>${window.escapeHtml(q)}</span></button>`).join('');
+    if (!bar || (!list.length && !(cards && cards.length))) return;
+    const cardChip = cards && cards.length ? `<button class="chat-quick-chip" id="quiz-cards-chip" style="white-space:nowrap; flex-shrink:0; border-color:var(--accent); color:var(--accent); font-weight:700;"><span>🃏 Add ${cards.length} card${cards.length > 1 ? 's' : ''} to Review</span></button>` : '';
+    bar.innerHTML = cardChip + list.map(q => `<button class="chat-quick-chip" data-query="${window.escapeHtml(q)}" style="white-space:nowrap; flex-shrink:0;"><span>${window.escapeHtml(q)}</span></button>`).join('');
     bar.scrollLeft = 0;
-    bar.querySelectorAll('.chat-quick-chip').forEach(chip => {
+    const cc = bar.querySelector('#quiz-cards-chip');
+    if (cc) cc.onclick = async () => {
+      cc.disabled = true;
+      let n = 0;
+      for (const c of cards) {
+        await window.DB.put('flashcards', { id: `qz-${Date.now()}-${n}`, fileId: activeFileId || 'global', page: window.State?.currentPage || 1, category: 'Quiz mistakes', front: c.front, back: c.back, due: Date.now(), stability: 0.5, difficulty: 5, reps: 0, lapses: 1, createdAt: Date.now() });
+        n++;
+      }
+      window.toast && window.toast(`Added ${n} card${n > 1 ? 's' : ''} to Review.`);
+      cc.remove();
+    };
+    bar.querySelectorAll('.chat-quick-chip[data-query]').forEach(chip => {
       chip.onclick = () => { const q = chip.dataset.query; if (q && inputEl) { inputEl.value = q; sendUserMessage(); } };
     });
   }
@@ -2328,6 +2344,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         systemPersonaInstruction = 'You are an elite AI Super-Intelligence operating with the exact conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Direct, sharp, natural, and intellectually deep. NEVER greet or give canned introductory phrases. Jump immediately into the core substance.';
       }
 
+      if (!quizActive && /\b(quiz|test\s+me|mcq\s+(?:lo|le|do)|sawal\s+poochho|questions?\s+poochho)\b/i.test(userText)) quizActive = true;
       const recentConvo = chatMessages.slice(-6, -1).map(m => `${m.role === 'user' ? 'Student' : 'AI Tutor'}: ${m.text}`).join('\n\n');
 
       const streamMode = typeof window.getStreamingMode === 'function' ? window.getStreamingMode() : (window.State?.streamingMode || 'sse');
@@ -2357,7 +2374,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         chapterStartPage: ctx.startPage,
         chapterEndPage: ctx.endPage,
         needsClarification: Boolean(ctx.needsClarification),
-        webSearch: webSearchOn
+        webSearch: webSearchOn,
+        quizMode: quizActive
       };
 
       // 1. True Real-Time Word-By-Word Streaming Mode (SSE)
@@ -2450,6 +2468,16 @@ Provide the complete academic answer now:`;
         replyText = replyText.replace(/\s*\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]?\s*$/i, '').replace(/\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]/gi, '').trim();
       }
       window.__lastFollowups = followups;
+      {
+        const cards = [];
+        replyText = replyText.replace(/\[\[\s*CARD\s*:([^\]]*?)\]\]/gi, (_m, body) => {
+          const parts = body.split('=>');
+          if (parts.length >= 2) cards.push({ front: parts[0].trim(), back: parts.slice(1).join('=>').trim() });
+          return '';
+        }).replace(/\n{3,}/g, '\n\n').trim();
+        window.__quizCards = cards;
+        if (quizActive && (cards.length || /final\s+score\s*[:\-]?\s*\d+\s*\/\s*\d+/i.test(replyText))) quizActive = false;
+      }
 
       if (!replyText) {
         replyText = `Mujhe aapki request process karne me thodi problem aayi. Kripya apna sawaal dobara poochhein ya question yahan paste karein, main turant madad karunga!`;
@@ -2516,7 +2544,10 @@ Provide the complete academic answer now:`;
     try {
       const fu = window.__lastFollowups || [];
       window.__lastFollowups = [];
-      if (fu.length) renderFollowupChips(fu);
+      const qc = window.__quizCards || [];
+      window.__quizCards = [];
+      if (qc.length) renderFollowupChips(fu, qc);
+      else if (fu.length) renderFollowupChips(fu);
       else {
         const candidateTopic = cleanSubjectForChips(userText) || lastKnownSubject;
         if (candidateTopic) updateDynamicQuickChips(candidateTopic);

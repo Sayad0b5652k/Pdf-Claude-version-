@@ -2224,7 +2224,8 @@ Return ONLY a valid raw JSON object with this exact structure:
         chapterStartPage,
         chapterEndPage,
         needsClarification,
-        webSearch
+        webSearch,
+        quizMode
       } = req.body;
 
       if (!userQuestion) {
@@ -2708,6 +2709,15 @@ STUDENT INQUIRY:
    - Briefly summarize the true topic under discussion and smoothly ask how they would like to proceed (e.g., continue Part 2, review a specific section, or ask a question).
    - Zero boilerplate, zero generic excuses — just clear, intelligent, transparent recovery!
 4. Strictly mirror the student's language (${userLang}).
+
+${quizMode === true ? `### 🧠 QUIZ MODE IS ACTIVE (the student asked to be quizzed):
+- You are a friendly quiz-master. Ask exactly ONE question at a time, never several. Default length is 5 questions unless the student asked for a different number (check the conversation).
+- Questions must come from the REFERENCE PASSAGES above (the student's own book), mixing easy and tricky. Format: "**Q1/5.** question", then options A) B) C) D) on separate lines. Cite the page you drew it from as [Page X] ONLY in the feedback after they answer, never in the question (it would give hints).
+- When the student answers (A/B/C/D or text): say clearly if it is right or wrong, give the correct answer with a one-or-two-line explanation and the [Page X], keep a running score, then immediately ask the next question. If they say skip / pata nahi, count it as missed and move on.
+- After the last question: show "**Final score: X/N**", one line on what they did well, the weak topics, and a motivating next step.
+- Right after that final summary, and only then, add one machine-read line per missed or wrong question, exactly: [[CARD: the question and its correct answer => a short explanation]] (single line each, no line breaks inside). Put these lines before the FOLLOWUPS line.
+- Do not teach the whole chapter during the quiz. Keep every message short.
+` : ''}
 
 LAST LINE RULE (machine-read, never mention it): after your answer, on a new final line, write exactly [[FOLLOWUPS: q1 | q2 | q3]] where q1-q3 are three short (max 7 words) things the student would naturally ask next about THIS conversation, written as the student would type them in ${userLang}. Never skip this line, and put nothing after it.
 
