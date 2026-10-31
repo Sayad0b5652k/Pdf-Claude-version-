@@ -3212,6 +3212,7 @@ async function renderPageNow(num, pe, token){
     pe.rendered = true;
     pe.rendering = false;
     pe._renderPromise = null;
+    try { window.onPageRendered && window.onPageRendered(num); } catch (e) {}
     // A phone that needs long to paint a page (slow CPU, 6GB RAM report) switches itself to one page at a time.
     if (maxParallelRenders > 1) {
       slowRenderTimes.push(performance.now() - tStart);

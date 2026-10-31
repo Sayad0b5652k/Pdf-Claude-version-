@@ -689,69 +689,208 @@ export async function runGlobalSearch(q){
 /* ============================================================
    IN-DOC SEARCH
    ============================================================ */
-export async function buildSearchIndex(){
+/* Search text: lower-case, one space between words, no zero-width marks. */
+function normSearch(t) {
+  return String(t || '').normalize('NFC').replace(/[​-‍﻿­]/g, '').replace(/\s+/g, ' ').toLowerCase();
+}
+function escRe(x) { return x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+/* The index fills in the background (a few pages per tick) so the reader never freezes. Searching works on what is ready. */
+export function buildSearchIndex(onProgress) {
   const fid = window.State.currentFile.id;
-  if(window.State.searchIndex[fid]) return window.State.searchIndex[fid];
-  const pages = [];
-  for(let i=1;i<=window.State.numPages;i++){
-    const page = await window.State.currentDoc.getPage(i);
-    const tc = await page.getTextContent();
-    pages.push({page:i, text: tc.items.map(it=>it.str).join(' ')});
-  }
-  window.State.searchIndex[fid] = pages;
-  return pages;
+  const doc = window.State.currentDoc;
+  let job = window.State.searchIndex[fid];
+  if (job && job.pages) { if (onProgress) job.listeners.add(onProgress); return job; }
+  job = { pages: [], done: false, total: window.State.numPages, listeners: new Set(onProgress ? [onProgress] : []), legacy: null };
+  window.State.searchIndex[fid] = job;
+  (async () => {
+    const { fixLegacyHindi, pageIsLegacyHindi } = await import('./hindi_fix.js');
+    for (let i = 1; i <= job.total; i++) {
+      if (window.State.currentDoc !== doc) return;               // another book opened meanwhile
+      try {
+        const page = await doc.getPage(i);
+        const tc = await page.getTextContent();
+        let raw = tc.items.map((it) => it.str).join(' ');
+        const legacy = pageIsLegacyHindi(raw);
+        if (legacy) raw = tc.items.map((it) => fixLegacyHindi(it.str, { pageLegacy: true, force: true })).join(' ');
+        job.pages.push({ page: i, text: normSearch(raw), legacy });
+        page.cleanup && page.cleanup();
+      } catch (e) { job.pages.push({ page: i, text: '', legacy: false }); }
+      if (i % 4 === 0) { job.listeners.forEach((fn) => { try { fn(job); } catch (e) {} }); await new Promise((r) => setTimeout(r, 0)); }
+    }
+    job.done = true;
+    job.listeners.forEach((fn) => { try { fn(job); } catch (e) {} });
+  })();
+  return job;
 }
 
-export async function openInDocSearch(){
+function chapterForPage(chapters, page) {
+  if (!chapters) return '';
+  let best = null;
+  for (const c of chapters) if (page >= c.startPage && page <= c.endPage) { if (!best || c.startPage >= best.startPage) best = c; }
+  return best ? (best.rawTitle || best.title) : '';
+}
+
+const searchNav = { q: '', hits: [], idx: -1, chapters: null };
+
+export async function openInDocSearch() {
   window.Sheet.open(`
-    <div class="font-display" style="font-size:17px; font-weight:600; margin:6px 0 14px;">Search in document</div>
-    <input id="doc-search-input" placeholder="Search text…" style="width:100%; padding:12px; font-size:14.5px; margin-bottom:12px;">
-    <div id="doc-search-results" style="font-size:13.5px; color:var(--text-dim);">Building index…</div>
+    <div class="font-display" style="font-size:17px; font-weight:600; margin:6px 0 12px;">Search in document</div>
+    <input id="doc-search-input" placeholder="Search text…" value="${window.escapeHtml(searchNav.q)}" autocomplete="off" style="width:100%; padding:12px; font-size:14.5px; margin-bottom:8px;">
+    <div id="doc-search-status" style="font-size:11.5px; color:var(--text-faint); margin-bottom:8px; min-height:15px;"></div>
+    <div id="doc-search-results" class="sy-sr" style="font-size:13.5px; color:var(--text-dim); max-height:52vh; overflow-y:auto;">Type to search across all pages.</div>
   `);
-  const pages = await buildSearchIndex();
-  document.getElementById('doc-search-results').textContent = 'Type to search across all pages.';
-  document.getElementById('doc-search-input').oninput = window.debounce((e)=>{
-    const q = e.target.value.trim().toLowerCase();
-    const results = document.getElementById('doc-search-results');
-    if(!q){ results.textContent='Type to search across all pages.'; return; }
-    const hits = pages.filter(p=>p.text.toLowerCase().includes(q)).slice(0,40);
-    if(!hits.length){ results.innerHTML = `No matches for "${window.escapeHtml(q)}"`; return; }
-    results.innerHTML = hits.map(h=>{
-      const i = h.text.toLowerCase().indexOf(q);
-      const snippet = window.escapeHtml(h.text.slice(Math.max(0,i-40), i+60));
-      return `<button class="btn search-hit" data-page="${h.page}" style="width:100%; text-align:left; justify-content:flex-start; padding:10px; background:transparent; border-bottom:1px solid var(--border); border-radius:0; color:var(--text);">
-        <span class="font-mono" style="color:var(--accent); font-size:11px; flex-shrink:0;">p.${h.page}</span>
-        <span style="font-size:13px; color:var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">…${snippet}…</span>
-      </button>`;
-    }).join('');
-    document.querySelectorAll('.search-hit').forEach(b=>{
-      b.onclick=()=>{ window.Sheet.close(); const pg=Number(b.dataset.page); window.scrollToPage(pg); flashSearchMatch(pg, q); };
+  const inp = document.getElementById('doc-search-input');
+  const resEl = document.getElementById('doc-search-results');
+  const stEl = document.getElementById('doc-search-status');
+  let shown = 60;
+  const fileId = window.State.currentFile.id;
+  window.getChapterList && window.getChapterList(window.State.currentDoc, fileId).then((c) => { searchNav.chapters = c; render(); }).catch(() => {});
+
+  const run = () => {
+    const q = normSearch(inp.value.trim());
+    const job = window.State.searchIndex[fileId];
+    stEl.textContent = job && !job.done ? `Indexing pages… ${job.pages.length}/${job.total}` : '';
+    if (!q) { resEl.textContent = 'Type to search across all pages.'; return; }
+    const hits = [];
+    for (const p of job.pages) {
+      if (!p.text) continue;
+      let from = 0, n = 0, first = -1;
+      while (true) { const k = p.text.indexOf(q, from); if (k < 0) break; if (first < 0) first = k; n++; from = k + Math.max(1, q.length); }
+      if (n) hits.push({ page: p.page, count: n, first, text: p.text });
+    }
+    searchNav.q = q; searchNav.rawHits = hits;
+    const total = hits.reduce((a, h) => a + h.count, 0);
+    if (!hits.length) { resEl.innerHTML = `No matches for “${window.escapeHtml(q)}”${job.done ? '' : ' yet (still indexing)'}`; return; }
+    const rows = [];
+    let lastChap = null;
+    for (const h of hits.slice(0, shown)) {
+      const chap = chapterForPage(searchNav.chapters, h.page);
+      if (chap && chap !== lastChap) { rows.push(`<div class="sy-sr-chap">${window.escapeHtml(chap)}</div>`); lastChap = chap; }
+      const a = Math.max(0, h.first - 36), b = Math.min(h.text.length, h.first + q.length + 56);
+      const snip = window.escapeHtml(h.text.slice(a, h.first)) + '<mark>' + window.escapeHtml(h.text.slice(h.first, h.first + q.length)) + '</mark>' + window.escapeHtml(h.text.slice(h.first + q.length, b));
+      rows.push(`<button class="btn search-hit sy-sr-hit" data-page="${h.page}"><span class="sy-sr-p">p.${h.page}</span><span class="sy-sr-snip">${a > 0 ? '…' : ''}${snip}${b < h.text.length ? '…' : ''}</span>${h.count > 1 ? `<span class="sy-sr-n">×${h.count}</span>` : ''}</button>`);
+    }
+    resEl.innerHTML = `<div class="sy-sr-total">${total} match${total > 1 ? 'es' : ''} on ${hits.length} page${hits.length > 1 ? 's' : ''}</div>` + rows.join('') + (hits.length > shown ? `<button class="btn btn-ghost sy-sr-more" id="sr-more">Show more</button>` : '');
+    const more = document.getElementById('sr-more'); if (more) more.onclick = () => { shown += 60; run(); };
+    resEl.querySelectorAll('.search-hit').forEach((btn) => {
+      btn.onclick = () => {
+        const pg = Number(btn.dataset.page);
+        // flat list of every match so the arrows can walk through the whole book
+        searchNav.hits = []; hits.forEach((h) => { for (let o = 0; o < h.count; o++) searchNav.hits.push({ page: h.page, occ: o }); });
+        searchNav.idx = searchNav.hits.findIndex((x) => x.page === pg);
+        window.Sheet.close();
+        gotoSearchHit(searchNav.idx);
+      };
     });
-  }, 250);
+  };
+  const render = run;
+  const debounced = window.debounce(() => { shown = 60; run(); }, 200);
+  inp.oninput = debounced;
+  const job = buildSearchIndex(() => { if (document.getElementById('doc-search-status') === stEl) run(); });
+  run();
+  if (inp.value) { inp.focus(); inp.select(); }
 }
 
-export function flashSearchMatch(pageNum, query, attemptsLeft=8){
-  const pe = window.pageEls[pageNum];
-  const spanRects = window.getSpanRects ? window.getSpanRects(pe) : (pe && pe.spanRects);
-  if(!spanRects || !spanRects.length){
-    if(attemptsLeft>0) setTimeout(()=>flashSearchMatch(pageNum, query, attemptsLeft-1), 150);
-    return;
-  }
-  const q = query.toLowerCase();
-  const matches = spanRects.filter(entry => entry.span.textContent.toLowerCase().includes(q));
-  if(!matches.length || !pe.annotLayer) return;
-  const flashEls = matches.map(entry=>{
-    const r = entry.rect;
-    const el = document.createElement('div');
-    el.style.cssText = `position:absolute; left:${r.left}px; top:${r.top}px; width:${r.width}px; height:${(r.bottom-r.top)||16}px;
-      background:rgba(255,106,43,.6); border-radius:3px; pointer-events:none; transition:opacity .8s ease;`;
-    pe.annotLayer.appendChild(el);
-    return el;
+/* ---- find every match on a rendered page and draw exact-word highlights ---- */
+function pageMatchRects(pe, q) {
+  const layer = pe.textLayerDiv, wrap = pe.wrap;
+  if (!layer || !wrap) return null;
+  const nodes = [];
+  const w = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT);
+  while (w.nextNode()) if (w.currentNode.nodeValue && w.currentNode.nodeValue.trim()) nodes.push(w.currentNode);
+  // legacy-font pages: match on the converted text, highlight the whole node
+  const legacyFix = window.State.searchIndex[window.State.currentFile.id]?.pages.find((p) => p.page === pe.num)?.legacy;
+  let conv = null;
+  if (legacyFix) conv = nodes.map((n) => window.fixLegacyHindi ? window.fixLegacyHindi(n.nodeValue, { pageLegacy: true, force: true }) : n.nodeValue);
+  let flat = '', map = [];                     // map[charIndex] = [nodeIdx, offset]
+  nodes.forEach((n, ni) => {
+    const t = conv ? conv[ni] : n.nodeValue;
+    if (flat.length) { flat += ' '; map.push([ni, -1]); }
+    for (let k = 0; k < t.length; k++) { const c = t[k]; if (/\s/.test(c) && flat.endsWith(' ')) continue; flat += /\s/.test(c) ? ' ' : c.toLowerCase(); map.push([ni, k]); }
   });
-  setTimeout(()=>{
-    flashEls.forEach(el=>{ el.style.opacity='0'; setTimeout(()=>el.remove(), 800); });
-  }, 1100);
+  const sc = wrap.offsetWidth ? wrap.getBoundingClientRect().width / wrap.offsetWidth : 1;
+  const wr = wrap.getBoundingClientRect();
+  const out = [];
+  let from = 0;
+  while (true) {
+    const k = flat.indexOf(q, from); if (k < 0) break; from = k + Math.max(1, q.length);
+    const rects = [];
+    const startM = map[k], endM = map[k + q.length - 1];
+    if (!startM || !endM) continue;
+    for (let ni = startM[0]; ni <= endM[0]; ni++) {
+      const node = nodes[ni]; const range = document.createRange();
+      if (conv) { range.selectNodeContents(node); }
+      else {
+        const s = ni === startM[0] ? Math.max(0, startM[1]) : 0;
+        const e = ni === endM[0] ? endM[1] + 1 : node.nodeValue.length;
+        try { range.setStart(node, s); range.setEnd(node, Math.min(e, node.nodeValue.length)); } catch (e2) { continue; }
+      }
+      for (const r of range.getClientRects()) if (r.width > 0 && r.height > 0) rects.push({ left: (r.left - wr.left) / sc, top: (r.top - wr.top) / sc, width: r.width / sc, height: r.height / sc });
+    }
+    if (rects.length) out.push(rects);
+  }
+  return out;
 }
+
+function clearSearchMarks() { document.querySelectorAll('.sx-hl').forEach((e) => e.remove()); }
+
+function drawSearchMarks(pageNum, curOcc) {
+  const pe = window.pageEls[pageNum];
+  if (!pe || !pe.annotLayer || !pe.textLayerDiv || !searchNav.q) return false;
+  pe.num = pageNum;
+  pe.annotLayer.querySelectorAll('.sx-hl').forEach((e) => e.remove());
+  const occs = pageMatchRects(pe, searchNav.q);
+  if (!occs) return false;
+  let curEl = null;
+  occs.forEach((rects, oi) => rects.forEach((r) => {
+    const el = document.createElement('div');
+    el.className = 'sx-hl' + (oi === curOcc ? ' sx-cur' : '');
+    el.style.cssText = `left:${r.left - 1}px;top:${r.top}px;width:${r.width + 2}px;height:${r.height}px`;
+    pe.annotLayer.appendChild(el);
+    if (oi === curOcc && !curEl) curEl = el;
+  }));
+  if (curEl) {
+    const sc = document.getElementById('reader-scroll');
+    if (sc && window.State.readingMode !== 'single') {
+      const er = curEl.getBoundingClientRect(), cr = sc.getBoundingClientRect();
+      sc.scrollTo({ top: sc.scrollTop + (er.top - cr.top) - cr.height * 0.35, behavior: 'smooth' });
+    }
+  }
+  return true;
+}
+
+function renderSearchBar() {
+  let bar = document.getElementById('sx-bar');
+  if (!searchNav.hits.length || searchNav.idx < 0) { if (bar) bar.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div'); bar.id = 'sx-bar';
+    bar.innerHTML = `<button id="sx-prev" aria-label="Previous match">‹</button><span id="sx-cnt"></span><button id="sx-next" aria-label="Next match">›</button><button id="sx-find" aria-label="Open search results">⌕</button><button id="sx-x" aria-label="Clear search">✕</button>`;
+    document.body.appendChild(bar);
+    bar.querySelector('#sx-prev').onclick = () => gotoSearchHit(searchNav.idx - 1);
+    bar.querySelector('#sx-next').onclick = () => gotoSearchHit(searchNav.idx + 1);
+    bar.querySelector('#sx-find').onclick = () => openInDocSearch();
+    bar.querySelector('#sx-x').onclick = () => { searchNav.hits = []; searchNav.idx = -1; searchNav.q = ''; clearSearchMarks(); renderSearchBar(); };
+  }
+  const h = searchNav.hits[searchNav.idx];
+  const chap = chapterForPage(searchNav.chapters, h.page);
+  bar.querySelector('#sx-cnt').innerHTML = `<span><b>${searchNav.idx + 1}</b> / ${searchNav.hits.length}</span><small>${chap ? window.escapeHtml(chap) + ' · ' : ''}p.${h.page}</small>`;
+}
+
+export function gotoSearchHit(i) {
+  const n = searchNav.hits.length; if (!n) return;
+  searchNav.idx = ((i % n) + n) % n;
+  const h = searchNav.hits[searchNav.idx];
+  renderSearchBar();
+  clearSearchMarks();
+  window.scrollToPage(h.page);
+  const tryDraw = (left = 14) => { if (drawSearchMarks(h.page, h.occ)) return; if (left > 0) setTimeout(() => tryDraw(left - 1), 150); };
+  setTimeout(() => tryDraw(), 120);
+}
+window.gotoSearchHit = gotoSearchHit;
+// pages that re-render (scrolled away and back) get their highlights again
+window.onPageRendered = (n) => { if (searchNav.hits.length && searchNav.q) { const same = searchNav.hits.some((x) => x.page === n); if (same) { const cur = searchNav.hits[searchNav.idx]; setTimeout(() => drawSearchMarks(n, cur && cur.page === n ? cur.occ : -1), 60); } } };
+window.addEventListener('hashchange', () => { if (window.State.view !== 'reader') { const b = document.getElementById('sx-bar'); if (b) b.remove(); } });
 
 /* ============================================================
    AI CHAT (Clean unified ChatGPT / Gemini experience)
@@ -875,8 +1014,8 @@ window.render = render;
 window.applyAutoTheme = applyAutoTheme;
 window.runGlobalSearch = runGlobalSearch;
 window.buildSearchIndex = buildSearchIndex;
+window.flashSearchMatch = () => {};
 window.openInDocSearch = openInDocSearch;
-window.flashSearchMatch = flashSearchMatch;
 window.openAIChat = openAIChat;
 window.openAcademicChat = openAIChat;
 window.openAIMenu = openAIMenu;
