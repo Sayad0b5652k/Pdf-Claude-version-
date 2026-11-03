@@ -144,16 +144,26 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
 
 export async function importFiles(fileList){
   window.toast(`Importing ${fileList.length} file${fileList.length>1?'s':''}…`);
+  let added = 0;
   for(const file of fileList){
     try{
+      if (!/\.pdf$/i.test(file.name) && !/pdf/i.test(file.type || '')) {
+        window.toast(`${file.name}: only PDF files can be added`);
+        continue;
+      }
       const buf = await file.arrayBuffer();
       await addBookFromBuffer(file.name.replace(/\.pdf$/i,''), buf, file.size, {});
+      added++;
     }catch(err){
       console.error(err);
-      window.toast(`Couldn't import ${file.name} — file may be corrupted`);
+      if (err && (err.name === 'PasswordException' || /password/i.test(err.message || ''))) {
+        window.toast(`${file.name} is password protected. Remove the password and add it again.`);
+      } else {
+        window.toast(`Couldn't import ${file.name} — file may be corrupted`);
+      }
     }
   }
-  window.toast('Import complete');
+  if (added) window.toast(added === 1 ? 'Book added' : `${added} books added`);
   window.renderDashboard();
 }
 
