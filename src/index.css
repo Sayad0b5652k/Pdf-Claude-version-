@@ -7426,3 +7426,10 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 #sx-cnt{display:flex;flex-direction:column;align-items:center;min-width:72px;font-size:13px;line-height:1.15;padding:0 4px}
 #sx-cnt span{white-space:nowrap}
 #sx-cnt small{font-size:10px;color:#aab3e6;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* bigger invisible tap area for the small remove button on Continue reading */
+.btn-remove-recent::after{content:"";position:absolute;inset:-9px}
+
+/* chat message actions: bigger touch area, labels stay on one line */
+.btn-teacher-action{position:relative;white-space:nowrap}
+.btn-teacher-action::after{content:"";position:absolute;inset:-7px}

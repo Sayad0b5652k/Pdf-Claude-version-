@@ -1593,8 +1593,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
           </div>
 
           <!-- Bottom Message Utility Bar for actual AI replies -->
-          ${!isUser && m.text !== '…' ? `
-            <div style="display:flex; align-items:center; gap:6px; margin-top:6px; padding:2px 0;">
+          ${!isUser && m.text !== '…' && !m.isError ? `
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px 6px; margin-top:6px; padding:2px 0;">
               <button class="btn btn-teacher-action" data-action="copy" data-idx="${idx}" title="Copy" style="height:24px; padding:0 8px; font-size:11px; font-weight:600; border-radius:12px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); gap:4px;">
                 ${window.icon('copy','icon icon-xs')} <span>Copy</span>
               </button>
@@ -2364,7 +2364,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         fullContext: ctx.chapterText || ctx.pageText || ctx.bookOverviewText,
         persona: systemPersonaInstruction,
         language: 'English/Hinglish (matching the student natural inquiry)',
-        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…').map(m => ({ role: m.role, text: m.text })),
+        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text })),
         customKey: customKey || undefined,
         preferredEngine: activeAiEngine || 'auto',
         explanationStyle: activeExplanationStyle || 'comprehensive',
@@ -2461,6 +2461,7 @@ Provide the complete academic answer now:`;
       }
 
       // Pull the model's suggested follow-ups out of the reply (they become the chips under the chat).
+      replyText = typeof replyText === 'string' ? replyText : '';
       let followups = [];
       {
         const m = replyText.match(/\[\[\s*FOLLOWUPS\s*:([^\]]*)\]\]/i);
@@ -2479,8 +2480,12 @@ Provide the complete academic answer now:`;
         if (quizActive && (cards.length || /final\s+score\s*[:\-]?\s*\d+\s*\/\s*\d+/i.test(replyText))) quizActive = false;
       }
 
+      let replyFailed = false;
       if (!replyText) {
-        replyText = `Mujhe aapki request process karne me thodi problem aayi. Kripya apna sawaal dobara poochhein ya question yahan paste karein, main turant madad karunga!`;
+        replyFailed = true;
+        replyText = (typeof navigator !== 'undefined' && navigator.onLine === false)
+          ? `📡 Internet nahi mil raha, isliye jawab nahi aa paya. Net aane par wahi sawaal dobara bhej dena.`
+          : `⚠️ AI se abhi jawab nahi aaya. Ye aam taur par Gemini key ya server ke issue se hota hai. Settings mein key check karo ya thodi der baad wahi sawaal dobara bhejo.`;
       }
 
       // Finish response delivery based on selected streaming mode:
@@ -2523,7 +2528,8 @@ Provide the complete academic answer now:`;
         role: 'assistant',
         text: replyText,
         mode: activeTeacherMode,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        isError: replyFailed || undefined
       };
       await saveTeacherChatHistory(fileId, chatMessages);
       renderMessages();
@@ -2531,9 +2537,10 @@ Provide the complete academic answer now:`;
       console.error('Teacher AI Error:', err);
       chatMessages[chatMessages.length - 1] = {
         role: 'assistant',
-        text: `Kripya apna question dobara type karein ya poochhein, main madad ke liye taiyar hoon!`,
+        text: `⚠️ Kuch gadbad ho gayi aur jawab nahi aa paya. Wahi sawaal ek baar dobara bhejo.`,
         mode: activeTeacherMode,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        isError: true
       };
       renderMessages();
     }
