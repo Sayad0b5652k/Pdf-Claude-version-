@@ -1471,7 +1471,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       webBtn.style.boxShadow = webSearchOn ? '0 0 0 1.5px var(--accent) inset' : 'none';
     };
     fetch('/api/web/status').then(r => r.ok ? r.json() : null).then(d => {
-      if (d && d.enabled) { webBtn.style.display = 'flex'; paintWeb(); }
+      let byok = ''; try { byok = window.State?.customGeminiKey || localStorage.getItem('sayad_custom_gemini_key') || ''; } catch (e) {}
+      if (d && (d.enabled || byok)) { webBtn.style.display = 'flex'; paintWeb(); }
     }).catch(() => {});
     webBtn.onclick = () => {
       webSearchOn = !webSearchOn;

@@ -123,6 +123,7 @@ class GeminiKeyPool {
       this.clientCache.set(key, new GoogleGenAI({
         apiKey: key,
         httpOptions: {
+          ...(process.env.GEMINI_BASE_URL ? { baseUrl: process.env.GEMINI_BASE_URL } : {}),
           headers: {
             "User-Agent": "aistudio-build",
           },
@@ -241,7 +242,7 @@ async function executeWithGeminiPool(
     customKey?: string;
     tools?: any[];
   } = {}
-): Promise<{ text: string; model: string; keyTag: string } | null> {
+): Promise<{ text: string; model: string; keyTag: string; sources?: { title: string; url: string }[] } | null> {
   // If user provided custom key (BYOK), prioritize it as top slot
   let slots = keyPool.getOrderedKeysForTool(category);
   if (options.customKey && typeof options.customKey === 'string' && options.customKey.trim().length > 10) {
@@ -320,7 +321,7 @@ async function executeWithGeminiPool(
               contents: prompt,
               config,
             });
-            return { text: resp.text, isTimeout: false };
+            return { text: resp.text, isTimeout: false, grounding: (resp as any)?.candidates?.[0]?.groundingMetadata } as any;
           } catch (modelCallErr: any) {
             // If tool call fails on a specific model, retry immediately without tools
             if (config.tools) {
@@ -345,10 +346,14 @@ async function executeWithGeminiPool(
         const text = response.text || "";
         if (text && text.trim()) {
           anyModelSucceededOnSlot = true;
+          const srcs = ((response as any).grounding?.groundingChunks || [])
+            .map((c: any) => c?.web).filter((w: any) => w?.uri)
+            .map((w: any) => ({ title: String(w.title || w.uri), url: String(w.uri) }));
           return {
             text: text.trim(),
             model: modelName,
             keyTag: slot.tag,
+            sources: srcs.length ? srcs : undefined,
           };
         }
       } catch (err: any) {
@@ -921,6 +926,50 @@ function extractAcademicSubject(rawQuery: string, chatHistory?: any[], docTitle?
   return clean || "";
 }
 
+
+
+/* Live answer notes straight from Google Search (Gemini "Search grounding"): needs no extra key beyond Gemini. */
+async function googleGroundedNotes(question: string, chatHistory: any[], customKey?: string): Promise<{ text: string; sources: { title: string; url: string }[] } | null> {
+  if (!(keyPool.hasAnyKey() || customKey)) return null;
+  let q = (question || "").trim();
+  if (q.split(/\s+/).length < 4 && Array.isArray(chatHistory)) {
+    const prev = [...chatHistory].reverse().find((m: any) => m?.role === "user" && m.text);
+    if (prev) q = `${String(prev.text).slice(0, 160)} — ${q}`;
+  }
+  const prompt = `Use Google Search to find the most current, reliable information for this question, then write compact research notes (max 220 words) with the key facts, numbers and dates. Mention the date or recency of each fact when known. Do not address the user and do not add opinions.\n\nQuestion: ${q}`;
+  const r = await executeWithGeminiPool("chat", prompt, {
+    tools: [{ googleSearch: {} }],
+    targetModel: "gemini-3.1-flash-lite",
+    temperature: 0.1,
+    customKey,
+    systemInstruction: "You are a precise research assistant. Only state what the search results support.",
+  });
+  if (!r || !r.text) return null;
+  return { text: r.text, sources: (r.sources || []).slice(0, 6) };
+}
+
+/* Works out whether the student really wants a picture, and of WHAT (never defaults to the open book's title). */
+async function resolveImageIntent(question: string, chatHistory: any[], docTitle: string, customKey?: string): Promise<{ wants: boolean; subject: string; kind: string } | null> {
+  if (!(keyPool.hasAnyKey() || customKey)) return null;
+  const recent = (Array.isArray(chatHistory) ? chatHistory.slice(-6) : []).filter((m: any) => m?.text)
+    .map((m: any) => `${m.role === "user" ? "Student" : "AI"}: ${String(m.text).slice(0, 220)}`).join("\n");
+  const prompt = `Decide if the student's LAST message is asking to SEE an image/picture/photo/map/diagram, and of what.
+Open book (context only, NOT the default subject): "${docTitle || "none"}"
+Recent chat:\n${recent || "(none)"}\n
+Last message: "${question}"
+
+Rules:
+- wants=true only if they are actually asking to be shown a visual. Merely mentioning a diagram or picture while asking for an explanation is wants=false.
+- subject = exactly what should be pictured, as the English Wikipedia article title (e.g. "Mahatma Gandhi", "Photosynthesis", "Partition of India"). Resolve pronouns ("inki photo", "uska map") from the recent chat. If they say "this diagram/figure of the chapter", use the topic being discussed, never just the book title.
+- kind = one of portrait, map, diagram, photo.
+Return ONLY JSON: {"wants":true|false,"subject":"...","kind":"portrait|map|diagram|photo"}`;
+  try {
+    const r = await executeWithGeminiPool("chat", prompt, { targetModel: "gemini-3.1-flash-lite", temperature: 0, responseMimeType: "application/json", customKey });
+    if (!r?.text) return null;
+    const j = JSON.parse(r.text.replace(/^```json|```$/gim, "").trim());
+    return { wants: j.wants === true, subject: String(j.subject || "").trim(), kind: String(j.kind || "photo") };
+  } catch { return null; }
+}
 
 /* ---------- Live web search (keys come from server env / AI Studio Secrets, never from the client) ---------- */
 function webProviders() {
@@ -2200,7 +2249,7 @@ Return ONLY a valid raw JSON object with this exact structure:
   });
 
   // S.A.Y.A.D. AI - Intelligent, Conversational, and Document-Aware Super AI
-  app.get("/api/web/status", (_req, res) => { const p = webProviders(); res.json({ tavily: p.tavily, firecrawl: p.firecrawl, enabled: p.any }); });
+  app.get("/api/web/status", (_req, res) => { const p = webProviders(); res.json({ tavily: p.tavily, firecrawl: p.firecrawl, google: keyPool.hasAnyKey(), enabled: p.any || keyPool.hasAnyKey() }); });
 
   app.post("/api/ai/hybrid-tutor", async (req, res) => {
     try {
@@ -2395,11 +2444,16 @@ MANDATORY RULES:
       if (isImageRequest) {
         try {
           const userLang = detectUserLanguage(userQuestion);
-          const resolvedSubject = extractAcademicSubject(userQuestion, chatHistory, docTitle);
-          console.log(`[Visual Request] Query: "${userQuestion}", Resolved Subject: "${resolvedSubject}"`);
+          // Ask a small model what the student really wants to SEE. The old regex path used the open book's title as the
+          // subject, so "Mahatma Gandhi ki photo" inside a photosynthesis book showed photosynthesis.
+          const intent = await resolveImageIntent(userQuestion, chatHistory, docTitle, customKey);
+          if (intent && !intent.wants) throw new Error("not-an-image-request");
+          const resolvedSubject = intent?.subject || extractAcademicSubject(userQuestion, chatHistory, undefined);
+          console.log(`[Visual Request] Query: "${userQuestion}", Subject: "${resolvedSubject}", kind: ${intent?.kind || "?"}`);
 
-          const hasPronoun = anaphoricPronounsRegex.test(userQuestion);
-          const targetVisualSubject = (hasPronoun && resolvedSubject) ? resolvedSubject : (resolvedSubject || userQuestion);
+          const targetVisualSubject = intent?.subject
+            ? `${intent.subject}${intent.kind === "map" ? " map" : intent.kind === "diagram" ? " diagram" : ""}`
+            : (resolvedSubject || userQuestion);
           const netImg = await fetchEducationalInternetImage(targetVisualSubject, resolvedSubject);
           if (netImg && netImg.imageUrl) {
             let explanation = "";
@@ -2475,7 +2529,14 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
 
           // If no specific image or subject was found, ask nicely instead of showing irrelevant images
           let guidanceMsg = "";
-          if (userLang === "Hinglish") {
+          if (intent?.subject) {
+            const sj = intent.subject;
+            guidanceMsg = userLang === "Hindi"
+              ? `"${sj}" की कोई सही और भरोसेमंद तस्वीर मुझे नहीं मिली। मैं गलत तस्वीर नहीं दिखाना चाहता। चाहें तो इसे शब्दों में या फ्लोचार्ट से समझा सकता हूँ।`
+              : userLang === "Hinglish"
+              ? `"${sj}" ki sahi aur bharosemand image mujhe nahi mili, aur main galat image nahi dikhana chahta. Chaho to isse words mein ya flowchart se samjha deta hu.`
+              : `I couldn't find a reliable picture of "${sj}", and I'd rather not show a wrong one. I can explain it in words or draw a flowchart instead.`;
+          } else if (userLang === "Hinglish") {
             guidanceMsg = "Aap kis specific topic, personality ya scientific concept ka map ya image dekhna chahte hain? (Jaise *World War 1 alliances map*, *Albert Einstein portrait*, ya *Plant cell diagram*). Topic ka naam likhein, main turant visual display kar dunga!";
           } else if (userLang === "Hindi") {
             guidanceMsg = "आप किस विशिष्ट विषय, व्यक्तित्व या वैज्ञानिक अवधारणा का मानचित्र या चित्र देखना चाहते हैं? (जैसे *प्रथम विश्व युद्ध का नक्शा*, *अल्बर्ट आइंस्टीन का चित्र*, या *पादप कोशिका का आरेख*)। विषय का नाम बताएं, मैं तुरंत प्रस्तुत करूँगा!";
@@ -2489,7 +2550,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
             engine: "tutor-guidance"
           });
         } catch (imgErr: any) {
-          console.warn("Visual generation fallback to standard text:", imgErr?.message);
+          if (imgErr?.message !== "not-an-image-request") console.warn("Visual generation fallback to standard text:", imgErr?.message);
         }
       }
 
@@ -2511,7 +2572,14 @@ ${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}
       let webResultsBlock = "";
       try {
         const wantsWeb = webSearch === true || looksTimeSensitive(userQuestion) || /https?:\/\/\S+/i.test(userQuestion);
-        if (wantsWeb && webProviders().any) {
+        if (wantsWeb && !/https?:\/\/\S+/i.test(userQuestion)) {
+          const g = await googleGroundedNotes(userQuestion, chatHistory, customKey);
+          if (g && g.text) {
+            webResultsBlock = `[W1] Google Search research notes (fresh):\n${g.text}`;
+            if (g.sources.length) webSourcesMd = "\n\n---\n**Sources:** " + g.sources.map((r, i) => `[${i + 1}] [${r.title.slice(0, 60)}](${r.url})`).join(" · ");
+          }
+        }
+        if (!webResultsBlock && wantsWeb && webProviders().any) {
           const web = await runWebSearch(userQuestion, chatHistory);
           if (web.items.length) {
             webResultsBlock = web.items.map((r, i) => `[W${i + 1}] ${r.title} (${r.url})\n${r.content}`).join("\n\n");
@@ -2523,7 +2591,7 @@ ${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}
       const hybridPrompt = `You are an elite, state-of-the-art AI Super-Intelligence and Universal Academic Professor — operating with the exact intelligence, sharp intuition, and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5).
 
 ### HOW YOU TALK (most important):
-You are a warm, sharp study partner chatting with a friend — not a lecture machine. Sound like a person: short natural sentences, light humour when it fits, no robotic headings on simple answers. Match the length to the question: a quick question gets a quick answer (2-5 lines); go deep, with structure, only when the student asks for depth or the topic needs it. Answer first, then add the one detail that matters. Occasionally end with a short, genuine follow-up question or a next step (not every time). If the student greets you or says thanks/ok, reply like a human would, using what you were just talking about. Remember everything said earlier in this chat and refer back to it naturally. If you are unsure or the book does not say, say so honestly instead of bluffing.
+You are a warm, sharp study partner chatting with a friend — not a lecture machine. Sound like a person: short natural sentences, light humour when it fits, no robotic headings on simple answers. Match the length to the question: a quick question gets a quick answer (2-5 lines); go deep, with structure, only when the student asks for depth or the topic needs it. Answer first, then add the one detail that matters. Occasionally end with a short, genuine follow-up question or a next step (not every time). Follow any explicit instruction about format, length or language exactly, whatever it is (\"short me\", \"5 points\", \"table me\", \"sirf answer\", \"Hindi me\", \"step by step\", \"2 line\", \"example ke saath\"); an instruction like that overrides your defaults and stays in force for the follow-ups until the student changes it. Pick up the student's mood too: stressed before an exam means calm, short and practical. Answer from the book first when the question is about it (cite [Page N]); if the question goes beyond the book, answer it fully from your own knowledge; if it needs fresh facts, rely on the LIVE WEB RESULTS block and cite it. If the student greets you or says thanks/ok, reply like a human would, using what you were just talking about. Remember everything said earlier in this chat and refer back to it naturally. If you are unsure or the book does not say, say so honestly instead of bluffing.
 
 ${persona ? `### ACTIVE PERSONA / STYLE:\n${persona}\n` : ''}
 ### CRITICAL: STRICT LANGUAGE & SCRIPT MIRRORING (CHATGPT / CLAUDE / GEMINI FEEL):
