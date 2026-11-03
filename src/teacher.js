@@ -1,3 +1,4 @@
+import { extractWidgets, widgetInner, bindWidget, widgetSummary } from './chat_widgets.js';
 // @ts-nocheck
 import { fixLegacyHindi, fixLegacyItems } from './hindi_fix.js';
 import { callAI, callServerGemini, callGeminiFast, callGroqFast, callGroq70b, speakWithElevenLabs, stopElevenAudio } from './ai.js';
@@ -808,6 +809,24 @@ export async function findRelevantPages(query, fileId, doc, lo, hi, limit = 4) {
   return scored.slice(0, limit);
 }
 
+/* Takes every machine-read marker out of a reply: interactive cards, follow-up chips, review cards. */
+function extractAllMarkers(text) {
+  let s = typeof text === 'string' ? text : '';
+  const ex = extractWidgets(s); s = ex.text;
+  let followups = [];
+  const fm = s.match(/\[\[\s*FOLLOWUPS\s*:([^\]]*)\]\]/i);
+  if (fm) followups = fm[1].split('|').map(x => x.trim()).filter(x => x.length > 2 && x.length < 70).slice(0, 3);
+  s = s.replace(/\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]?/gi, '');
+  const cards = [];
+  s = s.replace(/\[\[\s*CARD\s*:([^\]]*?)\]\]/gi, (_m, body) => {
+    const parts = body.split('=>');
+    if (parts.length >= 2) cards.push({ front: parts[0].trim(), back: parts.slice(1).join('=>').trim() });
+    return '';
+  });
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+  return { text: s, widget: ex.widget, followups, cards };
+}
+
 export async function getTeacherContext(options = {}, userQuery = '', chatHistory = []) {
   let fileRecord = window.State?.files?.find(f => f.id === activeFileId) || window.State?.currentFile;
   const isGlobal = activeFileId === 'global_chat' || (!fileRecord && !activeFileId);
@@ -1592,6 +1611,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
           <div class="${isUser ? 'chat-msg-user-bubble' : 'chat-msg-ai-bubble selectable-text'}">
             ${isUser ? window.escapeHtml(m.text || '') : window.renderMarkdown(m.text || '')}
           </div>
+          ${!isUser && m.widget ? `<div class="cw-card" data-idx="${idx}">${widgetInner(m)}</div>` : ''}
 
           <!-- Bottom Message Utility Bar for actual AI replies -->
           ${!isUser && m.text !== '…' && !m.isError ? `
@@ -1623,6 +1643,22 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
   }
 
   function bindMessageActionButtons() {
+    document.querySelectorAll('.cw-card').forEach(el => {
+      const msg = chatMessages[Number(el.dataset.idx)];
+      if (!msg || !msg.widget) return;
+      bindWidget(el, msg, {
+        fileId: activeFileId, page: window.State?.currentPage || 1,
+        save: () => saveTeacherChatHistory(fileId, chatMessages),
+        send: (text) => { if (inputEl) { inputEl.value = text; sendUserMessage(); } },
+        afterRedraw: (card) => card.querySelectorAll('.inline-page-jump-chip').forEach(chip => {
+          chip.onclick = async (e) => {
+            e.stopPropagation();
+            const pNum = Number(chip.dataset.page);
+            if (pNum && activeFileId && activeFileId !== 'global_chat' && typeof window.openReader === 'function') await window.openReader(activeFileId, pNum);
+          };
+        })
+      });
+    });
     document.querySelectorAll('.btn-teacher-action').forEach(btn => {
       btn.onclick = async (e) => {
         e.stopPropagation();
@@ -2355,6 +2391,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       const customKey = window.State?.customGeminiKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('sayad_custom_gemini_key') : '');
 
       let replyText = '';
+      let markers = null;
 
       const requestPayload = {
         userQuestion: userText,
@@ -2365,7 +2402,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         fullContext: ctx.chapterText || ctx.pageText || ctx.bookOverviewText,
         persona: systemPersonaInstruction,
         language: 'English/Hinglish (matching the student natural inquiry)',
-        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text })),
+        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text + (m.widget ? ' ' + widgetSummary(m.widget) : '') })),
         customKey: customKey || undefined,
         preferredEngine: activeAiEngine || 'auto',
         explanationStyle: activeExplanationStyle || 'comprehensive',
@@ -2398,6 +2435,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
               }
             }
           );
+          markers = replyText ? extractAllMarkers(replyText) : null;
+          if (markers) replyText = markers.text;
           if (streamer) {
             await streamer.finish(replyText);
           }
@@ -2461,27 +2500,18 @@ Provide the complete academic answer now:`;
         }
       }
 
-      // Pull the model's suggested follow-ups out of the reply (they become the chips under the chat).
+      // Interactive cards, follow-up chips and review cards the model attached to its reply.
       replyText = typeof replyText === 'string' ? replyText : '';
-      let followups = [];
-      {
-        const m = replyText.match(/\[\[\s*FOLLOWUPS\s*:([^\]]*)\]\]/i);
-        if (m) followups = m[1].split('|').map(x => x.trim()).filter(x => x.length > 2 && x.length < 70).slice(0, 3);
-        replyText = replyText.replace(/\s*\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]?\s*$/i, '').replace(/\[\[\s*FOLLOWUPS\s*:[^\]]*\]\]/gi, '').trim();
-      }
+      const mk = (markers && markers.text === replyText) ? markers : extractAllMarkers(replyText);
+      replyText = mk.text;
+      const followups = mk.followups;
+      const replyWidget = mk.widget;
       window.__lastFollowups = followups;
-      {
-        const cards = [];
-        replyText = replyText.replace(/\[\[\s*CARD\s*:([^\]]*?)\]\]/gi, (_m, body) => {
-          const parts = body.split('=>');
-          if (parts.length >= 2) cards.push({ front: parts[0].trim(), back: parts.slice(1).join('=>').trim() });
-          return '';
-        }).replace(/\n{3,}/g, '\n\n').trim();
-        window.__quizCards = cards;
-        if (quizActive && (cards.length || /final\s+score\s*[:\-]?\s*\d+\s*\/\s*\d+/i.test(replyText))) quizActive = false;
-      }
+      window.__quizCards = mk.cards;
+      if (quizActive && (replyWidget || mk.cards.length || /final\s+score\s*[:\-]?\s*\d+\s*\/\s*\d+/i.test(replyText))) quizActive = false;
 
       let replyFailed = false;
+      if (!replyText && replyWidget) replyText = 'Ye lo 👇';
       if (!replyText) {
         replyFailed = true;
         replyText = (typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -2530,7 +2560,8 @@ Provide the complete academic answer now:`;
         text: replyText,
         mode: activeTeacherMode,
         timestamp: Date.now(),
-        isError: replyFailed || undefined
+        isError: replyFailed || undefined,
+        widget: (!replyFailed && replyWidget) ? replyWidget : undefined
       };
       await saveTeacherChatHistory(fileId, chatMessages);
       renderMessages();
