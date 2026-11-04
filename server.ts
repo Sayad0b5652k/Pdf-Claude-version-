@@ -1038,6 +1038,84 @@ async function runWebSearch(question: string, chatHistory: any[]): Promise<{ ite
   return { items: items.slice(0, 6) };
 }
 
+/* ---------- Web image fallback (Tavily / Firecrawl) — used only when Wikipedia/Wikimedia has no image ---------- */
+type WebImageCand = { imageUrl: string; text: string; pageUrl: string; host: string };
+const IMG_TOKEN_STOP = new Set(["the", "of", "and", "map", "diagram", "photo", "image", "picture", "portrait", "in", "a", "an", "ka", "ki", "ke"]);
+function imgTokens(s: string): string[] {
+  return (s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9ऀ-ॿ\s]/g, " ").split(/\s+/).filter(w => w.length > 2 && !IMG_TOKEN_STOP.has(w));
+}
+function hostOf(u: string): string { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } }
+async function webImageFallback(subject: string, kind: string, customKey?: string): Promise<{ imageUrl: string; title: string; description: string; sourceName: string; sourceUrl: string } | null> {
+  const pv = webProviders();
+  if (!pv.any || !subject) return null;
+  const tavilyBase = process.env.TAVILY_BASE_URL || "https://api.tavily.com";
+  const fireBase = process.env.FIRECRAWL_BASE_URL || "https://api.firecrawl.dev";
+  const q = `${subject}${kind === "map" ? " map" : kind === "diagram" ? " diagram" : kind === "portrait" ? " portrait photo" : " photo"}`.slice(0, 200);
+  const cands: WebImageCand[] = [];
+  const push = (imageUrl: any, text: any, pageUrl: any) => {
+    if (typeof imageUrl !== "string" || !/^https:\/\//i.test(imageUrl)) return;
+    if (/\.(svg|gif)(\?|$)/i.test(imageUrl) || /(logo|icon|sprite|avatar|favicon)/i.test(imageUrl)) return;
+    if (cands.some(c => c.imageUrl === imageUrl)) return;
+    cands.push({ imageUrl, text: String(text || "").slice(0, 300), pageUrl: typeof pageUrl === "string" ? pageUrl : "", host: hostOf(typeof pageUrl === "string" && pageUrl ? pageUrl : imageUrl) });
+  };
+  if (pv.tavily) {
+    try {
+      const d = await fetchJsonWithTimeout(`${tavilyBase}/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.TAVILY_API_KEY}` },
+        body: JSON.stringify({ query: q, max_results: 5, search_depth: "basic", include_images: true, include_image_descriptions: true, include_answer: false }),
+      }, 9000);
+      const pages = (d?.results || []).filter((r: any) => r?.url);
+      for (const im of d?.images || []) {
+        if (typeof im === "string") push(im, "", "");
+        else push(im?.url, im?.description, pages[0]?.url || "");
+      }
+    } catch (e: any) { console.warn("Tavily image search failed:", e?.message); }
+  }
+  if (cands.length < 3 && pv.firecrawl) {
+    try {
+      const d = await fetchJsonWithTimeout(`${fireBase}/v2/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
+        body: JSON.stringify({ query: q, sources: ["images"], limit: 6 }),
+      }, 12000);
+      const arr = Array.isArray(d?.data?.images) ? d.data.images : Array.isArray(d?.data) ? d.data : [];
+      for (const im of arr) push(im?.imageUrl || im?.url, im?.title || im?.description, im?.url && im?.imageUrl ? im.url : "");
+    } catch (e: any) { console.warn("Firecrawl image search failed:", e?.message); }
+  }
+  if (!cands.length) return null;
+  const list = cands.slice(0, 8);
+  const subjTokens = imgTokens(subject);
+  const overlapOk = (c: WebImageCand) => {
+    if (!subjTokens.length) return false;
+    const hay = new Set(imgTokens(`${c.text} ${c.pageUrl} ${c.imageUrl}`));
+    return subjTokens.every(t => hay.has(t) || [...hay].some(h => h.includes(t) || t.includes(h)));
+  };
+  let chosen: WebImageCand | null = null;
+  if (keyPool.hasAnyKey() || customKey) {
+    const prompt = `A student wants to SEE a picture of: "${subject}" (kind: ${kind || "photo"}).
+Below are web image candidates with their descriptions. Pick the ONE index that clearly depicts exactly this subject. If none clearly does (wrong subject, unrelated, generic stock art, only a logo), answer -1. Never guess.
+${list.map((c, i) => `${i}: ${c.text || "(no description)"} [${c.host}]`).join("\n")}
+Return ONLY JSON: {"index": <number>}`;
+    try {
+      const r = await executeWithGeminiPool("chat", prompt, { targetModel: "gemini-3.1-flash-lite", temperature: 0, responseMimeType: "application/json", customKey });
+      const j = JSON.parse(String(r?.text || "").replace(/^```json|```$/gim, "").trim());
+      const idx = Number(j.index);
+      if (Number.isInteger(idx) && idx >= 0 && idx < list.length && list[idx].text) chosen = list[idx];
+    } catch (e: any) { console.warn("Web image verification failed:", e?.message); }
+  } else {
+    chosen = list.find(c => c.text && overlapOk(c)) || null;
+  }
+  if (!chosen) return null;
+  return {
+    imageUrl: chosen.imageUrl,
+    title: subject,
+    description: chosen.text,
+    sourceName: chosen.host || "web",
+    sourceUrl: chosen.pageUrl || chosen.imageUrl,
+  };
+}
+
 async function fetchLiveInternetGrounding(query: string): Promise<string> {
   if (!query || query.trim().length < 4) return "";
   // Do NOT search internet on casual greetings or conversational pleasantries
@@ -2454,7 +2532,15 @@ MANDATORY RULES:
           const targetVisualSubject = intent?.subject
             ? `${intent.subject}${intent.kind === "map" ? " map" : intent.kind === "diagram" ? " diagram" : ""}`
             : (resolvedSubject || userQuestion);
-          const netImg = await fetchEducationalInternetImage(targetVisualSubject, resolvedSubject);
+          let netImg: any = await fetchEducationalInternetImage(targetVisualSubject, resolvedSubject);
+          let webCredit = "";
+          if (!(netImg && netImg.imageUrl) && intent?.subject) {
+            const wi = await webImageFallback(intent.subject, intent.kind || "photo", customKey);
+            if (wi) {
+              netImg = { imageUrl: wi.imageUrl, title: wi.title, description: wi.description };
+              webCredit = `\n\n*Image source: [${wi.sourceName}](${wi.sourceUrl})*`;
+            }
+          }
           if (netImg && netImg.imageUrl) {
             let explanation = "";
             const visualLangInstruction = userLang === "Hinglish"
@@ -2494,7 +2580,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
             }
 
             const proxyUrl = `/api/image-proxy?url=${encodeURIComponent(netImg.imageUrl)}&subject=${encodeURIComponent(netImg.title)}`;
-            const combinedText = `![${netImg.title}](${proxyUrl})\n\n${explanation}`;
+            const combinedText = `![${netImg.title}](${proxyUrl})${webCredit}\n\n${explanation}`;
             return res.json({
               text: finishReply(combinedText),
               status: "success",
