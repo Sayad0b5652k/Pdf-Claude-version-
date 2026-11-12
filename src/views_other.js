@@ -117,81 +117,6 @@ export async function renderSettings(){
       </div>
     </div>
 
-    <!-- 5. Storage -->
-    <div class="section-title" style="margin-bottom:10px;">Storage</div>
-    <div class="card" style="padding:16px; margin-bottom:22px;">
-      <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:6px;">
-        <span style="color:var(--text-dim);">Library size</span><span class="font-mono">${window.fmtBytes(totalSize)}</span>
-      </div>
-      <div style="display:flex; justify-content:space-between; font-size:14px;">
-        <span style="color:var(--text-dim);">Books stored</span><span class="font-mono">${window.State.files.length}</span>
-      </div>
-    </div>
-
-    <!-- 6. Backup -->
-    <div class="section-title" style="margin-bottom:10px;">Backup</div>
-    <div class="card" style="padding:14px; margin-bottom:22px; display:flex; gap:10px;">
-      <button class="btn btn-ghost" style="flex:1;" id="btn-export">Export notes &amp; bookmarks</button>
-      <button class="btn btn-ghost" style="flex:1;" id="btn-import-backup">Restore</button>
-    </div>
-
-    <!-- 7. About S.A.Y.A.D. with QR Code on Right & Link Below -->
-    <div class="section-title" style="margin-bottom:10px;">About S.A.Y.A.D.</div>
-    <div class="card" style="padding:18px; font-size:13px; color:var(--text-dim); line-height:1.7; margin-bottom:22px;">
-      <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border);">
-        <div style="width:48px; height:48px; border-radius:12px; background:var(--surface-2); border:1px solid var(--accent-soft); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 12px var(--accent-soft); overflow:hidden;">
-          <img src="${typeof window.getThemeCrestUrl === 'function' ? window.getThemeCrestUrl() : '/icons/theme-classic-512.png'}" alt="S.A.Y.A.D." style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
-        </div>
-        <div>
-          <div class="font-display" style="font-size:20px; font-weight:800; color:var(--text); letter-spacing:.04em;">S.A.Y.A.D.</div>
-          <div style="font-size:12px;"><span style="color:var(--text-dim); font-weight:600;">Built by</span> <span style="color:var(--accent); font-weight:700;">Athar Labs</span></div>
-        </div>
-      </div>
-
-      <!-- Full Meaning Box & Flat Theme-Colored QR Code (Spacious & Clean) -->
-      <div style="background:var(--surface-2); border:1px solid var(--border); border-radius:16px; padding:16px; margin-bottom:14px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
-          <!-- Left Column: Acronym Full Meaning in Theme Accent Colors -->
-          <div style="flex:1; min-width:130px;">
-            <div style="font-weight:700; color:var(--text); margin-bottom:10px; font-size:13px;">Full Meaning:</div>
-            <div style="display:grid; gap:6px; font-size:13px; font-weight:600;">
-              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">S</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Study</span></div>
-              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">A</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Assistant for</span></div>
-              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">Y</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Your</span></div>
-              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">A</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Academic</span></div>
-              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">D</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Development</span></div>
-            </div>
-          </div>
-
-          <!-- Right Column: Flat QR Code rendered in exact theme accent color -->
-          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; flex-shrink:0; background:var(--surface); border:1.5px solid var(--accent-soft); border-radius:14px; padding:10px 10px 8px; box-shadow:0 4px 14px var(--accent-soft); width:112px;">
-            <div style="width:92px; height:92px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
-              ${qrSvg}
-            </div>
-            <span style="font-size:9.5px; font-weight:800; color:var(--accent); margin-top:6px; letter-spacing:0.06em; text-transform:uppercase;">SCAN APP</span>
-          </div>
-        </div>
-
-        <!-- Below: App URL Link with Copy Button -->
-        <div style="margin-top:14px; padding-top:12px; border-top:1px dashed var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px;">
-          <a href="${appUrl}" target="_blank" rel="noopener noreferrer" style="display:flex; align-items:center; gap:6px; min-width:0; flex:1; text-decoration:none;">
-            <span style="font-size:13px; flex-shrink:0;">🔗</span>
-            <span id="sayad-app-link-text" style="font-size:12px; font-family:var(--font-mono, monospace); color:var(--accent); font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${appUrl}">
-              ${appUrl}
-            </span>
-          </a>
-          <button class="btn btn-ghost" id="btn-copy-app-link" style="padding:5px 10px; font-size:11.5px; font-weight:700; border-radius:8px; color:var(--text); background:var(--surface); border:1px solid var(--border); flex-shrink:0; display:flex; align-items:center; gap:5px; cursor:pointer;">
-            ${window.icon('copy','icon icon-xs')}
-            <span>Copy Link</span>
-          </button>
-        </div>
-      </div>
-
-      S.A.Y.A.D. stores every book, note, and flashcard directly on this device using IndexedDB — nothing leaves your browser except AI requests and dictionary/OCR lookups you trigger yourself.
-      <div style="margin-top:10px; font-size:12px;">Built on: PDF.js (rendering), pdf-lib (annotated export), Tesseract.js (scanned-page OCR), Fuse.js (search), the Free Dictionary API, and a hand-implemented FSRS scheduler for spaced repetition.</div>
-      <div class="font-mono" style="margin-top:12px; font-size:11px; color:var(--text-faint); border-top:1px solid var(--border); padding-top:10px;">S.A.Y.A.D V2</div>
-    </div>
-
     <!-- 8. AI Engine & Custom API Key Section (Technical - Shifted Down Above App Installation) -->
     <div class="section-title" style="margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;">
       <span>AI Engine &amp; Custom API Key</span>
@@ -201,15 +126,6 @@ export async function renderSettings(){
     </div>
     <div class="card" style="padding:16px 18px; margin-bottom:22px; border:1px solid var(--border); border-radius:16px;">
       
-      <!-- Athar's Humorous & Friendly Quota Note -->
-      <div style="background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:14px; display:flex; gap:12px; align-items:flex-start;">
-        <div style="font-size:24px; line-height:1; flex-shrink:0;">☕</div>
-        <div style="font-size:12.5px; line-height:1.5; color:var(--text-dim);">
-          <strong style="color:var(--text);">"Quota khatam? Toh jao khud ki key lekar aao! Saara kharcha mai hi kyu uthau?"</strong>
-          <div style="margin-top:3px; font-size:11px; color:var(--accent); font-weight:700;">— Sayad Athar</div>
-        </div>
-      </div>
-
       <div style="font-size:13px; color:var(--text); font-weight:700; margin-bottom:4px;">Personal Google Gemini API Key</div>
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.4;">
         Free unlimited Google Gemini API key direct Google AI Studio se create karein aur yahan paste karein.
@@ -416,6 +332,24 @@ export async function renderSettings(){
       </details>
     </div>
 
+    <!-- 5. Storage -->
+    <div class="section-title" style="margin-bottom:10px;">Storage</div>
+    <div class="card" style="padding:16px; margin-bottom:22px;">
+      <div style="display:flex; justify-content:space-between; font-size:14px; margin-bottom:6px;">
+        <span style="color:var(--text-dim);">Library size</span><span class="font-mono">${window.fmtBytes(totalSize)}</span>
+      </div>
+      <div style="display:flex; justify-content:space-between; font-size:14px;">
+        <span style="color:var(--text-dim);">Books stored</span><span class="font-mono">${window.State.files.length}</span>
+      </div>
+    </div>
+
+    <!-- 6. Backup -->
+    <div class="section-title" style="margin-bottom:10px;">Backup</div>
+    <div class="card" style="padding:14px; margin-bottom:22px; display:flex; gap:10px;">
+      <button class="btn btn-ghost" style="flex:1;" id="btn-export">Export notes &amp; bookmarks</button>
+      <button class="btn btn-ghost" style="flex:1;" id="btn-import-backup">Restore</button>
+    </div>
+
     <!-- 9. App Updates & Refresh (Technical - Shifted Down Above App Installation) -->
     <div class="section-title" style="margin-bottom:10px;">App Updates &amp; Refresh</div>
     <div class="card" style="padding:16px; margin-bottom:22px; border:1px solid var(--border); border-radius:16px; background:var(--surface);">
@@ -426,12 +360,9 @@ export async function renderSettings(){
         <div>
           <div style="font-size:14px; font-weight:700; color:var(--text);">Safe App Update &amp; Refresh</div>
           <div style="font-size:11.5px; color:var(--text-dim); margin-top:2px;">
-            Clears old app cache and applies the latest features without losing your data.
+            Applies the latest version. Your books, notes and highlights stay safe.
           </div>
         </div>
-      </div>
-      <div style="font-size:12px; color:var(--text-dim); line-height:1.4; margin-bottom:14px; background:var(--surface-2); padding:10px 12px; border-radius:10px; border:1px solid var(--border);">
-        <strong style="color:var(--accent);">Zero Data Loss:</strong> Aapke uploaded books, PDFs, notes, bookmarks, aur highlights 100% safe rahenge.
       </div>
       <button class="btn btn-primary" id="btn-force-safe-update" style="width:100%; padding:12px; font-size:13px; font-weight:800; border-radius:10px; justify-content:center; gap:8px;">
         <span>🔄 Check Updates &amp; Refresh App</span>
@@ -453,12 +384,6 @@ export async function renderSettings(){
         </div>
       </div>
 
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px;">
-        <span style="font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent); padding:3px 9px; border-radius:20px;">⚡ Offline Support</span>
-        <span style="font-size:11px; font-weight:700; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border); padding:3px 9px; border-radius:20px;">🚀 Full Screen</span>
-        <span style="font-size:11px; font-weight:700; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border); padding:3px 9px; border-radius:20px;">🔒 100% Private</span>
-      </div>
-
       ${(typeof window.isStandalone === 'function' && window.isStandalone()) ? `
         <div style="padding:10px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; font-size:12.5px; color:var(--accent); font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;">
           <span>✅ App Installed &amp; Ready</span>
@@ -469,6 +394,68 @@ export async function renderSettings(){
         </button>
       `}
     </div>
+    <!-- 7. About S.A.Y.A.D. with QR Code on Right & Link Below -->
+    <div class="section-title" style="margin-bottom:10px;">About S.A.Y.A.D.</div>
+    <div class="card" style="padding:18px; font-size:13px; color:var(--text-dim); line-height:1.7; margin-bottom:22px;">
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border);">
+        <div style="width:48px; height:48px; border-radius:12px; background:var(--surface-2); border:1px solid var(--accent-soft); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 12px var(--accent-soft); overflow:hidden;">
+          <img src="${typeof window.getThemeCrestUrl === 'function' ? window.getThemeCrestUrl() : '/icons/theme-classic-512.png'}" alt="S.A.Y.A.D." style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
+        </div>
+        <div>
+          <div class="font-display" style="font-size:20px; font-weight:800; color:var(--text); letter-spacing:.04em;">S.A.Y.A.D.</div>
+          <div style="font-size:12px;"><span style="color:var(--text-dim); font-weight:600;">Built by</span> <span style="color:var(--accent); font-weight:700;">Athar Labs</span></div>
+        </div>
+      </div>
+
+      <details style="margin-bottom:12px;">
+        <summary style="cursor:pointer; font-weight:700; color:var(--text); font-size:13px; padding:4px 0;">Full meaning, QR &amp; app link</summary>
+        <div style="margin-top:10px;">
+      <!-- Full Meaning Box & Flat Theme-Colored QR Code (Spacious & Clean) -->
+      <div style="background:var(--surface-2); border:1px solid var(--border); border-radius:16px; padding:16px; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:16px;">
+          <!-- Left Column: Acronym Full Meaning in Theme Accent Colors -->
+          <div style="flex:1; min-width:130px;">
+            <div style="font-weight:700; color:var(--text); margin-bottom:10px; font-size:13px;">Full Meaning:</div>
+            <div style="display:grid; gap:6px; font-size:13px; font-weight:600;">
+              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">S</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Study</span></div>
+              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">A</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Assistant for</span></div>
+              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">Y</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Your</span></div>
+              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">A</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Academic</span></div>
+              <div style="display:flex; align-items:center;"><span style="color:var(--accent); font-weight:800; font-size:16px; width:18px;">D</span> <span style="color:var(--text-dim); margin:0 6px;">—</span> <span style="color:var(--text);">Development</span></div>
+            </div>
+          </div>
+
+          <!-- Right Column: Flat QR Code rendered in exact theme accent color -->
+          <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; flex-shrink:0; background:var(--surface); border:1.5px solid var(--accent-soft); border-radius:14px; padding:10px 10px 8px; box-shadow:0 4px 14px var(--accent-soft); width:112px;">
+            <div style="width:92px; height:92px; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+              ${qrSvg}
+            </div>
+            <span style="font-size:9.5px; font-weight:800; color:var(--accent); margin-top:6px; letter-spacing:0.06em; text-transform:uppercase;">SCAN APP</span>
+          </div>
+        </div>
+
+        <!-- Below: App URL Link with Copy Button -->
+        <div style="margin-top:14px; padding-top:12px; border-top:1px dashed var(--border); display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <a href="${appUrl}" target="_blank" rel="noopener noreferrer" style="display:flex; align-items:center; gap:6px; min-width:0; flex:1; text-decoration:none;">
+            <span style="font-size:13px; flex-shrink:0;">🔗</span>
+            <span id="sayad-app-link-text" style="font-size:12px; font-family:var(--font-mono, monospace); color:var(--accent); font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${appUrl}">
+              ${appUrl}
+            </span>
+          </a>
+          <button class="btn btn-ghost" id="btn-copy-app-link" style="padding:5px 10px; font-size:11.5px; font-weight:700; border-radius:8px; color:var(--text); background:var(--surface); border:1px solid var(--border); flex-shrink:0; display:flex; align-items:center; gap:5px; cursor:pointer;">
+            ${window.icon('copy','icon icon-xs')}
+            <span>Copy Link</span>
+          </button>
+        </div>
+      </div>
+
+        </div>
+      </details>
+      S.A.Y.A.D. stores every book, note, and flashcard directly on this device using IndexedDB — nothing leaves your browser except AI requests and dictionary/OCR lookups you trigger yourself.
+      <details style="margin-top:10px;"><summary style="cursor:pointer; font-size:12px; font-weight:700;">Credits</summary><div style="margin-top:6px; font-size:12px;">Built on: PDF.js (rendering), pdf-lib (annotated export), Tesseract.js (scanned-page OCR), Fuse.js (search), the Free Dictionary API, and a hand-implemented FSRS scheduler for spaced repetition.</div></details>
+      <div class="font-mono" style="margin-top:12px; font-size:11px; color:var(--text-faint); border-top:1px solid var(--border); padding-top:10px;">S.A.Y.A.D V2</div>
+    </div>
+
 
   </div>
   </div>
