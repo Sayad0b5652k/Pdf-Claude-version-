@@ -543,7 +543,130 @@ export function clearPendingOverlay(){
 
 export function isSingleWord(text){ return !/\s/.test(text.trim()) && text.trim().length>0; }
 
-export function showSelToolbar(){
+/* ---- Compact floating bar (default) — the classic full card is kept untouched and opens via "⋯" or the Classic setting ---- */
+function ensureMiniBar(){
+  let m = document.getElementById('sel-mini');
+  if(!m){ m = document.createElement('div'); m.id = 'sel-mini'; document.body.appendChild(m); }
+  return m;
+}
+function hideMiniBar(){
+  const m = document.getElementById('sel-mini');
+  if(m) m.classList.remove('show');
+}
+function positionMiniBar(){
+  const m = document.getElementById('sel-mini');
+  if(!m || !m.classList.contains('show') || !pendingSelection) return;
+  const wrap = pendingSelection.pageWrap && pendingSelection.pageWrap.isConnected ? pendingSelection.pageWrap : window.pageEls?.[pendingSelection.pageNum]?.wrap;
+  const rel = pendingSelection.relRects || [];
+  let top, bottom, midX;
+  if(wrap && rel.length){
+    const wr = wrap.getBoundingClientRect();
+    const first = rel[0], last = rel[rel.length-1];
+    top = wr.top + first.top; bottom = wr.top + last.top + last.height;
+    const x0 = Math.min(...rel.map(r=>r.left)), x1 = Math.max(...rel.map(r=>r.left+r.width));
+    midX = wr.left + (x0 + x1) / 2;
+  } else {
+    const rs = pendingSelection.rects || [];
+    if(!rs.length) return;
+    top = rs[0].top; bottom = rs[rs.length-1].bottom; midX = (rs[0].left + rs[rs.length-1].right) / 2;
+  }
+  const vv = window.visualViewport;
+  const vh = vv ? vv.height : window.innerHeight, vw = window.innerWidth;
+  const mh = m.offsetHeight || 48, mw = m.offsetWidth || 300;
+  const minY = 64, maxY = vh - mh - 12;
+  let y = bottom + 28;                 // below the selection handles
+  if(y > maxY) y = top - mh - 12;      // no room below: flip above
+  y = Math.max(minY, Math.min(maxY, y));
+  const x = Math.max(8, Math.min(vw - mw - 8, midX - mw / 2));
+  m.style.left = x + 'px'; m.style.top = y + 'px';
+}
+let miniScrollBound = false;
+function bindMiniReposition(){
+  if(miniScrollBound) return; miniScrollBound = true;
+  let raf = 0;
+  const on = () => { if(raf) return; raf = requestAnimationFrame(()=>{ raf = 0; positionMiniBar(); }); };
+  document.addEventListener('scroll', on, true);
+  window.addEventListener('resize', on);
+  if(window.visualViewport) window.visualViewport.addEventListener('resize', on);
+}
+function miniAction(kind){
+  const sel = pendingSelection;
+  const selText = sel?.text?.trim() || '';
+  const fallback = sel || { text: typeof window.getCurrentPageText === 'function' ? window.getCurrentPageText() : '', pageNum: window.State?.currentPage || 1 };
+  hideSelToolbar();
+  switch(kind){
+    case 'explain': return window.runQuickExplain(fallback, false);
+    case 'summary': return window.runAIToolObj(window.AI_TOOLS?.find(t => t.key === 'summarize') || { key: 'summarize', label: 'Summarize', icon: 'fileText' }, fallback);
+    case 'cards': return window.runInteractiveFlashcardsModal(fallback);
+    case 'mcq': return window.runMCQGeneratorModal(fallback);
+    case 'teacher': return typeof window.openTeacherView === 'function' && window.openTeacherView(selText ? `Teach me about this selected excerpt:\n"${selText}"` : '');
+    case 'topic': return window.openTopicAIChat('', selText);
+    case 'copy': return window.copyToClipboard(sel?.text || '').then(ok => window.toast(ok ? 'Copied to clipboard' : 'Couldn\'t copy'));
+    case 'speak': return window.runTTS(sel?.text || '');
+    case 'translate': return window.runTranslateToolModal(sel);
+    case 'define': return window.runDictionaryLookup(sel);
+  }
+}
+function renderMiniBar(){
+  const classic = document.getElementById('sel-toolbar');
+  if(classic) classic.classList.remove('show');
+  const m = ensureMiniBar();
+  const ic = (n) => window.icon(n, 'icon icon-xs');
+  const AI = [
+    ['explain','brain','Explain'], ['summary','fileText','Summary'], ['cards','cards','Flashcards'], ['mcq','help','MCQs'],
+    ['teacher','teacher','Ask Teacher'], ['topic','sparkle','Topic Chat'], ['copy','copy','Copy'], ['speak','volume','Speak'],
+    ['translate','language','Translate'], ['define','search','Define']
+  ];
+  m.innerHTML = `
+    <div class="sm-row">
+      ${COLORS.slice(0,4).map(c => `<button class="sm-dot" data-color="${c}" style="background:${c}" title="Apply this color" aria-label="Apply color"></button>`).join('')}
+      <span class="sm-sep"></span>
+      <button class="sm-ic ${annotMode==='underline'?'on':''}" id="sm-ul" title="Underline instead of highlight" aria-label="Underline mode">${ic('underline')}</button>
+      <button class="sm-ic" id="sm-note" title="Add note" aria-label="Add note">${ic('note')}</button>
+      <span class="sm-sep"></span>
+      <button class="sm-ask" id="sm-ask">${ic('sparkle')}<span>Ask AI</span></button>
+      <button class="sm-ic" id="sm-more" title="Full panel" aria-label="Full panel">⋯</button>
+    </div>
+    <div class="sm-ai" id="sm-ai" hidden>
+      ${AI.map(([k,i,l]) => `<button class="sm-chip ${k==='teacher'?'p':''}" data-k="${k}">${ic(i)}<span>${l}</span></button>`).join('')}
+      <button class="sm-chip" id="sm-full"><span>Full panel…</span></button>
+    </div>`;
+  m.classList.add('show');
+  bindMiniReposition();
+
+  m.querySelectorAll('.sm-dot').forEach(b => b.onclick = () => {
+    const color = b.dataset.color;
+    window.State.brushColor = color;
+    createAnnotation(color, annotMode);
+    hideSelToolbar();
+  });
+  const ul = m.querySelector('#sm-ul');
+  ul.onclick = () => { annotMode = annotMode === 'underline' ? 'highlight' : 'underline'; ul.classList.toggle('on', annotMode === 'underline'); };
+  m.querySelector('#sm-note').onclick = () => { const sel = pendingSelection; hideSelToolbar(); openNoteComposer(sel); };
+  const aiRow = m.querySelector('#sm-ai');
+  m.querySelector('#sm-ask').onclick = () => { aiRow.hidden = !aiRow.hidden; m.classList.toggle('open', !aiRow.hidden); positionMiniBar(); };
+  const openClassic = () => { hideMiniBar(); showSelToolbar(true); };
+  m.querySelector('#sm-more').onclick = openClassic;
+  m.querySelector('#sm-full').onclick = openClassic;
+  m.querySelectorAll('.sm-chip[data-k]').forEach(b => b.onclick = () => miniAction(b.dataset.k));
+  positionMiniBar();
+  requestAnimationFrame(positionMiniBar);
+}
+
+export function showSelToolbar(forceClassic){
+  if(!pendingSelection || !pendingSelection.text || !pendingSelection.text.trim()){
+    const b = document.getElementById('sel-toolbar'); if(b) b.classList.remove('show');
+    hideMiniBar();
+    return;
+  }
+  if(forceClassic === true || window.State?.selStyle === 'classic'){
+    hideMiniBar();
+    return renderClassicToolbar();
+  }
+  renderMiniBar();
+}
+
+function renderClassicToolbar(){
   const bar = document.getElementById('sel-toolbar');
   if(!bar) return;
   if(!pendingSelection || !pendingSelection.text || !pendingSelection.text.trim()){
@@ -764,6 +887,7 @@ export function showSelToolbar(){
 export function hideSelToolbar(){
   const bar = document.getElementById('sel-toolbar');
   if (bar) bar.classList.remove('show');
+  hideMiniBar();
   clearPendingOverlay();
   pendingSelection = null;
 }

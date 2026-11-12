@@ -1110,6 +1110,16 @@ export function openAdvancedSettingsModal() {
               <span class="adv-pill-switch-btn ${isSelDisabled ? 'active' : ''}">LOCK</span>
             </div>
           </div>
+          <div class="adv-linear-row">
+            <div class="adv-row-info">
+              <div class="adv-row-title">Selection Panel Style</div>
+              <div class="adv-row-sub">Compact: small bar near the text. Classic: the full card at the bottom</div>
+            </div>
+            <div id="adv-sel-style-btn" class="adv-pill-switch" role="button">
+              <span class="adv-pill-switch-btn ${window.State.selStyle !== 'classic' ? 'active' : ''}">COMPACT</span>
+              <span class="adv-pill-switch-btn ${window.State.selStyle === 'classic' ? 'active' : ''}">CLASSIC</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1341,6 +1351,18 @@ export function openAdvancedSettingsModal() {
         btns[1].classList.toggle('active', nextVal);
       }
       window.toast(`Text selection ${nextVal ? 'Locked' : 'Unlocked'}`);
+    };
+  }
+
+  const selStyleBtn = document.getElementById('adv-sel-style-btn');
+  if (selStyleBtn) {
+    selStyleBtn.onclick = async () => {
+      const next = window.State.selStyle === 'classic' ? 'compact' : 'classic';
+      window.State.selStyle = next;
+      if (window.DB && window.DB.setting) await window.DB.setting('selStyle', next);
+      const btns = selStyleBtn.querySelectorAll('.adv-pill-switch-btn');
+      if (btns.length === 2) { btns[0].classList.toggle('active', next !== 'classic'); btns[1].classList.toggle('active', next === 'classic'); }
+      window.toast(`Selection panel: ${next === 'classic' ? 'Classic' : 'Compact'}`);
     };
   }
 
@@ -2823,7 +2845,7 @@ export function setupReaderInteractions(scrollEl){
   scrollEl.addEventListener('click', (e) => {
     if (Date.now() - lastTouchEndTime < 600) return;
     if (Math.hypot(e.clientX - mouseDownX, e.clientY - mouseDownY) > 8) return;
-    if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, .sheet, .menu, #sel-toolbar, #auto-scroll-controller')) return;
+    if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, .sheet, .menu, #sel-toolbar, #sel-mini, #auto-scroll-controller')) return;
     const sel = window.getSelection();
     if (sel && sel.toString().trim().length > 0) return;
     if (e.detail === 2) {

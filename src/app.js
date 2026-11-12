@@ -436,6 +436,7 @@ export async function boot(){
   window.State.hideNavigationBar = await window.DB.getSetting('hideNavigationBar', false);
   window.State.selectionColor = await window.DB.getSetting('selectionColor', '#2FC6BC');
   window.State.disableTextSelection = await window.DB.getSetting('disableTextSelection', false);
+  window.State.selStyle = await window.DB.getSetting('selStyle', 'compact');
   window.State.doubleTapAction = await window.DB.getSetting('doubleTapAction', 'zoom');
   window.State.autoScrollEnabled = await window.DB.getSetting('autoScrollEnabled', false);
   window.State.readAloudOledVisualizer = await window.DB.getSetting('readAloudOledVisualizer', true);
@@ -1053,7 +1054,9 @@ document.addEventListener('pointerdown', (e)=>{
 // Dismiss selection toolbar when tapping on empty space without scrolling
 document.addEventListener('click', (e)=>{
   const bar = document.getElementById('sel-toolbar');
-  if(!bar || !bar.classList.contains('show')) return;
+  const miniBar = document.getElementById('sel-mini');
+  const barOpen = (bar && bar.classList.contains('show')) || (miniBar && miniBar.classList.contains('show'));
+  if(!barOpen) return;
 
   // Protect against trailing click right after a text selection is formed (e.g. tap-hold release or double tap)
   if (window.lastSelectionTime && (Date.now() - window.lastSelectionTime < 500)) {
@@ -1071,7 +1074,8 @@ document.addEventListener('click', (e)=>{
   }
 
   // Do not hide if click is inside the toolbar or bottom sheet
-  if(bar.contains(e.target)) return;
+  if(bar && bar.contains(e.target)) return;
+  if(miniBar && miniBar.contains(e.target)) return;
   if(document.getElementById('sheet')?.contains(e.target)) return;
   if(e.target.closest('.sheet') || e.target.closest('#sheet-backdrop')) return;
 
