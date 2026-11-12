@@ -1589,7 +1589,7 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
         ${isInitiallyCached ? getActionBarButtonsHtml() : ''}
       </div>
     </div>
-  `);
+  `, { peek: Boolean(resolvedSel.isSelection) });
 
   // 5. Attach Immediate Synchronous Listeners
   bindScopeEvents();

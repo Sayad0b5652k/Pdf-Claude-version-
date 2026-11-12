@@ -52,8 +52,14 @@ export const Sheet = {
           const dx = Math.abs(e.changedTouches[0].clientX - startX);
 
           // Only close if user deliberately pulled down directly on the top handle bar
-          if (isHandleTouch && dy > 60 && dy > dx * 1.5) {
-            this.close();
+          const isPeek = this.el.classList.contains('peek');
+          if (isHandleTouch && isPeek && Math.abs(dy) < 8 && dx < 8) {
+            this.el.classList.toggle('expanded'); positionBottomBar(this.el);
+          } else if (isHandleTouch && isPeek && dy < -40 && Math.abs(dy) > dx * 1.5) {
+            this.el.classList.add('expanded'); positionBottomBar(this.el);
+          } else if (isHandleTouch && dy > 60 && dy > dx * 1.5) {
+            if (isPeek && this.el.classList.contains('expanded')) { this.el.classList.remove('expanded'); positionBottomBar(this.el); }
+            else this.close();
           }
           isHandleTouch = false;
         }
@@ -99,8 +105,12 @@ export const Sheet = {
     } else if (this.body) {
       this.body.scrollTop = 0;
     }
+    // Peek mode: page stays visible and tappable (no dimming backdrop), sheet starts at ~46% height; handle toggles full height.
+    const peek = options.peek === true;
+    this.el.classList.toggle('peek', peek);
+    if (!peek || !isAlreadyOpen) this.el.classList.remove('expanded');
     this.el.classList.add('open');
-    this.backdrop.classList.add('open');
+    this.backdrop.classList.toggle('open', !peek);
     keepBottomBarPositioned(this.el);
 
     this.body.querySelectorAll('.sheet-close-btn, [data-sheet-close]').forEach(btn => {
@@ -147,7 +157,7 @@ export const Sheet = {
   },
   close(){
     if (!this.el) return;
-    this.el.classList.remove('open');
+    this.el.classList.remove('open', 'peek', 'expanded');
     this.backdrop.classList.remove('open');
     if (window._readerSettingsTimer) {
       clearInterval(window._readerSettingsTimer);
@@ -646,7 +656,8 @@ export function positionBottomBar(el){
     const offset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
     el.style.bottom = offset + 'px';
     if(el.id === 'sheet'){
-      el.style.maxHeight = Math.min(vv.height * 0.82, vv.height - 24) + 'px';
+      const frac = (el.classList.contains('peek') && !el.classList.contains('expanded')) ? 0.46 : 0.82;
+      el.style.maxHeight = Math.min(vv.height * frac, vv.height - 24) + 'px';
     }
   } else {
     el.style.bottom = '0px';

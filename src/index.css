@@ -7512,3 +7512,9 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 #sel-mini .sm-ai[hidden] { display: none; }
 #sel-mini .sm-chip { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 999px; padding: 7px 11px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; white-space: nowrap; }
 #sel-mini .sm-chip.p { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* Peek sheet: AI result opened from a text selection keeps the page visible and tappable */
+.sheet.peek { max-height: 46vh; box-shadow: 0 -10px 30px -10px rgba(0,0,0,.4); transition: transform .24s cubic-bezier(0.16, 1, 0.3, 1), max-height .2s ease; }
+.sheet.peek.expanded { max-height: 84vh; }
+.sheet.peek .sheet-handle { width: 44px; height: 5px; margin: 8px auto 2px; padding: 0; position: relative; }
+.sheet.peek .sheet-handle::after { content: ''; position: absolute; left: -20px; right: -20px; top: -10px; bottom: -12px; }
