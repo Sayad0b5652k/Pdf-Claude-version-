@@ -990,8 +990,25 @@ async function fetchJsonWithTimeout(url: string, init: any, ms: number): Promise
     return await r.json();
   } finally { clearTimeout(t); }
 }
-async function runWebSearch(question: string, chatHistory: any[]): Promise<{ items: WebItem[] }> {
+/* Spend guard for paid web providers (Tavily/Firecrawl): per-visitor and per-day caps so nobody can drain the key quota. */
+const paidWebHits = new Map<string, { n: number; resetAt: number }>();
+let paidWebDay = { n: 0, resetAt: Date.now() + 86_400_000 };
+function allowPaidWeb(ip: string): boolean {
+  const now = Date.now();
+  const perHour = Number(process.env.WEB_CALLS_PER_HOUR || 30);
+  const perDay = Number(process.env.WEB_CALLS_PER_DAY || 600);
+  if (paidWebDay.resetAt <= now) paidWebDay = { n: 0, resetAt: now + 86_400_000 };
+  if (paidWebDay.n >= perDay) return false;
+  let e = paidWebHits.get(ip);
+  if (!e || e.resetAt <= now) { e = { n: 0, resetAt: now + 3_600_000 }; paidWebHits.set(ip, e); if (paidWebHits.size > 5000) for (const [k, v] of paidWebHits) if (v.resetAt <= now) paidWebHits.delete(k); }
+  if (e.n >= perHour) return false;
+  e.n++; paidWebDay.n++;
+  return true;
+}
+
+async function runWebSearch(question: string, chatHistory: any[], ip = "unknown"): Promise<{ items: WebItem[] }> {
   const pv = webProviders();
+  if (pv.any && !allowPaidWeb(ip)) { console.warn("[Web] paid search budget reached for", ip); return { items: [] }; }
   const items: WebItem[] = [];
   const urlMatch = (question || "").match(/https?:\/\/[^\s)>\]]+/i);
   // A pasted link: read that page.
@@ -1045,9 +1062,10 @@ function imgTokens(s: string): string[] {
   return (s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9ऀ-ॿ\s]/g, " ").split(/\s+/).filter(w => w.length > 2 && !IMG_TOKEN_STOP.has(w));
 }
 function hostOf(u: string): string { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } }
-async function webImageFallback(subject: string, kind: string, customKey?: string): Promise<{ imageUrl: string; title: string; description: string; sourceName: string; sourceUrl: string } | null> {
+async function webImageFallback(subject: string, kind: string, customKey?: string, ip = "unknown"): Promise<{ imageUrl: string; title: string; description: string; sourceName: string; sourceUrl: string } | null> {
   const pv = webProviders();
   if (!pv.any || !subject) return null;
+  if (!allowPaidWeb(ip)) return null;
   const tavilyBase = process.env.TAVILY_BASE_URL || "https://api.tavily.com";
   const fireBase = process.env.FIRECRAWL_BASE_URL || "https://api.firecrawl.dev";
   const q = `${subject}${kind === "map" ? " map" : kind === "diagram" ? " diagram" : kind === "portrait" ? " portrait photo" : " photo"}`.slice(0, 200);
@@ -2535,7 +2553,7 @@ MANDATORY RULES:
           let netImg: any = await fetchEducationalInternetImage(targetVisualSubject, resolvedSubject);
           let webCredit = "";
           if (!(netImg && netImg.imageUrl) && intent?.subject) {
-            const wi = await webImageFallback(intent.subject, intent.kind || "photo", customKey);
+            const wi = await webImageFallback(intent.subject, intent.kind || "photo", customKey, req.ip || "unknown");
             if (wi) {
               netImg = { imageUrl: wi.imageUrl, title: wi.title, description: wi.description };
               webCredit = `\n\n*Image source: [${wi.sourceName}](${wi.sourceUrl})*`;
@@ -2666,7 +2684,7 @@ ${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}
           }
         }
         if (!webResultsBlock && wantsWeb && webProviders().any) {
-          const web = await runWebSearch(userQuestion, chatHistory);
+          const web = await runWebSearch(userQuestion, chatHistory, req.ip || "unknown");
           if (web.items.length) {
             webResultsBlock = web.items.map((r, i) => `[W${i + 1}] ${r.title} (${r.url})\n${r.content}`).join("\n\n");
             webSourcesMd = "\n\n---\n**Sources:** " + web.items.map((r, i) => `[${i + 1}] [${r.title.slice(0, 60)}](${r.url})`).join(" · ");
