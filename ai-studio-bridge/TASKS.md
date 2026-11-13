@@ -36,5 +36,32 @@ Expected: pages are never blank for more than a moment and the page counter matc
 Search a word that appears many times. Expected: results grouped by chapter, tap one -> the word (only the
 word) is highlighted, bottom bar shows "n / total", arrows move between matches.
 
-## 8. Anything else that looks broken
+## 8. Image requests (real Wikipedia / web)
+Ask: "Mahatma Gandhi ki photo dikhao", "photosynthesis ka diagram dikhao", "India ka map dikhao".
+Expected: the image matches the subject (never a different topic). If Wikipedia has nothing and TAVILY_API_KEY/FIRECRAWL_API_KEY
+is set, a web image may appear with an `Image source: [site](link)` line. If nothing reliable exists: an honest
+"reliable image nahi mili" message. Report any wrong-subject image with the exact prompt.
+
+## 9. Interactive cards
+Ask for a quiz (MCQ + fill-in-the-blank + short answer) and a "topics covered" checklist.
+Expected: tappable card in the chat, instant right/wrong feedback, a score, and "Add N cards to Review" for mistakes.
+Also check: after a quiz with mistakes, re-open the chat - a chip "Meri galtiyan (N)" appears and starts a new quiz on those concepts.
+
+## 10. Failed reply -> Retry
+Turn on airplane mode (or use a wrong Gemini key), send a chat message.
+Expected: a clear error message and a "Retry" button. Fix the network/key, tap Retry: the answer arrives, the question is not duplicated.
+
+## 11. Text selection bar (touch device only)
+In the reader long-press a word and drag the handles over 2-3 lines.
+Expected: a small bar (colour dots, underline, note, "Ask AI", "...") appears right below the selection - not half the screen.
+Tap a colour dot: highlight applied in one tap. Tap "Ask AI" -> chips row -> "Explain": the result opens as a lower sheet
+(about 45% height) and the PDF page above stays visible and scrollable; tap the sheet handle to expand/collapse.
+"..." must open the old full card with every original button. Reader > Advanced > "Selection Panel Style" switches between COMPACT and CLASSIC.
+Report any case where the bar overlaps the selection handles or goes off screen.
+
+## 12. Settings page
+Open Settings. Expected order: Appearance, Reading, Pro Design Theme, AI Engine, AI Response, Storage, Backup, App Updates, App Installation, About.
+Nothing overlaps, "Full meaning, QR & app link" and "Credits" collapse/expand. Report anything cramped.
+
+## 13. Anything else that looks broken
 List it with steps and a screenshot description.
