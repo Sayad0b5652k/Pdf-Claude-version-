@@ -1633,6 +1633,11 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
               </button>
             </div>
           ` : ''}
+          ${!isUser && m.isError && idx === chatMessages.length - 1 && idx > 0 && chatMessages[idx-1]?.role === 'user' ? `
+            <div style="margin-top:6px;">
+              <button class="btn btn-teacher-action" data-action="retry" data-idx="${idx}" title="Retry" style="height:30px; padding:0 14px; font-size:12px; font-weight:700; border-radius:15px; background:var(--accent); color:#fff; border:0;">↻ Retry</button>
+            </div>
+          ` : ''}
         </div>
       `;
     }).join('');
@@ -1667,6 +1672,16 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         const msg = chatMessages[idx];
         if (!msg) return;
 
+        if (action === 'retry') {
+          const prev = chatMessages[idx - 1];
+          if (!prev || prev.role !== 'user' || sendBtn.disabled) return;
+          const again = prev.text;
+          chatMessages.splice(idx - 1, 2);
+          await saveTeacherChatHistory(fileId, chatMessages);
+          renderMessages();
+          sendUserMessage(again);
+          return;
+        }
         if (action === 'delete-msg') {
           chatMessages.splice(idx, 1);
           await saveTeacherChatHistory(fileId, chatMessages);
@@ -2187,6 +2202,24 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       }
     };
   });
+
+  // "My mistakes" chip: appears when earlier chat quizzes left unreviewed mistakes for this book
+  (async () => {
+    try {
+      const bar = document.getElementById('chat-quick-chips-bar');
+      if (!bar || !window.DB || !window.DB.all) return;
+      const all = await window.DB.all('flashcards');
+      const mine = (all || []).filter(c => c && c.category === 'Chat quiz mistakes' && (isGlobal || c.fileId === fileId));
+      if (!mine.length || !document.getElementById('chat-quick-chips-bar')) return;
+      const stems = mine.slice(-6).map((c, i) => `${i + 1}) ${String(c.front || '').split('\n')[0].slice(0, 140)}`).join('\n');
+      const chip = document.createElement('button');
+      chip.className = 'chat-quick-chip';
+      chip.dataset.query = `Meri pichhle quiz ki galtiyon par naya quiz lo. Inhi concepts ko alag sawaalon se test karo (wahi sawaal repeat mat karna):\n${stems}`;
+      chip.innerHTML = `<span>🎯 Meri galtiyan (${mine.length})</span>`;
+      chip.onclick = () => { if (inputEl) { inputEl.value = chip.dataset.query; sendUserMessage(); } };
+      bar.insertBefore(chip, bar.firstChild);
+    } catch (e) {}
+  })();
 
   // Real-time Voice Dictation in Input Box (Hindi-to-Hinglish + English Support with Deduplication and 3.5s Silence Auto-Stop)
   let isDictating = false;
