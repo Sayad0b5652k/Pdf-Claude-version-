@@ -7535,3 +7535,32 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
   #sel-mini .sm-ask span { display: none; }
   #sel-mini .sm-ask { padding: 8px 10px; }
 }
+
+/* ===== Reading Analytics flip card: exam plan on the back + setup sheet ===== */
+.an-flip { perspective: 1200px; margin-bottom: 22px; }
+.an-flip .card { margin-bottom: 0 !important; }
+.an-flip-in { position: relative; transition: transform .55s cubic-bezier(.3,.8,.3,1); transform-style: preserve-3d; }
+.an-flip.flipped .an-flip-in { transform: rotateY(180deg); }
+.an-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.an-front { position: relative; }
+.an-back { position: absolute; inset: 0; transform: rotateY(180deg); }
+.an-flip:not(.flipped) .an-back { pointer-events: none; }
+.an-flip.flipped .an-front { pointer-events: none; }
+.an-back-card { height: 100%; padding: 20px; border: 1px solid var(--border); background: var(--surface); border-radius: 20px; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; gap: 8px; position: relative; }
+.an-chip { position: absolute; top: 16px; right: 16px; z-index: 3; display: inline-flex; align-items: center; gap: 5px; padding: 6px 11px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-size: 12px; font-weight: 800; cursor: pointer; }
+.sp-back-h { font-size: 18px; font-weight: 800; letter-spacing: -.01em; }
+.sp-big { font-size: 34px; line-height: 1.05; font-weight: 800; color: var(--accent); margin-top: 14px; }
+.sp-big span { font-size: 15px; font-weight: 700; color: var(--text-dim); }
+.sp-sub { font-size: 14px; color: var(--text-dim); line-height: 1.45; }
+.sp-sub b { color: var(--text); }
+.sp-bar { display: block; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: auto; }
+.sp-bar u { display: block; height: 100%; background: var(--accent); border-radius: 3px; text-decoration: none; }
+.sp-book { font-size: 12px; color: var(--text-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-btn { margin-top: auto; width: 100%; padding: 12px; font-weight: 800; border-radius: 12px; }
+.sp-bar + .sp-book + .sp-btn { margin-top: 6px; }
+.sp-btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+.sp-sheet { padding: 6px 4px 14px; display: flex; flex-direction: column; gap: 8px; }
+.sp-sheet-h { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+.sp-sheet label { font-size: 12px; font-weight: 700; color: var(--text-dim); margin-top: 6px; }
+.sp-sheet select, .sp-sheet input { width: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); font-size: 14px; }
+.sp-note { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin: 4px 0 8px; }

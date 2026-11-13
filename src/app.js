@@ -6,6 +6,7 @@ import './ai.js';
 import './utils.js';
 import './seed.js';
 import './views_dashboard.js';
+import './study_plan.js';
 import './smart_cover.js';
 import './views_other.js';
 import './reader.js';

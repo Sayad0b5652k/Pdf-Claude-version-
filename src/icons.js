@@ -35,6 +35,7 @@ export const ICONS = {
   upload:'<path d="M12 3v11"/><path d="m7 8 5-5 5 5"/><path d="M4 21h16"/>',
   lock:'<rect x="5" y="11" width="14" height="10"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+  calendar:'<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/>',
   zap:'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
   brain:'<circle cx="12" cy="5" r="2.1"/><circle cx="5" cy="12" r="2.1"/><circle cx="19" cy="12" r="2.1"/><circle cx="12" cy="19" r="2.1"/><path d="M12 7.1V12M7.1 12H12M12 12h6.9M12 12v6.9"/>',
   cards:'<rect x="4" y="6" width="12" height="14"/><path d="M9 6V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-2"/>',

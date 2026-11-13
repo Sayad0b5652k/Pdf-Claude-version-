@@ -14,6 +14,7 @@ export async function renderDashboard(preserveScroll = true){
   const totalSize = files.reduce((a,f)=>a+(f.size||0),0);
   const readingStats = await window.getReadingStats();
   const chatHistories = await window.DB.all('chathistory').catch(() => []);
+  const planBack = typeof window.studyPlanBackHtml === 'function' ? await window.studyPlanBackHtml(files).catch(() => '') : '';
   // The user may have navigated away (e.g. opened a book) while the awaits above were pending
   if (window.State.view !== 'dashboard') return;
 
@@ -24,7 +25,7 @@ export async function renderDashboard(preserveScroll = true){
     const widgetsEl = document.getElementById('dash-widgets');
     if (widgetsEl) {
       widgetsEl.innerHTML = `
-        ${renderAnalyticsCard(files, readingStats)}
+        ${analyticsFlipHtml(files, readingStats, planBack)}
 
         ${recents.length? `
         <div id="continue-reading-section" style="margin-bottom:24px;">
@@ -98,7 +99,7 @@ export async function renderDashboard(preserveScroll = true){
 
     <div style="padding:6px 20px;">
       <div id="dash-widgets">
-        ${renderAnalyticsCard(files, readingStats)}
+        ${analyticsFlipHtml(files, readingStats, planBack)}
 
         ${recents.length? `
         <div id="continue-reading-section" style="margin-bottom:24px;">
@@ -146,6 +147,7 @@ export async function renderDashboard(preserveScroll = true){
 export function bindDashboardEvents() {
   window.bindBottomNav();
   bindAIChatHistoryEvents();
+  if (typeof window.bindStudyPlanBack === 'function') window.bindStudyPlanBack(window.State.files.slice().sort((a,b)=>b.lastOpened-a.lastOpened));
 
   const searchEl = document.getElementById('dash-search');
   if (searchEl) {
@@ -331,6 +333,25 @@ export function paperEntryCard() {
     <span class="pp-entry-ic">${window.icon('paper','icon')}</span>
     <span class="pp-entry-t"><i class="pp-kick">PRACTICE</i><b>Question Papers</b><small>Board-pattern papers from your books, with history</small></span>
     <span class="pp-entry-go">${window.icon('chevRight','icon icon-sm')}</span></button>`;
+}
+
+/** Reading Analytics on the front; the exam plan lives on its back (tap the small chip to flip). */
+export function analyticsFlipHtml(files, readingStats, planBack) {
+  if (!planBack) return renderAnalyticsCard(files, readingStats);
+  return `<div class="an-flip ${window._anFlipped ? 'flipped' : ''}" id="an-flip">
+    <div class="an-flip-in">
+      <div class="an-face an-front">
+        ${renderAnalyticsCard(files, readingStats)}
+        <button class="an-chip" id="an-flip-btn" type="button">${window.icon('calendar', 'icon icon-xs')}<span>Exam plan</span></button>
+      </div>
+      <div class="an-face an-back">
+        <div class="card an-back-card">
+          ${planBack}
+          <button class="an-chip" id="an-back-btn" type="button">${window.icon('chart', 'icon icon-xs')}<span>Analytics</span></button>
+        </div>
+      </div>
+    </div>
+  </div>`;
 }
 
 export function renderAnalyticsCard(files, readingStats) {
