@@ -7501,7 +7501,11 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 #sel-mini.show { display: flex; animation: smIn .16s ease-out; }
 @keyframes smIn { from { opacity: 0; transform: translateY(6px) scale(.97); } to { opacity: 1; transform: none; } }
 #sel-mini .sm-row { display: flex; align-items: center; gap: 9px; }
-#sel-mini .sm-dot { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; border: 2px solid var(--bg-elev); box-shadow: 0 0 0 1px var(--border); padding: 0; cursor: pointer; }
+#sel-mini .sm-dot { width: 26px; height: 26px; min-width: 26px; border-radius: 50%; background: var(--c); border: 2px solid var(--bg-elev); box-shadow: 0 0 0 1px var(--border); padding: 0; cursor: pointer; position: relative; }
+#sel-mini .sm-row.ul .sm-dot { background: var(--surface); border-radius: 8px; }
+#sel-mini .sm-row.ul .sm-dot::after { content: 'U'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; color: var(--text); text-decoration: underline; text-decoration-color: var(--c); text-decoration-thickness: 3px; text-underline-offset: 3px; }
+#sel-mini .sm-mode { display: inline-flex; align-items: center; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 800; color: var(--text); cursor: pointer; white-space: nowrap; }
+#sel-mini .sm-mode-ic.u { font-weight: 800; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 2px; }
 #sel-mini .sm-sep { width: 1px; height: 22px; background: var(--border); flex: none; }
 #sel-mini .sm-ic { background: none; border: 0; color: var(--text); width: 32px; height: 32px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; cursor: pointer; padding: 0; }
 #sel-mini .sm-ic.on { background: var(--surface); box-shadow: inset 0 0 0 1px var(--accent); color: var(--accent); }
@@ -7518,3 +7522,16 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 .sheet.peek.expanded { max-height: 84vh; }
 .sheet.peek .sheet-handle { width: 44px; height: 5px; margin: 8px auto 2px; padding: 0; position: relative; }
 .sheet.peek .sheet-handle::after { content: ''; position: absolute; left: -20px; right: -20px; top: -10px; bottom: -12px; }
+
+/* tighter compact bar so "…" never falls off narrow phones */
+#sel-mini { padding: 6px 8px; }
+#sel-mini .sm-row { gap: 5px; }
+#sel-mini .sm-dot { width: 24px; height: 24px; min-width: 24px; }
+#sel-mini .sm-sep { display: none; }
+#sel-mini .sm-mode { padding: 6px 9px; }
+#sel-mini .sm-ic { width: 30px; height: 30px; }
+#sel-mini .sm-ask { padding: 7px 10px; }
+@media (max-width: 389px) {
+  #sel-mini .sm-ask span { display: none; }
+  #sel-mini .sm-ask { padding: 8px 10px; }
+}

@@ -437,6 +437,7 @@ export async function boot(){
   window.State.selectionColor = await window.DB.getSetting('selectionColor', '#2FC6BC');
   window.State.disableTextSelection = await window.DB.getSetting('disableTextSelection', false);
   window.State.selStyle = await window.DB.getSetting('selStyle', 'compact');
+  window.State.selDefaultStyle = await window.DB.getSetting('selDefaultStyle', 'highlight');
   window.State.doubleTapAction = await window.DB.getSetting('doubleTapAction', 'zoom');
   window.State.autoScrollEnabled = await window.DB.getSetting('autoScrollEnabled', false);
   window.State.readAloudOledVisualizer = await window.DB.getSetting('readAloudOledVisualizer', true);

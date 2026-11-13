@@ -571,7 +571,9 @@ function positionMiniBar(){
     top = rs[0].top; bottom = rs[rs.length-1].bottom; midX = (rs[0].left + rs[rs.length-1].right) / 2;
   }
   const vv = window.visualViewport;
-  const vh = vv ? vv.height : window.innerHeight, vw = window.innerWidth;
+  let vh = vv ? vv.height : window.innerHeight; const vw = window.innerWidth;
+  const openSheet = document.getElementById('sheet');
+  if (openSheet && openSheet.classList.contains('open') && openSheet.classList.contains('peek')) vh = Math.min(vh, openSheet.getBoundingClientRect().top);  // stay above the peek sheet
   const mh = m.offsetHeight || 48, mw = m.offsetWidth || 300;
   const minY = 64, maxY = vh - mh - 12;
   let y = bottom + 28;                 // below the selection handles
@@ -611,6 +613,7 @@ function renderMiniBar(){
   const classic = document.getElementById('sel-toolbar');
   if(classic) classic.classList.remove('show');
   const m = ensureMiniBar();
+  annotMode = window.State?.selDefaultStyle === 'underline' ? 'underline' : 'highlight';   // every new selection starts from the default style
   const ic = (n) => window.icon(n, 'icon icon-xs');
   const AI = [
     ['explain','brain','Explain'], ['summary','fileText','Summary'], ['cards','cards','Flashcards'], ['mcq','help','MCQs'],
@@ -618,12 +621,12 @@ function renderMiniBar(){
     ['translate','language','Translate'], ['define','search','Define']
   ];
   m.innerHTML = `
-    <div class="sm-row">
-      ${COLORS.slice(0,4).map(c => `<button class="sm-dot" data-color="${c}" style="background:${c}" title="Apply this color" aria-label="Apply color"></button>`).join('')}
+    <div class="sm-row ${annotMode==='underline'?'ul':''}" id="sm-row">
+      <button class="sm-mode" id="sm-mode" aria-label="Switch between highlight and underline">${annotMode==='underline' ? '<span class="sm-mode-ic u">U</span><span>Underline</span>' : ic('highlighter') + '<span>Highlight</span>'}</button>
       <span class="sm-sep"></span>
-      <button class="sm-ic ${annotMode==='underline'?'on':''}" id="sm-ul" title="Underline instead of highlight" aria-label="Underline mode">${ic('underline')}</button>
+      ${COLORS.slice(0,4).map(c => `<button class="sm-dot" data-color="${c}" style="--c:${c}" title="Apply this color" aria-label="Apply color"></button>`).join('')}
+      <span class="sm-sep"></span>
       <button class="sm-ic" id="sm-note" title="Add note" aria-label="Add note">${ic('note')}</button>
-      <span class="sm-sep"></span>
       <button class="sm-ask" id="sm-ask">${ic('sparkle')}<span>Ask AI</span></button>
       <button class="sm-ic" id="sm-more" title="Full panel" aria-label="Full panel">⋯</button>
     </div>
@@ -640,8 +643,15 @@ function renderMiniBar(){
     createAnnotation(color, annotMode);
     hideSelToolbar();
   });
-  const ul = m.querySelector('#sm-ul');
-  ul.onclick = () => { annotMode = annotMode === 'underline' ? 'highlight' : 'underline'; ul.classList.toggle('on', annotMode === 'underline'); };
+  const modeBtn = m.querySelector('#sm-mode'), rowEl = m.querySelector('#sm-row');
+  modeBtn.onclick = () => {
+    annotMode = annotMode === 'underline' ? 'highlight' : 'underline';
+    const u = annotMode === 'underline';
+    rowEl.classList.toggle('ul', u);
+    modeBtn.innerHTML = u ? '<span class="sm-mode-ic u">U</span><span>Underline</span>' : ic('highlighter') + '<span>Highlight</span>';
+    if (window.toast) window.toast(u ? 'Underline mode' : 'Highlight mode');
+    positionMiniBar();
+  };
   m.querySelector('#sm-note').onclick = () => { const sel = pendingSelection; hideSelToolbar(); openNoteComposer(sel); };
   const aiRow = m.querySelector('#sm-ai');
   m.querySelector('#sm-ask').onclick = () => { aiRow.hidden = !aiRow.hidden; m.classList.toggle('open', !aiRow.hidden); positionMiniBar(); };

@@ -1112,6 +1112,16 @@ export function openAdvancedSettingsModal() {
           </div>
           <div class="adv-linear-row">
             <div class="adv-row-info">
+              <div class="adv-row-title">Default Markup Style</div>
+              <div class="adv-row-sub">What the colour dots do when you select text (you can switch per selection)</div>
+            </div>
+            <div id="adv-markup-style-btn" class="adv-pill-switch" role="button">
+              <span class="adv-pill-switch-btn ${window.State.selDefaultStyle !== 'underline' ? 'active' : ''}">HIGHLIGHT</span>
+              <span class="adv-pill-switch-btn ${window.State.selDefaultStyle === 'underline' ? 'active' : ''}">UNDERLINE</span>
+            </div>
+          </div>
+          <div class="adv-linear-row">
+            <div class="adv-row-info">
               <div class="adv-row-title">Selection Panel Style</div>
               <div class="adv-row-sub">Compact: small bar near the text. Classic: the full card at the bottom</div>
             </div>
@@ -1351,6 +1361,18 @@ export function openAdvancedSettingsModal() {
         btns[1].classList.toggle('active', nextVal);
       }
       window.toast(`Text selection ${nextVal ? 'Locked' : 'Unlocked'}`);
+    };
+  }
+
+  const markupBtn = document.getElementById('adv-markup-style-btn');
+  if (markupBtn) {
+    markupBtn.onclick = async () => {
+      const next = window.State.selDefaultStyle === 'underline' ? 'highlight' : 'underline';
+      window.State.selDefaultStyle = next;
+      if (window.DB && window.DB.setting) await window.DB.setting('selDefaultStyle', next);
+      const btns = markupBtn.querySelectorAll('.adv-pill-switch-btn');
+      if (btns.length === 2) { btns[0].classList.toggle('active', next !== 'underline'); btns[1].classList.toggle('active', next === 'underline'); }
+      window.toast(`Default markup: ${next === 'underline' ? 'Underline' : 'Highlight'}`);
     };
   }
 
