@@ -942,7 +942,8 @@ export function renderMermaidDiagrams(container) {
           lineColor: isDark ? '#60a5fa' : '#3b82f6',
           secondaryColor: isDark ? '#0f172a' : '#f8fafc',
           tertiaryColor: isDark ? '#1e1e2e' : '#ffffff',
-          edgeLabelBackground: isDark ? '#1e293b' : '#ffffff'
+          edgeLabelBackground: isDark ? '#1e293b' : '#ffffff',
+          fontSize: '16px'
         },
         securityLevel: 'loose',
         flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
@@ -1004,14 +1005,14 @@ export function openImageLightbox(src, caption, options = {}) {
 
   const modal = document.createElement('div');
   modal.id = 'ai-image-lightbox';
-  modal.style.cssText = 'position:fixed; inset:0; z-index:99999; background:rgba(5,9,14,0.94); backdrop-filter:blur(12px); display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:14px; user-select:none; -webkit-user-select:none; animation:fadeIn 0.18s ease;';
+  modal.style.cssText = 'position:fixed; inset:0; z-index:99999; background:rgb(5,9,14); display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:14px; user-select:none; -webkit-user-select:none; animation:fadeIn 0.18s ease;';
 
   const cleanCaption = caption || (isSvg ? 'Academic Flowchart' : 'Educational Visual');
   const fileName = cleanCaption.replace(/[^a-zA-Z0-9_-]/g, '_') || 'academic-visual';
 
   modal.innerHTML = `
     <!-- Top Control Toolbar -->
-    <div style="width:100%; max-width:960px; display:flex; align-items:center; justify-content:space-between; gap:10px; z-index:20; background:rgba(20,28,38,0.8); backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:8px 12px;">
+    <div style="width:100%; max-width:960px; display:flex; align-items:center; justify-content:space-between; gap:10px; z-index:20; background:rgb(20,28,38); border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:8px 12px;">
       <div style="display:flex; align-items:center; gap:8px; min-width:0;">
         <span style="font-size:16px;">${isSvg ? '📊' : '🖼️'}</span>
         <span style="color:#fff; font-size:12.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:280px;">${escapeHtml(cleanCaption)}</span>
@@ -1043,7 +1044,7 @@ export function openImageLightbox(src, caption, options = {}) {
 
     <!-- Center Viewport with Hardware-Accelerated Smooth Transform -->
     <div id="lb-viewport" style="position:relative; width:100%; height:calc(100vh - 120px); overflow:hidden; display:flex; align-items:center; justify-content:center; cursor:grab; touch-action:none;">
-      <div id="lb-transform-box" style="display:flex; align-items:center; justify-content:center; transform-origin:center center; will-change:transform; transform:translate3d(0,0,0) scale(1);">
+      <div id="lb-transform-box" style="display:flex; align-items:center; justify-content:center; transform-origin:center center; transform:translate(0px,0px) scale(1);">
         ${isSvg ? `
           <div id="lb-svg-card" style="background:var(--surface, #ffffff); border:1px solid var(--border, rgba(255,255,255,0.15)); border-radius:14px; padding:22px 26px; box-shadow:0 18px 56px rgba(0,0,0,0.6); max-width:92vw; max-height:80vh; overflow:auto; display:flex; align-items:center; justify-content:center; color:var(--text, #0f172a); pointer-events:none;">
             ${svgHtml || ''}
@@ -1068,7 +1069,7 @@ export function openImageLightbox(src, caption, options = {}) {
 
   const updateTransform = () => {
     if (!transformBox) return;
-    transformBox.style.transform = `translate3d(${panX}px, ${panY}px, 0px) scale(${zoom})`;
+    transformBox.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
     if (zoomLevelEl) {
       zoomLevelEl.textContent = `${Math.round(zoom * 100)}%`;
     }
@@ -1077,8 +1078,15 @@ export function openImageLightbox(src, caption, options = {}) {
     }
   };
 
+  const maxZoom = () => {
+    if (isSvg || /^data:image\/svg|\.svg(?:[?#]|$)/i.test(src)) return 8;
+    const im = modal.querySelector('#lb-image');
+    if (!im || !im.naturalWidth || !im.clientWidth) return 5;
+    // beyond ~2x the real pixel density the picture only gets blurrier, so stop there
+    return Math.max(2, Math.min(5, (im.naturalWidth / (im.clientWidth * (window.devicePixelRatio || 1))) * 2));
+  };
   const setZoom = (newZoom, animated = true) => {
-    zoom = Math.max(0.5, Math.min(5.0, newZoom));
+    zoom = Math.max(0.5, Math.min(maxZoom(), newZoom));
     if (zoom <= 1) {
       panX = 0;
       panY = 0;
@@ -1155,7 +1163,7 @@ export function openImageLightbox(src, caption, options = {}) {
       const dy = e.touches[0].clientY - e.touches[1].clientY;
       const dist = Math.hypot(dx, dy);
       const factor = dist / touchStartDist;
-      zoom = Math.max(0.5, Math.min(5.0, touchStartZoom * factor));
+      zoom = Math.max(0.5, Math.min(maxZoom(), touchStartZoom * factor));
       updateTransform();
     }
   };

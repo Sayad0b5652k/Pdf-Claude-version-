@@ -1280,7 +1280,7 @@ async function fetchEducationalInternetImage(rawQuery: string, fallbackSubject?:
   // 2. Search Wikipedia API with smart entity scoring (ensures primary subject matches)
   for (const kw of searchKeywords) {
     try {
-      const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(kw)}&gsrlimit=8&prop=pageimages|extracts&piprop=original|thumbnail&pithumbsize=1200&exintro=1&explaintext=1&format=json`;
+      const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent(kw)}&gsrlimit=8&prop=pageimages|extracts&piprop=original|thumbnail&pithumbsize=2000&exintro=1&explaintext=1&format=json`;
       const resp = await fetch(wikiUrl, { headers: { "User-Agent": "SAYAD-Academic-App/2.0 (educational research)" } });
       if (resp.ok) {
         const data: any = await resp.json();
