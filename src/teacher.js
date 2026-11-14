@@ -1,4 +1,3 @@
-import { extractWidgets, widgetInner, bindWidget, widgetSummary } from './chat_widgets.js';
 // @ts-nocheck
 import { fixLegacyHindi, fixLegacyItems } from './hindi_fix.js';
 import { callAI, callServerGemini, callGeminiFast, callGroqFast, callGroq70b, speakWithElevenLabs, stopElevenAudio } from './ai.js';
@@ -23,7 +22,6 @@ export const TEACHER_MODES = [
 export let activeTeacherMode = 'professional';
 export let examTargetMarks = 3; // 2, 3, or 5
 export let crossPdfActive = false;
-let quizActive = false;
 let webSearchOn = (() => { try { return localStorage.getItem('sayad_chat_web') === '1'; } catch (e) { return false; } })();
 export let isVoiceListening = false;
 export let speechRecognitionInstance = null;
@@ -812,7 +810,6 @@ export async function findRelevantPages(query, fileId, doc, lo, hi, limit = 4) {
 /* Takes every machine-read marker out of a reply: interactive cards, follow-up chips, review cards. */
 function extractAllMarkers(text) {
   let s = typeof text === 'string' ? text : '';
-  const ex = extractWidgets(s); s = ex.text;
   let followups = [];
   const fm = s.match(/\[\[\s*FOLLOWUPS\s*:([^\]]*)\]\]/i);
   if (fm) followups = fm[1].split('|').map(x => x.trim()).filter(x => x.length > 2 && x.length < 70).slice(0, 3);
@@ -824,7 +821,7 @@ function extractAllMarkers(text) {
     return '';
   });
   s = s.replace(/\n{3,}/g, '\n\n').trim();
-  return { text: s, widget: ex.widget, followups, cards };
+  return { text: s, followups, cards };
 }
 
 export async function getTeacherContext(options = {}, userQuery = '', chatHistory = []) {
@@ -1611,7 +1608,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
           <div class="${isUser ? 'chat-msg-user-bubble' : 'chat-msg-ai-bubble selectable-text'}">
             ${isUser ? window.escapeHtml(m.text || '') : window.renderMarkdown(m.text || '')}
           </div>
-          ${!isUser && m.widget ? `<div class="cw-card" data-idx="${idx}">${widgetInner(m)}</div>` : ''}
+          ${!isUser && m.quizCta ? `<div style="margin-top:8px;"><button class="btn btn-primary" data-action="open-quiz" style="padding:10px 16px;border-radius:14px;font-weight:800;">Quiz Generator kholo</button></div>` : ''}
 
           <!-- Bottom Message Utility Bar for actual AI replies -->
           ${!isUser && m.text !== '…' && !m.isError ? `
@@ -1648,21 +1645,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
   }
 
   function bindMessageActionButtons() {
-    document.querySelectorAll('.cw-card').forEach(el => {
-      const msg = chatMessages[Number(el.dataset.idx)];
-      if (!msg || !msg.widget) return;
-      bindWidget(el, msg, {
-        fileId: activeFileId, page: window.State?.currentPage || 1,
-        save: () => saveTeacherChatHistory(fileId, chatMessages),
-        send: (text) => { if (inputEl) { inputEl.value = text; sendUserMessage(); } },
-        afterRedraw: (card) => card.querySelectorAll('.inline-page-jump-chip').forEach(chip => {
-          chip.onclick = async (e) => {
-            e.stopPropagation();
-            const pNum = Number(chip.dataset.page);
-            if (pNum && activeFileId && activeFileId !== 'global_chat' && typeof window.openReader === 'function') await window.openReader(activeFileId, pNum);
-          };
-        })
-      });
+    document.querySelectorAll('[data-action="open-quiz"]').forEach(b => {
+      b.onclick = () => { if (typeof window.runMCQGeneratorModal === 'function') window.runMCQGeneratorModal(); };
     });
     document.querySelectorAll('.btn-teacher-action').forEach(btn => {
       btn.onclick = async (e) => {
@@ -2203,24 +2187,6 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
     };
   });
 
-  // "My mistakes" chip: appears when earlier chat quizzes left unreviewed mistakes for this book
-  (async () => {
-    try {
-      const bar = document.getElementById('chat-quick-chips-bar');
-      if (!bar || !window.DB || !window.DB.all) return;
-      const all = await window.DB.all('flashcards');
-      const mine = (all || []).filter(c => c && c.category === 'Chat quiz mistakes' && (isGlobal || c.fileId === fileId));
-      if (!mine.length || !document.getElementById('chat-quick-chips-bar')) return;
-      const stems = mine.slice(-6).map((c, i) => `${i + 1}) ${String(c.front || '').split('\n')[0].slice(0, 140)}`).join('\n');
-      const chip = document.createElement('button');
-      chip.className = 'chat-quick-chip';
-      chip.dataset.query = `Meri pichhle quiz ki galtiyon par naya quiz lo. Inhi concepts ko alag sawaalon se test karo (wahi sawaal repeat mat karna):\n${stems}`;
-      chip.innerHTML = `<span>🎯 Meri galtiyan (${mine.length})</span>`;
-      chip.onclick = () => { if (inputEl) { inputEl.value = chip.dataset.query; sendUserMessage(); } };
-      bar.insertBefore(chip, bar.firstChild);
-    } catch (e) {}
-  })();
-
   // Real-time Voice Dictation in Input Box (Hindi-to-Hinglish + English Support with Deduplication and 3.5s Silence Auto-Stop)
   let isDictating = false;
   let dictationRecognition = null;
@@ -2371,6 +2337,20 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       inputEl.value = '';
       inputEl.style.height = 'auto';
     }
+
+    // Quizzes live in the Quiz Generator (reliable, graded, saves mistakes): point there instead of faking a quiz in chat.
+    if (/\b(quiz|mcq|mcqs|test\s+me|mock\s+test)\b|sawal\s+poochh|questions?\s+poochh/i.test(userText) && fileId !== 'global_chat') {
+      chatMessages.push({
+        role: 'assistant',
+        text: 'Quiz ke liye Quiz Generator best hai: chapter chuno, MCQ / fill in the blank / short answer ka mix lo, aur galtiyan apne aap review me chali jati hain.',
+        quizCta: true,
+        mode: activeTeacherMode,
+        timestamp: Date.now()
+      });
+      await saveTeacherChatHistory(fileId, chatMessages);
+      renderMessages();
+      return;
+    }
     
     chatMessages.push({
       role: 'assistant',
@@ -2414,7 +2394,6 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         systemPersonaInstruction = 'You are an elite AI Super-Intelligence operating with the exact conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Direct, sharp, natural, and intellectually deep. NEVER greet or give canned introductory phrases. Jump immediately into the core substance.';
       }
 
-      if (!quizActive && /\b(quiz|test\s+me|mcq\s+(?:lo|le|do)|sawal\s+poochho|questions?\s+poochho)\b/i.test(userText)) quizActive = true;
       const recentConvo = chatMessages.slice(-6, -1).map(m => `${m.role === 'user' ? 'Student' : 'AI Tutor'}: ${m.text}`).join('\n\n');
 
       const streamMode = typeof window.getStreamingMode === 'function' ? window.getStreamingMode() : (window.State?.streamingMode || 'sse');
@@ -2435,7 +2414,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         fullContext: ctx.chapterText || ctx.pageText || ctx.bookOverviewText,
         persona: systemPersonaInstruction,
         language: 'English/Hinglish (matching the student natural inquiry)',
-        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text + (m.widget ? ' ' + widgetSummary(m.widget) : '') })),
+        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text + '' })),
         customKey: customKey || undefined,
         preferredEngine: activeAiEngine || 'auto',
         explanationStyle: activeExplanationStyle || 'comprehensive',
@@ -2445,8 +2424,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         chapterStartPage: ctx.startPage,
         chapterEndPage: ctx.endPage,
         needsClarification: Boolean(ctx.needsClarification),
-        webSearch: webSearchOn,
-        quizMode: quizActive
+        webSearch: webSearchOn
       };
 
       // 1. True Real-Time Word-By-Word Streaming Mode (SSE)
@@ -2538,13 +2516,10 @@ Provide the complete academic answer now:`;
       const mk = (markers && markers.text === replyText) ? markers : extractAllMarkers(replyText);
       replyText = mk.text;
       const followups = mk.followups;
-      const replyWidget = mk.widget;
       window.__lastFollowups = followups;
       window.__quizCards = mk.cards;
-      if (quizActive && (replyWidget || mk.cards.length || /final\s+score\s*[:\-]?\s*\d+\s*\/\s*\d+/i.test(replyText))) quizActive = false;
 
       let replyFailed = false;
-      if (!replyText && replyWidget) replyText = 'Ye lo 👇';
       if (!replyText) {
         replyFailed = true;
         replyText = (typeof navigator !== 'undefined' && navigator.onLine === false)
@@ -2593,8 +2568,7 @@ Provide the complete academic answer now:`;
         text: replyText,
         mode: activeTeacherMode,
         timestamp: Date.now(),
-        isError: replyFailed || undefined,
-        widget: (!replyFailed && replyWidget) ? replyWidget : undefined
+        isError: replyFailed || undefined
       };
       await saveTeacherChatHistory(fileId, chatMessages);
       renderMessages();
