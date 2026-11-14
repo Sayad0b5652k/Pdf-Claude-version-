@@ -971,167 +971,9 @@ Return ONLY JSON: {"wants":true|false,"subject":"...","kind":"portrait|map|diagr
   } catch { return null; }
 }
 
-/* ---------- Live web search (keys come from server env / AI Studio Secrets, never from the client) ---------- */
-function webProviders() {
-  const tavily = !!process.env.TAVILY_API_KEY;
-  const firecrawl = !!process.env.FIRECRAWL_API_KEY;
-  return { tavily, firecrawl, any: tavily || firecrawl };
-}
+/* ---------- Live web search: Google Search grounding through the Gemini key (no extra keys needed) ---------- */
 function looksTimeSensitive(q: string): boolean {
   return /\b(latest|aaj|abhi|filhaal|current(?:ly)?|today|tonight|yesterday|news|recent(?:ly)?|trending|breaking|live|price|rate|score|result|results|election|who\s+is\s+the\s+(?:current|new)|is\s+saal|this\s+(?:year|week|month)|202[5-9])\b/i.test(q || "");
-}
-type WebItem = { title: string; url: string; content: string };
-async function fetchJsonWithTimeout(url: string, init: any, ms: number): Promise<any> {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), ms);
-  try {
-    const r = await fetch(url, { ...init, signal: ctrl.signal });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  } finally { clearTimeout(t); }
-}
-/* Spend guard for paid web providers (Tavily/Firecrawl): per-visitor and per-day caps so nobody can drain the key quota. */
-const paidWebHits = new Map<string, { n: number; resetAt: number }>();
-let paidWebDay = { n: 0, resetAt: Date.now() + 86_400_000 };
-function allowPaidWeb(ip: string): boolean {
-  const now = Date.now();
-  const perHour = Number(process.env.WEB_CALLS_PER_HOUR || 30);
-  const perDay = Number(process.env.WEB_CALLS_PER_DAY || 600);
-  if (paidWebDay.resetAt <= now) paidWebDay = { n: 0, resetAt: now + 86_400_000 };
-  if (paidWebDay.n >= perDay) return false;
-  let e = paidWebHits.get(ip);
-  if (!e || e.resetAt <= now) { e = { n: 0, resetAt: now + 3_600_000 }; paidWebHits.set(ip, e); if (paidWebHits.size > 5000) for (const [k, v] of paidWebHits) if (v.resetAt <= now) paidWebHits.delete(k); }
-  if (e.n >= perHour) return false;
-  e.n++; paidWebDay.n++;
-  return true;
-}
-
-async function runWebSearch(question: string, chatHistory: any[], ip = "unknown"): Promise<{ items: WebItem[] }> {
-  const pv = webProviders();
-  if (pv.any && !allowPaidWeb(ip)) { console.warn("[Web] paid search budget reached for", ip); return { items: [] }; }
-  const items: WebItem[] = [];
-  const urlMatch = (question || "").match(/https?:\/\/[^\s)>\]]+/i);
-  // A pasted link: read that page.
-  if (urlMatch && pv.firecrawl) {
-    try {
-      const d = await fetchJsonWithTimeout("https://api.firecrawl.dev/v1/scrape", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
-        body: JSON.stringify({ url: urlMatch[0], formats: ["markdown"], onlyMainContent: true }),
-      }, 15000);
-      const md = d?.data?.markdown || "";
-      if (md) items.push({ title: d?.data?.metadata?.title || urlMatch[0], url: urlMatch[0], content: md.slice(0, 6000) });
-    } catch (e: any) { console.warn("Firecrawl scrape failed:", e?.message); }
-  }
-  // A follow-up like "aur uska price?" should search for the topic, so prepend the last student message.
-  let q = (question || "").replace(/https?:\/\/\S+/gi, " ").trim();
-  if (q.split(/\s+/).length < 4 && Array.isArray(chatHistory)) {
-    const prev = [...chatHistory].reverse().find((m: any) => m?.role === "user" && m.text);
-    if (prev) q = `${String(prev.text).slice(0, 120)} ${q}`;
-  }
-  q = q.slice(0, 300);
-  if (q.length > 3) {
-    if (pv.tavily) {
-      try {
-        const d = await fetchJsonWithTimeout("https://api.tavily.com/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.TAVILY_API_KEY}` },
-          body: JSON.stringify({ query: q, max_results: 5, search_depth: "basic", include_answer: false, topic: looksTimeSensitive(q) ? "news" : "general" }),
-        }, 9000);
-        for (const r of d?.results || []) if (r?.url) items.push({ title: r.title || r.url, url: r.url, content: String(r.content || "").slice(0, 900) });
-      } catch (e: any) { console.warn("Tavily failed:", e?.message); }
-    }
-    if (items.length < 2 && pv.firecrawl) {
-      try {
-        const d = await fetchJsonWithTimeout("https://api.firecrawl.dev/v1/search", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
-          body: JSON.stringify({ query: q, limit: 5 }),
-        }, 12000);
-        for (const r of d?.data || []) if (r?.url) items.push({ title: r.title || r.url, url: r.url, content: String(r.description || r.markdown || "").slice(0, 900) });
-      } catch (e: any) { console.warn("Firecrawl search failed:", e?.message); }
-    }
-  }
-  return { items: items.slice(0, 6) };
-}
-
-/* ---------- Web image fallback (Tavily / Firecrawl) — used only when Wikipedia/Wikimedia has no image ---------- */
-type WebImageCand = { imageUrl: string; text: string; pageUrl: string; host: string };
-const IMG_TOKEN_STOP = new Set(["the", "of", "and", "map", "diagram", "photo", "image", "picture", "portrait", "in", "a", "an", "ka", "ki", "ke"]);
-function imgTokens(s: string): string[] {
-  return (s || "").toLowerCase().normalize("NFKD").replace(/[^a-z0-9ऀ-ॿ\s]/g, " ").split(/\s+/).filter(w => w.length > 2 && !IMG_TOKEN_STOP.has(w));
-}
-function hostOf(u: string): string { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } }
-async function webImageFallback(subject: string, kind: string, customKey?: string, ip = "unknown"): Promise<{ imageUrl: string; title: string; description: string; sourceName: string; sourceUrl: string } | null> {
-  const pv = webProviders();
-  if (!pv.any || !subject) return null;
-  if (!allowPaidWeb(ip)) return null;
-  const tavilyBase = process.env.TAVILY_BASE_URL || "https://api.tavily.com";
-  const fireBase = process.env.FIRECRAWL_BASE_URL || "https://api.firecrawl.dev";
-  const q = `${subject}${kind === "map" ? " map" : kind === "diagram" ? " diagram" : kind === "portrait" ? " portrait photo" : " photo"}`.slice(0, 200);
-  const cands: WebImageCand[] = [];
-  const push = (imageUrl: any, text: any, pageUrl: any) => {
-    if (typeof imageUrl !== "string" || !/^https:\/\//i.test(imageUrl)) return;
-    if (/\.(svg|gif)(\?|$)/i.test(imageUrl) || /(logo|icon|sprite|avatar|favicon)/i.test(imageUrl)) return;
-    if (cands.some(c => c.imageUrl === imageUrl)) return;
-    cands.push({ imageUrl, text: String(text || "").slice(0, 300), pageUrl: typeof pageUrl === "string" ? pageUrl : "", host: hostOf(typeof pageUrl === "string" && pageUrl ? pageUrl : imageUrl) });
-  };
-  if (pv.tavily) {
-    try {
-      const d = await fetchJsonWithTimeout(`${tavilyBase}/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.TAVILY_API_KEY}` },
-        body: JSON.stringify({ query: q, max_results: 5, search_depth: "basic", include_images: true, include_image_descriptions: true, include_answer: false }),
-      }, 9000);
-      const pages = (d?.results || []).filter((r: any) => r?.url);
-      for (const im of d?.images || []) {
-        if (typeof im === "string") push(im, "", "");
-        else push(im?.url, im?.description, pages[0]?.url || "");
-      }
-    } catch (e: any) { console.warn("Tavily image search failed:", e?.message); }
-  }
-  if (cands.length < 3 && pv.firecrawl) {
-    try {
-      const d = await fetchJsonWithTimeout(`${fireBase}/v2/search`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.FIRECRAWL_API_KEY}` },
-        body: JSON.stringify({ query: q, sources: ["images"], limit: 6 }),
-      }, 12000);
-      const arr = Array.isArray(d?.data?.images) ? d.data.images : Array.isArray(d?.data) ? d.data : [];
-      for (const im of arr) push(im?.imageUrl || im?.url, im?.title || im?.description, im?.url && im?.imageUrl ? im.url : "");
-    } catch (e: any) { console.warn("Firecrawl image search failed:", e?.message); }
-  }
-  if (!cands.length) return null;
-  const list = cands.slice(0, 8);
-  const subjTokens = imgTokens(subject);
-  const overlapOk = (c: WebImageCand) => {
-    if (!subjTokens.length) return false;
-    const hay = new Set(imgTokens(`${c.text} ${c.pageUrl} ${c.imageUrl}`));
-    return subjTokens.every(t => hay.has(t) || [...hay].some(h => h.includes(t) || t.includes(h)));
-  };
-  let chosen: WebImageCand | null = null;
-  if (keyPool.hasAnyKey() || customKey) {
-    const prompt = `A student wants to SEE a picture of: "${subject}" (kind: ${kind || "photo"}).
-Below are web image candidates with their descriptions. Pick the ONE index that clearly depicts exactly this subject. If none clearly does (wrong subject, unrelated, generic stock art, only a logo), answer -1. Never guess.
-${list.map((c, i) => `${i}: ${c.text || "(no description)"} [${c.host}]`).join("\n")}
-Return ONLY JSON: {"index": <number>}`;
-    try {
-      const r = await executeWithGeminiPool("chat", prompt, { targetModel: "gemini-3.1-flash-lite", temperature: 0, responseMimeType: "application/json", customKey });
-      const j = JSON.parse(String(r?.text || "").replace(/^```json|```$/gim, "").trim());
-      const idx = Number(j.index);
-      if (Number.isInteger(idx) && idx >= 0 && idx < list.length && list[idx].text) chosen = list[idx];
-    } catch (e: any) { console.warn("Web image verification failed:", e?.message); }
-  } else {
-    chosen = list.find(c => c.text && overlapOk(c)) || null;
-  }
-  if (!chosen) return null;
-  return {
-    imageUrl: chosen.imageUrl,
-    title: subject,
-    description: chosen.text,
-    sourceName: chosen.host || "web",
-    sourceUrl: chosen.pageUrl || chosen.imageUrl,
-  };
 }
 
 async function fetchLiveInternetGrounding(query: string): Promise<string> {
@@ -2345,7 +2187,7 @@ Return ONLY a valid raw JSON object with this exact structure:
   });
 
   // S.A.Y.A.D. AI - Intelligent, Conversational, and Document-Aware Super AI
-  app.get("/api/web/status", (_req, res) => { const p = webProviders(); res.json({ tavily: p.tavily, firecrawl: p.firecrawl, google: keyPool.hasAnyKey(), enabled: p.any || keyPool.hasAnyKey() }); });
+  app.get("/api/web/status", (_req, res) => { res.json({ google: keyPool.hasAnyKey(), enabled: keyPool.hasAnyKey() }); });
 
   app.post("/api/ai/hybrid-tutor", async (req, res) => {
     try {
@@ -2550,15 +2392,8 @@ MANDATORY RULES:
           const targetVisualSubject = intent?.subject
             ? `${intent.subject}${intent.kind === "map" ? " map" : intent.kind === "diagram" ? " diagram" : ""}`
             : (resolvedSubject || userQuestion);
-          let netImg: any = await fetchEducationalInternetImage(targetVisualSubject, resolvedSubject);
-          let webCredit = "";
-          if (!(netImg && netImg.imageUrl) && intent?.subject) {
-            const wi = await webImageFallback(intent.subject, intent.kind || "photo", customKey, req.ip || "unknown");
-            if (wi) {
-              netImg = { imageUrl: wi.imageUrl, title: wi.title, description: wi.description };
-              webCredit = `\n\n*Image source: [${wi.sourceName}](${wi.sourceUrl})*`;
-            }
-          }
+          const netImg: any = await fetchEducationalInternetImage(targetVisualSubject, resolvedSubject);
+          const webCredit = "";
           if (netImg && netImg.imageUrl) {
             let explanation = "";
             const visualLangInstruction = userLang === "Hinglish"
@@ -2672,7 +2507,7 @@ ${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}
       const isDocQuery = isDocumentSpecificQuery(userQuestion, docTitle) || Boolean(docTitle && docTitle !== 'global_chat' && (chapterText || fullContext));
       const resolvedSubject = extractAcademicSubject(userQuestion, chatHistory, docTitle);
       const liveInternetGrounding = !isDocQuery ? await fetchLiveInternetGrounding(resolvedSubject || userQuestion) : "";
-      // Live web (Tavily / Firecrawl): when the student turns it on, asks about something current, or pastes a link.
+      // Live web (Google Search grounding): when the student turns it on or asks about something current.
       let webResultsBlock = "";
       try {
         const wantsWeb = webSearch === true || looksTimeSensitive(userQuestion) || /https?:\/\/\S+/i.test(userQuestion);
@@ -2681,13 +2516,6 @@ ${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}
           if (g && g.text) {
             webResultsBlock = `[W1] Google Search research notes (fresh):\n${g.text}`;
             if (g.sources.length) webSourcesMd = "\n\n---\n**Sources:** " + g.sources.map((r, i) => `[${i + 1}] [${r.title.slice(0, 60)}](${r.url})`).join(" · ");
-          }
-        }
-        if (!webResultsBlock && wantsWeb && webProviders().any) {
-          const web = await runWebSearch(userQuestion, chatHistory, req.ip || "unknown");
-          if (web.items.length) {
-            webResultsBlock = web.items.map((r, i) => `[W${i + 1}] ${r.title} (${r.url})\n${r.content}`).join("\n\n");
-            webSourcesMd = "\n\n---\n**Sources:** " + web.items.map((r, i) => `[${i + 1}] [${r.title.slice(0, 60)}](${r.url})`).join(" · ");
           }
         }
       } catch (webErr: any) { console.warn("Web search skipped:", webErr?.message); }

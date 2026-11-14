@@ -1,5 +1,5 @@
 # Report <date> - <short name>
-Environment: (AI Studio preview / which keys were set: Gemini yes/no, Tavily yes/no, Firecrawl yes/no)
+Environment: (AI Studio preview / which keys were set: Gemini yes/no)
 
 | Task | Result (PASS / FAIL / NOT TESTED) | Notes |
 |------|-----------------------------------|-------|

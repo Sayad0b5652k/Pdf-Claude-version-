@@ -1,7 +1,7 @@
 # Tasks for AI Studio (written by Claude)
 
 Run these in the live preview with the real Gemini key in Secrets. Fill in a report in `reports/`.
-Optional keys: `TAVILY_API_KEY`, `FIRECRAWL_API_KEY` (task 4 and 5 only if they are set).
+Only the Gemini key is needed. No Tavily/Firecrawl.
 
 ## 1. Book chat tone and memory
 Open any PDF -> Chat. Ask: "photosynthesis kya hota hai", then "iska formula?", then "theek hai".
@@ -19,14 +19,9 @@ Expected: one question at a time, feedback with page chip, "Final score: X/5", t
 "Add N cards to Review" chip. Tap it and check Review has the new cards (category "Quiz mistakes").
 Also check the quiz questions really come from the book (not general knowledge).
 
-## 4. Live web search (only if TAVILY_API_KEY is set)
-The globe button should appear in the chat input. Turn it on and ask: "aaj ki latest India news".
-Expected: answer mentions live results and ends with a `Sources:` line with working links.
-Also check: with the button OFF, asking "latest iPhone price" still triggers web search automatically.
-If no key is set, the globe button must NOT be visible - report whether that holds.
-
-## 5. Link reading (only if FIRECRAWL_API_KEY is set)
-Paste a news article URL into chat and ask "isme kya likha hai". Expected: a summary of that page + a source link.
+## 4. Live web search (Google Search grounding)
+The globe button shows in the chat input when a Gemini key exists. Turn it on and ask: "aaj ki latest India news".
+Expected: answer uses fresh info and ends with a `Sources:` line with working links.
 
 ## 6. Reader on a long book
 Open a PDF with 300+ pages. Fling-scroll fast, then jump to the last chapters from the TOC.
@@ -38,8 +33,7 @@ word) is highlighted, bottom bar shows "n / total", arrows move between matches.
 
 ## 8. Image requests (real Wikipedia / web)
 Ask: "Mahatma Gandhi ki photo dikhao", "photosynthesis ka diagram dikhao", "India ka map dikhao".
-Expected: the image matches the subject (never a different topic). If Wikipedia has nothing and TAVILY_API_KEY/FIRECRAWL_API_KEY
-is set, a web image may appear with an `Image source: [site](link)` line. If nothing reliable exists: an honest
+Expected: the image matches the subject (never a different topic). If Wikipedia has nothing, an honest
 "reliable image nahi mili" message. Report any wrong-subject image with the exact prompt.
 
 ## 9. Interactive cards

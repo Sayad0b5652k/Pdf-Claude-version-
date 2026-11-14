@@ -1480,7 +1480,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
   const inputMicBtn = document.getElementById('teacher-input-mic-btn');
   const inputWrapper = document.getElementById('teacher-input-wrapper');
 
-  // Live web search toggle (only offered when the server has a Tavily / Firecrawl key).
+  // Live web search toggle (Google Search grounding; shown whenever a Gemini key is available).
   const webBtn = document.getElementById('teacher-web-btn');
   if (webBtn) {
     const paintWeb = () => {
