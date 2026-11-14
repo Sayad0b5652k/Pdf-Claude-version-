@@ -4,6 +4,7 @@
    missed day simply spreads the remaining chapters over the days that are left. */
 
 const DAY = 86400000;
+const localISO = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const fmtDay = (t) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 const esc = (s) => window.escapeHtml(String(s ?? ''));
@@ -202,7 +203,7 @@ export function bindStudyPlanBack(files) {
 
 export async function openStudyPlanSheet(files) {
   const old = await loadPlan(files);
-  const tomorrow = new Date(Date.now() + DAY).toISOString().slice(0, 10);
+  const tomorrow = localISO(Date.now() + DAY);
   let draft = ((old && old.subjects) || []).filter((s) => files.some((f) => f.id === s.fileId)).map((s) => ({
     fileId: s.fileId, examDate: s.examDate, chapters: s.chapters, source: s.source || 'pages', done: s.done || {},
     off: new Set(), loading: false,

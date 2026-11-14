@@ -1703,9 +1703,11 @@ export function openReadingThemesModal() {
       const th = btn.dataset.theme;
       window.State.theme = th;
       window.State.autoTheme = false;
-      document.documentElement.dataset.theme = th;
+      window.themeTransition(() => {
+        document.documentElement.dataset.theme = th;
+        if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
+      }, btn);
       try { localStorage.setItem('sayad_theme', th); } catch(e){}
-      if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
       if (window.DB) {
         await window.DB.setting('theme', th);
         await window.DB.setting('autoTheme', false);

@@ -567,14 +567,17 @@ export async function renderSettings(){
 
   document.querySelectorAll('[data-theme-btn]').forEach(b=>{
     b.onclick = async ()=>{
-      window.State.theme = b.dataset.themeBtn;
+      const chosen = b.dataset.themeBtn;
+      window.State.theme = chosen;
       window.State.autoTheme = false;
-      document.documentElement.dataset.theme = window.State.theme;
-      try { localStorage.setItem('sayad_theme', window.State.theme); } catch(e){}
-      if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
-      await window.DB.setting('theme', window.State.theme);
+      window.themeTransition(() => {
+        document.documentElement.dataset.theme = chosen;
+        if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
+        updateThemeButtonsDOM(chosen);
+      }, b);
+      try { localStorage.setItem('sayad_theme', chosen); } catch(e){}
+      await window.DB.setting('theme', chosen);
       await window.DB.setting('autoTheme', false);
-      updateThemeButtonsDOM(window.State.theme);
     };
   });
 

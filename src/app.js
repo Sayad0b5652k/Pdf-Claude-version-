@@ -185,7 +185,7 @@ export function showHumorousExitDialog() {
       box-shadow: 0 24px 50px rgba(0,0,0,0.6), 0 0 30px rgba(255,106,43,0.15);
       text-align: center;
       color: var(--text, #fff);
-      animation: sayadScaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      animation: sayadScaleUp 0.6s ease-out;
       position: relative;
     ">
       <!-- Tag badge -->

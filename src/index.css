@@ -3381,7 +3381,7 @@ body.selection-disabled .textLayer * {
   box-shadow: 0 16px 48px -10px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--border);
   z-index: 10001;
   pointer-events: auto;
-  animation: mw-modal-zoom 0.24s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: mw-modal-zoom 0.6s ease-out;
 }
 
 .mw-studio-card::-webkit-scrollbar {
@@ -7566,3 +7566,35 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 .sp-chk { display: flex; gap: 8px; align-items: flex-start; padding: 6px 2px; font-size: 13px; }
 .sp-chk input { margin-top: 3px; }
 .sp-chk em { color: var(--text-faint); font-style: normal; font-size: 11.5px; }
+
+
+/* ===== Motion polish: springy sheets, dialogs that drop in, theme colour reveal ===== */
+:root { --spring: cubic-bezier(.34, 1.32, .5, 1); }
+.sheet { transition: transform .2s cubic-bezier(.4, 0, 1, 1); }
+.sheet.open { transition: transform .52s var(--spring); }
+.sheet.peek, .sheet.peek.open { transition: transform .24s cubic-bezier(.16, 1, .3, 1), max-height .2s ease; }
+.sheet::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 64px; background: var(--bg-elev); pointer-events: none; }
+.sheet.peek::after { display: none; }
+@keyframes sayadScaleUp {
+  0%   { transform: translateY(-64px) scale(.94); opacity: 0; }
+  45%  { transform: translateY(9px) scale(1); opacity: 1; }
+  68%  { transform: translateY(-4px); }
+  85%  { transform: translateY(1.5px); }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes mw-modal-zoom {
+  0%   { transform: translateY(-64px) scale(.94); opacity: 0; }
+  45%  { transform: translateY(9px) scale(1); opacity: 1; }
+  68%  { transform: translateY(-4px); }
+  85%  { transform: translateY(1.5px); }
+  100% { transform: none; opacity: 1; }
+}
+#toast { transition: transform .5s var(--spring), opacity .25s ease; }
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 2; }
+.btn:not(.no-press):active { transform: scale(.96); }
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .sheet.open { transition: transform .01s; }
+  #toast { transition: opacity .2s; }
+}

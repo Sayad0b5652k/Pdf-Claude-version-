@@ -1309,6 +1309,24 @@ export function downloadDiagram(buttonEl) {
 // Bind to window for global availability
 window.toast = toast;
 window.Sheet = Sheet;
+/** Theme switch with a circular colour reveal from the tapped control (View Transitions API; plain switch when unsupported). */
+window.themeTransition = function themeTransition(apply, originEl) {
+  let reduce = false;
+  try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* ignore */ }
+  if (typeof document.startViewTransition !== 'function' || reduce) { apply(); return; }
+  let x = innerWidth / 2, y = innerHeight / 2;
+  try { const r = originEl && originEl.getBoundingClientRect(); if (r && r.width) { x = r.left + r.width / 2; y = r.top + r.height / 2; } } catch (e) { /* ignore */ }
+  const end = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  let vt;
+  try { vt = document.startViewTransition(() => { apply(); }); } catch (e) { apply(); return; }
+  vt.ready.then(() => {
+    document.documentElement.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${end}px at ${x}px ${y}px)`] },
+      { duration: 620, easing: 'cubic-bezier(.22,.8,.26,1)', pseudoElement: '::view-transition-new(root)' }
+    );
+  }).catch(() => { /* transition skipped */ });
+};
+
 window.Modal = Sheet; // Safety alias for modals and bottom sheets
 window.copyToClipboard = copyToClipboard;
 window.stripMarkdown = stripMarkdown;
