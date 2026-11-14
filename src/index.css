@@ -103,6 +103,30 @@ body {
   touch-action: manipulation;
 }
 
+/* Native Android wrapper: Realme's WebView can report zero CSS safe-area
+   insets while still drawing below the OS bars. Keep the bars visible and
+   reserve their physical space explicitly only inside the APK. */
+html.sayad-android-wrapper {
+  --sayad-status-inset: 26px;
+  --sayad-navigation-inset: 30px;
+}
+html.sayad-android-wrapper #app {
+  top: var(--sayad-status-inset);
+  bottom: var(--sayad-navigation-inset);
+  height: auto;
+}
+html.sayad-android-wrapper .sayad-splash-container {
+  top: var(--sayad-status-inset);
+  bottom: var(--sayad-navigation-inset);
+  height: auto;
+}
+html.sayad-android-wrapper .sheet,
+html.sayad-android-wrapper .sheet-backdrop,
+html.sayad-android-wrapper #toast,
+html.sayad-android-wrapper #sel-toolbar {
+  bottom: var(--sayad-navigation-inset);
+}
+
 /* Re-enable normal text selection specifically where it's genuinely useful:
    reading your own saved note/summary content, and inputs you type into. */
 .selectable-text, input, textarea {

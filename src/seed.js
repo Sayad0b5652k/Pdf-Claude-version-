@@ -194,3 +194,47 @@ export async function seedSampleIfNeeded(){
 window.addBookFromBuffer = addBookFromBuffer;
 window.importFiles = importFiles;
 window.seedSampleIfNeeded = seedSampleIfNeeded;
+
+// Android wrapper bridge: the native PDF intent plugin emits a base64 payload
+// for a content:// URI. Convert it into the same local IndexedDB/PDF.js flow,
+// then open the newly imported book instead of leaving the user on the library.
+async function handleNativePdf(detail) {
+  try {
+    if (!detail.base64) return;
+    const binary = atob(detail.base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const fileName = String(detail.name || 'opened-document.pdf').replace(/[\\/:*?"<>|]/g, '_');
+    const safeName = fileName.toLowerCase().endsWith('.pdf') ? fileName : `${fileName}.pdf`;
+    const rec = await addBookFromBuffer(safeName.replace(/\.pdf$/i, ''), bytes.buffer, bytes.byteLength, {});
+    window.toast?.('PDF opened');
+    if (typeof window.openReader === 'function') {
+      await window.openReader(rec.id);
+    } else {
+      window.renderDashboard?.();
+    }
+  } catch (error) {
+    console.error('[Native PDF] Failed to import opened document', error);
+    window.toast?.('Could not open this PDF in S.A.Y.A.D.');
+  }
+}
+
+window.__sayadHandleNativePdf = handleNativePdf;
+window.addEventListener('sayad:native-pdf', (event) => {
+  const detail = event?.detail || {};
+  if (detail.id && window.__sayadNativePdfLastId === detail.id) return;
+  if (detail.id) window.__sayadNativePdfLastId = detail.id;
+  delete window.__sayadNativePdfPending;
+  handleNativePdf(detail);
+});
+
+// If Android delivered the intent before this module finished loading, native
+// code leaves a pending payload for us to consume once the importer is ready.
+if (window.__sayadNativePdfPending) {
+  const pending = window.__sayadNativePdfPending;
+  delete window.__sayadNativePdfPending;
+  if (!pending.id || window.__sayadNativePdfLastId !== pending.id) {
+    if (pending.id) window.__sayadNativePdfLastId = pending.id;
+    setTimeout(() => handleNativePdf(pending), 0);
+  }
+}

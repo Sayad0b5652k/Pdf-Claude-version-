@@ -904,7 +904,8 @@ export function openReaderSettings(){
 }
 
 export function applyAdvancedReaderSettings() {
-  const isImmersive = window.State.hideSystemBars === true || (window.State.hideStatusBar && window.State.hideNavigationBar);
+  const isAndroidWrapper = document.documentElement.classList.contains('sayad-android-wrapper');
+  const isImmersive = !isAndroidWrapper && (window.State.hideSystemBars === true || (window.State.hideStatusBar && window.State.hideNavigationBar));
   const isSelDisabled = window.State.disableTextSelection === true;
   const selColor = window.State.selectionColor || '#2FC6BC';
 
@@ -937,7 +938,8 @@ export function applyAdvancedReaderSettings() {
 }
 
 export async function updateSystemImmersiveMode() {
-  const isImmersive = window.State.hideSystemBars === true || (window.State.hideStatusBar && window.State.hideNavigationBar);
+  const isAndroidWrapper = document.documentElement.classList.contains('sayad-android-wrapper');
+  const isImmersive = !isAndroidWrapper && (window.State.hideSystemBars === true || (window.State.hideStatusBar && window.State.hideNavigationBar));
 
   applyAdvancedReaderSettings();
 
