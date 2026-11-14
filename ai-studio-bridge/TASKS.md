@@ -36,10 +36,10 @@ Ask: "Mahatma Gandhi ki photo dikhao", "photosynthesis ka diagram dikhao", "Indi
 Expected: the image matches the subject (never a different topic). If Wikipedia has nothing, an honest
 "reliable image nahi mili" message. Report any wrong-subject image with the exact prompt.
 
-## 9. Interactive cards
-Ask for a quiz (MCQ + fill-in-the-blank + short answer) and a "topics covered" checklist.
-Expected: tappable card in the chat, instant right/wrong feedback, a score, and "Add N cards to Review" for mistakes.
-Also check: after a quiz with mistakes, re-open the chat - a chip "Meri galtiyan (N)" appears and starts a new quiz on those concepts.
+## 9. Chat quiz request + Exam plan
+In book chat type "Mujhse quiz pucho". Expected: no AI call; a short message with a "Quiz Generator kholo" button that opens the generator.
+Home -> Reading Analytics card -> "Exam plan" chip flips it. Tap "Plan banao": pick 2 books, an exam date for each, check the chapters list (TOC se for books with a TOC, "pages ke blocks" otherwise), Save.
+Expected: today's checklist with chapters from both books; ticking a row strikes it through and the progress bar moves; "Quiz" on a row opens the book and the Quiz Generator.
 
 ## 10. Failed reply -> Retry
 Turn on airplane mode (or use a wrong Gemini key), send a chat message.
