@@ -342,12 +342,12 @@ export function analyticsFlipHtml(files, readingStats, planBack) {
     <div class="an-flip-in">
       <div class="an-face an-front">
         ${renderAnalyticsCard(files, readingStats)}
-        <button class="an-chip" id="an-flip-btn" type="button">${window.icon('calendar', 'icon icon-xs')}<span>Exam plan</span></button>
+        <button class="an-chip" id="an-flip-btn" type="button" aria-label="Exam plan" title="Exam plan">${window.icon('calendar', 'icon icon-sm')}${window._spPending > 0 ? '<i class="an-dot"></i>' : ''}</button>
       </div>
       <div class="an-face an-back">
         <div class="card an-back-card">
           ${planBack}
-          <button class="an-chip" id="an-back-btn" type="button">${window.icon('chart', 'icon icon-xs')}<span>Analytics</span></button>
+          <button class="an-chip" id="an-back-btn" type="button" aria-label="Reading analytics" title="Reading analytics">${window.icon('chart', 'icon icon-sm')}</button>
         </div>
       </div>
     </div>

@@ -127,11 +127,12 @@ async function dueMap() {
 /* ---------------- back face of the Reading Analytics card ---------------- */
 
 export async function studyPlanBackHtml(files) {
-  const head = (extra = '') => `<div class="sp-back-h">Exam plan${extra}</div>`;
+  const head = () => `<div class="sp-eyebrow">EXAM PLAN</div>`;
   if (!files || !files.length) return `${head()}<div class="sp-sub">Pehle ek book import karo.</div>`;
   const plan = await loadPlan(files);
   const live = plan && plan.subjects.filter((s) => files.some((f) => f.id === s.fileId));
   if (!live || !live.length) {
+    window._spPending = 0;
     return `${head()}<div class="sp-big">Exam date set karo</div>
       <div class="sp-sub">Subjects chuno, har ek ka exam date do. Chapters TOC se aayenge aur roz ka checklist ban jayega.</div>
       <button id="sp-edit" class="btn btn-primary sp-btn" type="button">Plan banao</button>`;
@@ -139,7 +140,13 @@ export async function studyPlanBackHtml(files) {
   const c = computeToday({ subjects: live }, Date.now(), await dueMap());
   const name = (id) => bookName(files.find((f) => f.id === id));
   const next = c.subjects.find((s) => s.daysLeft >= 0);
-  const chip = next ? `<span class="sp-count"><b>${next.daysLeft}</b> din · ${esc(name(next.fileId).slice(0, 18))}</span>` : '';
+  const todayAll = c.subjects.flatMap((s) => s.items), todayDone = todayAll.filter((i) => i.done).length;
+  window._spPending = todayAll.length - todayDone;
+  const hero = next
+    ? `<div class="sp-hero"><div class="sp-num"><b>${next.daysLeft}</b><span>${next.daysLeft === 1 ? 'din baaki' : 'din baaki'}</span></div>
+        <div class="sp-hero-r"><span class="sp-eyebrow">EXAM PLAN</span><span class="sp-subj-name">${esc(name(next.fileId))}</span>
+        <span class="sp-today ${todayAll.length && todayDone === todayAll.length ? 'ok' : ''}">${todayAll.length ? `Aaj ${todayDone}/${todayAll.length} ✓` : 'Aaj chhutti 🎉'}</span></div></div>`
+    : head();
   let rows = '';
   for (const s of c.subjects) {
     const nm = esc(name(s.fileId));
@@ -159,10 +166,10 @@ export async function studyPlanBackHtml(files) {
   const active = c.subjects.filter((s) => s.phase !== 'over');
   const tot = active.reduce((a, s) => a + s.total, 0), dn = active.reduce((a, s) => a + s.doneCount, 0);
   const pct = tot ? Math.round((dn / tot) * 100) : 0;
-  return `${head(chip)}
+  return `${hero}
     <div class="sp-list">${rows || '<div class="sp-sub">Aaj koi chapter pending nahi.</div>'}</div>
     <i class="sp-bar"><u style="width:${pct}%"></u></i>
-    <div class="sp-foot"><span>${dn}/${tot} chapters · ${pct}%</span><button id="sp-edit" class="sp-link" type="button">Edit plan</button></div>`;
+    <div class="sp-foot"><span>${dn}/${tot} chapters · ${pct}%</span><button id="sp-edit" class="sp-link" type="button" aria-label="Edit plan">${window.icon('edit', 'icon icon-xs')}<span>Edit</span></button></div>`;
 }
 
 export function bindStudyPlanBack(files) {
