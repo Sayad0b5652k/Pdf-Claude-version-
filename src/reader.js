@@ -2430,6 +2430,7 @@ export function updateReaderZoom(preserveAnchor = true) {
     pe._renderPromise = null;
     pe.spanRects = null;
     pe.rendered = false;
+    clearTile(pe);
   }
 
   if (mode === 'single') {
@@ -2741,7 +2742,7 @@ export function setupReaderInteractions(scrollEl){
     e.preventDefault();
     const t0=e.touches[0], t1=e.touches[1];
     const dist = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
-    zoomGesture.liveZoom = Math.min(2.5, Math.max(0.5, zoomGesture.startZoom * (dist/zoomGesture.startDist)));
+    zoomGesture.liveZoom = Math.min(MAX_READER_ZOOM, Math.max(0.5, zoomGesture.startZoom * (dist/zoomGesture.startDist)));
     if(zoomFrame) return;
     zoomFrame = requestAnimationFrame(()=>{
       zoomFrame = null;
@@ -2995,6 +2996,7 @@ const MAX_CANVAS_PIXELS = { low: 4, mid: 6, high: 8 }[RENDER_TIER] * 1024 * 1024
 // Native sharpness on every phone: budget screens are dpr 2, so nobody is rendered below their screen's resolution.
 // Memory is protected by the pixel cap above, not by blurring normal pages.
 const MAX_DPR = 2.5;
+const MAX_READER_ZOOM = 6;   // tiles keep every zoom level sharp
 window.RENDER_TIER = RENDER_TIER;
 let maxParallelRenders = RENDER_TIER === 'low' ? 1 : 2;   // slow phones paint one page at a time so scrolling stays smooth
 const slowRenderTimes = [];
@@ -3004,6 +3006,7 @@ let renderQueue = [];
 let renderGeneration = 0;
 
 function releasePageResources(pe){
+  clearTile(pe);
   pe._renderToken = (pe._renderToken || 0) + 1; // invalidates any render still in flight
   if(pe.renderTask){
     try { pe.renderTask.cancel(); } catch(e){}
@@ -3138,6 +3141,97 @@ export function setupVirtualRender(){
   pumpRenderQueue();
 }
 
+/* ============================================================
+   Sharp zoom ("tiles"). A page that is too big for one canvas is painted once at a reduced
+   resolution. On top of it, only the part of the page that is on screen (plus a margin) is
+   painted again at full sharpness, in its own small canvas. This is what lets 400-600% zoom stay crisp
+   without ever holding a gigantic bitmap in memory. Firefox's viewer does the same.
+   ============================================================ */
+let tileTimer = null;
+function clearTile(pe){
+  if(!pe) return;
+  pe._tileToken = (pe._tileToken || 0) + 1;
+  if(pe._tileTask){ try { pe._tileTask.cancel(); } catch(e){} pe._tileTask = null; }
+  if(pe.tile){
+    try { pe.tile.width = 0; pe.tile.height = 0; } catch(e){}
+    if(pe.tile.parentNode) pe.tile.remove();
+    pe.tile = null;
+  }
+  pe._tileRect = null;
+}
+export function scheduleTiles(delay = 140){
+  clearTimeout(tileTimer);
+  tileTimer = setTimeout(refreshTiles, delay);
+}
+async function refreshTiles(){
+  if(window.zoomGestureActive){ scheduleTiles(220); return; }
+  const scrollEl = document.getElementById('reader-scroll');
+  if(!scrollEl) return;
+  const sr = scrollEl.getBoundingClientRect();
+  for(const pe of Object.values(pageEls)){
+    if(!pe || !pe.wrap || !pe.nativeVp) continue;
+    const wr = pe.wrap.getBoundingClientRect();
+    const visible = wr.width > 0 && wr.bottom > sr.top && wr.top < sr.bottom && wr.right > sr.left && wr.left < sr.right;
+    const capped = pe.rendered && pe.canvas && pe._baseScale && pe._wantScale && pe._baseScale < pe._wantScale * 0.92;
+    if(!visible || !capped){ if(pe.tile || pe._tileTask) clearTile(pe); continue; }
+    try { await renderTile(pe, sr, wr); } catch(e){ /* a failed tile just leaves the base bitmap */ }
+  }
+}
+async function renderTile(pe, sr, wr){
+  const page = pe.pageProxy;
+  if(!page) return;
+  const cssW = pe.nativeVp.width * pe.scale, cssH = pe.nativeVp.height * pe.scale;
+  const k = wr.width / cssW || 1;                       // 1 unless a CSS transform is active
+  const vis = {
+    x0: Math.max(0, (sr.left - wr.left) / k), y0: Math.max(0, (sr.top - wr.top) / k),
+    x1: Math.min(cssW, (sr.right - wr.left) / k), y1: Math.min(cssH, (sr.bottom - wr.top) / k)
+  };
+  if(vis.x1 - vis.x0 < 8 || vis.y1 - vis.y0 < 8) return;
+  const dpr = Math.min(window.devicePixelRatio || 2, MAX_DPR);
+  // d = device pixels per CSS pixel for the tile. Keep as much margin around the screen as the pixel budget allows;
+  // if even the visible part is over budget, lower the sharpness a little.
+  let r = vis, d = dpr;
+  for(const pad of [0.35, 0.2, 0.08, 0]){
+    const px = (vis.x1 - vis.x0) * pad, py = (vis.y1 - vis.y0) * pad;
+    r = { x0: Math.max(0, vis.x0 - px), y0: Math.max(0, vis.y0 - py), x1: Math.min(cssW, vis.x1 + px), y1: Math.min(cssH, vis.y1 + py) };
+    d = dpr;
+    const area = (r.x1 - r.x0) * (r.y1 - r.y0) * d * d;
+    if(area <= MAX_CANVAS_PIXELS) break;
+    if(pad === 0) d = dpr * Math.sqrt(MAX_CANVAS_PIXELS / area);
+  }
+  const s = d * pe.scale;                                 // PDF units -> tile pixels
+  if(s < pe._baseScale * 1.15) return;                  // not noticeably sharper than what is already there
+  const t = pe._tileRect;
+  if(t && t.pageScale === pe.scale && Math.abs(t.d - d) / d < 0.03 &&
+     t.x0 <= vis.x0 + 2 && t.y0 <= vis.y0 + 2 && t.x1 >= vis.x1 - 2 && t.y1 >= vis.y1 - 2) return;   // current tile still covers the screen
+
+  const token = ++pe._tileToken;
+  if(pe._tileTask){ try { pe._tileTask.cancel(); } catch(e){} pe._tileTask = null; }
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.ceil((r.x1 - r.x0) * d));
+  cv.height = Math.max(1, Math.ceil((r.y1 - r.y0) * d));
+  cv.className = 'page-tile';
+  cv.style.cssText = `position:absolute;left:${r.x0}px;top:${r.y0}px;width:${cv.width / d}px;height:${cv.height / d}px;pointer-events:none;`;
+  const ctx = cv.getContext('2d');
+  if(!ctx) return;
+  const vp = page.getViewport({ scale: s, offsetX: -r.x0 * d, offsetY: -r.y0 * d });
+  const task = page.render({ canvasContext: ctx, viewport: vp });
+  pe._tileTask = task;
+  try { await task.promise; }
+  catch(e){ if(pe._tileTask === task) pe._tileTask = null; try { cv.width = 0; cv.height = 0; } catch(_){} return; }
+  if(pe._tileTask === task) pe._tileTask = null;
+  if(pe._tileToken !== token || !pe.rendered || !pe.canvas || !pe.canvas.parentNode){ try { cv.width = 0; cv.height = 0; } catch(_){} return; }
+  const old = pe.tile;
+  pe.canvas.after(cv);
+  pe.tile = cv;
+  pe._tileRect = { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1, d, pageScale: pe.scale };
+  if(old){ try { old.width = 0; old.height = 0; } catch(_){} old.remove(); }
+}
+// Scrolling the zoomed page asks for fresh tiles once it settles (scroll events do not bubble, so listen in the capture phase).
+document.addEventListener('scroll', (e) => {
+  if(e.target && e.target.id === 'reader-scroll') scheduleTiles(140);
+}, { capture: true, passive: true });
+
 export async function renderPage(num){
   const pe = pageEls[num];
   if(!pe || pe.rendered) return;
@@ -3170,6 +3264,8 @@ async function renderPageNow(num, pe, token){
     if(pixels > MAX_CANVAS_PIXELS){
       renderViewport = page.getViewport({ scale: pe.scale * dpr * Math.sqrt(MAX_CANVAS_PIXELS / pixels) });
     }
+    pe._baseScale = renderViewport.scale;   // what the full-page bitmap really has
+    pe._wantScale = pe.scale * dpr;          // what the screen could show; the gap is filled by sharp tiles
 
     canvas = document.createElement('canvas');
     canvas.width = Math.floor(renderViewport.width);
@@ -3216,6 +3312,7 @@ async function renderPageNow(num, pe, token){
       }
     }
     const previousCanvas = pe.canvas;
+    clearTile(pe);
     pe.wrap.innerHTML = '';
     pe.wrap.appendChild(canvas);
     if(previousCanvas && previousCanvas !== canvas){
@@ -3266,6 +3363,7 @@ async function renderPageNow(num, pe, token){
     pe.rendered = true;
     pe.rendering = false;
     pe._renderPromise = null;
+    scheduleTiles(60);
     try { window.onPageRendered && window.onPageRendered(num); } catch (e) {}
     // A phone that needs long to paint a page (slow CPU, 6GB RAM report) switches itself to one page at a time.
     if (maxParallelRenders > 1) {
@@ -4224,7 +4322,7 @@ export async function openReaderMenu(){
       <button class="btn btn-icon" id="zoom-step-in" style="width:36px; height:36px;">${window.icon('zoomIn','icon icon-sm')}</button>
     </div>
     <div style="display:flex; gap:6px; margin-top:8px;">
-      ${[100,125,150,200].map(p=>`<button class="chip zoom-preset" data-zoom="${p}" style="flex:1; text-align:center; ${Math.round(window.State.zoom*100)===p?'background:var(--accent-soft); color:var(--accent); border-color:var(--accent);':''}">${p}%</button>`).join('')}
+      ${[100,150,200,300,400,600].map(p=>`<button class="chip zoom-preset" data-zoom="${p}" style="flex:1; text-align:center; ${Math.round(window.State.zoom*100)===p?'background:var(--accent-soft); color:var(--accent); border-color:var(--accent);':''}">${p}%</button>`).join('')}
     </div>
     <div style="display:flex; gap:8px; margin-top:10px;">
       <button class="btn" data-fit="width" style="flex:1; padding:11px; background:${window.State.fitMode==='width'?'var(--accent-soft)':'var(--surface-2)'}; color:${window.State.fitMode==='width'?'var(--accent)':'var(--text)'}; border:1px solid ${window.State.fitMode==='width'?'var(--accent)':'var(--border)'};">${window.icon('list','icon icon-sm')} Fit width</button>
@@ -4238,7 +4336,7 @@ export async function openReaderMenu(){
   document.getElementById('export-annotated').onclick = ()=>exportAnnotatedPdf(fid, annots);
   const pctLabel = document.getElementById('zoom-pct-label');
   function applyZoom(newZoom){
-    window.State.zoom = Math.min(2.5, Math.max(0.5, newZoom));
+    window.State.zoom = Math.min(MAX_READER_ZOOM, Math.max(0.5, newZoom));
     pctLabel.textContent = Math.round(window.State.zoom*100)+'%';
     document.querySelectorAll('.zoom-preset').forEach(c=>{
       const on = Number(c.dataset.zoom)===Math.round(window.State.zoom*100);
@@ -4248,8 +4346,8 @@ export async function openReaderMenu(){
     });
     updateReaderZoom(true);
   }
-  document.getElementById('zoom-step-out').onclick = ()=>applyZoom(window.State.zoom-0.1);
-  document.getElementById('zoom-step-in').onclick = ()=>applyZoom(window.State.zoom+0.1);
+  document.getElementById('zoom-step-out').onclick = ()=>applyZoom(window.State.zoom-(window.State.zoom>2.5?0.5:0.1));
+  document.getElementById('zoom-step-in').onclick = ()=>applyZoom(window.State.zoom+(window.State.zoom>=2.5?0.5:0.1));
   document.querySelectorAll('.zoom-preset').forEach(chip=>{
     chip.onclick = ()=>applyZoom(Number(chip.dataset.zoom)/100);
   });
