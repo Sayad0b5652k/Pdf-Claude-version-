@@ -1,6 +1,7 @@
 // @ts-nocheck
 
 export async function openPageTools(fid){
+  if (!fid) fid = window.State && window.State.currentFile && window.State.currentFile.id; if (!fid) return;
   const file = await window.DB.get('files', fid);
   if(!file) { window.toast('Book not found'); return; }
   const numPages = file.pageCount || 0;

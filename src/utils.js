@@ -928,9 +928,15 @@ if (typeof window !== 'undefined') {
 }
 
 export function renderMermaidDiagrams(container) {
+  // Most sheets/menus have no diagram: skip all Mermaid work (and its 3 MB load) unless one is present.
+  const _root = container || document;
+  if (!_root.querySelector || !_root.querySelector('.mermaid:not([data-processed="true"])')) return;
   if (typeof window.mermaid !== 'undefined') {
     try {
       const isDark = document.documentElement.dataset.theme === 'dark' || document.documentElement.classList.contains('dark') || window.State?.theme === 'dark';
+      const _themeKey = isDark ? 'd' : 'l';
+      if (window._mermaidThemeKey !== _themeKey) {
+      window._mermaidThemeKey = _themeKey;
       window.mermaid.initialize({
         startOnLoad: false,
         theme: isDark ? 'dark' : 'default',
@@ -948,6 +954,7 @@ export function renderMermaidDiagrams(container) {
         securityLevel: 'loose',
         flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' }
       });
+      }
       const root = container || document;
       const nodes = Array.from(root.querySelectorAll('.mermaid:not([data-processed="true"])'));
       if (nodes.length > 0) {
