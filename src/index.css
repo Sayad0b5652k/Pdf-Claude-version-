@@ -7683,7 +7683,7 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 /* hide/show drawings, hint bubble */
 body.ink-hidden .fabric-canvas-container { visibility: hidden !important; pointer-events: none !important; }
 #mtool-eye.on, .mk-hbtn.on { background: var(--accent-soft); border-color: var(--accent); }
-#mk-tip { position: fixed; z-index: 45; left: 50%; transform: translateX(-50%); max-width: min(92vw, 380px); background: var(--text); color: var(--bg); border-radius: 12px; padding: 9px 13px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,.3); display: flex; gap: 10px; align-items: center; }
+#mk-tip { position: fixed; z-index: 45; left: 50%; transform: translateX(-50%); width: min(92vw, 380px); box-sizing: border-box; background: var(--text); color: var(--bg); border-radius: 12px; padding: 9px 13px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,.3); display: flex; gap: 10px; align-items: center; }
 #mk-tip button { border: 0; background: rgba(255,255,255,.18); color: inherit; border-radius: 8px; padding: 4px 9px; font-weight: 700; cursor: pointer; flex: none; }
 
 /* polish pass */
