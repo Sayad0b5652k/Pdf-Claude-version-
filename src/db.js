@@ -91,7 +91,7 @@ export async function idb(storeName, mode='readonly'){
   return db.transaction(storeName, mode).objectStore(storeName);
 }
 
-export function reqP(req){ return new Promise((res,rej)=>{ req.onsuccess=()=>res(req.result); req.onerror=()=>rej(req.error); }); }
+export function reqP(req){ return new Promise((res,rej)=>{ req.onsuccess=()=>res(req.result); req.onerror=()=>{ const e=req.error; if(e && e.name==='QuotaExceededError' && window.onStorageFull) window.onStorageFull(); rej(e); }; }); }
 
 export async function normalizeBuffer(data) {
   if (!data) return null;

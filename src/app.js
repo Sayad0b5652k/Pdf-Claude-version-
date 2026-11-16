@@ -12,7 +12,46 @@ import './views_other.js';
 import './reader.js';
 import './page_tools.js';
 import './selection.js';
-import './annotations_drawing.js';
+// ---- Safety net: one place that notices crashes and a full phone, so nothing fails silently ----
+{
+  let lastToast = 0;
+  const calm = (msg, gap = 20000) => { const n = Date.now(); if (n - lastToast < gap) return; lastToast = n; try { window.toast && window.toast(msg); } catch (_) {} };
+  const harmless = (m) => /ResizeObserver loop|AbortError|RenderingCancelled|Worker was destroyed|Transport destroyed|Loading aborted|cancelled|Script error/i.test(m || '');
+  let lastFull = 0;
+  window.onStorageFull = () => { const n = Date.now(); if (n - lastFull < 60000) return; lastFull = n; try { window.toast && window.toast('Phone ki storage bhar gayi hai — kuch purani book ya cache hata do, warna naya data save nahi hoga'); } catch (_) {} };
+  window.addEventListener('unhandledrejection', (e) => {
+    const r = e && e.reason, msg = String((r && (r.message || r.name)) || r || '');
+    if (r && r.name === 'QuotaExceededError') { window.onStorageFull(); return; }
+    if (harmless(msg)) { e.preventDefault && e.preventDefault(); return; }
+    console.warn('[unhandled]', r);
+    calm('Kuch gadbad hui, par app chal rahi hai. Dobara try karo.');
+  });
+  window.addEventListener('error', (e) => {
+    const msg = String((e && e.message) || '');
+    if (harmless(msg) || (e && e.target && e.target !== window)) return;   // resource errors (images, fonts) are not crashes
+    console.warn('[error]', e && e.error);
+    calm('Kuch gadbad hui, par app chal rahi hai. Dobara try karo.');
+  });
+}
+
+// The drawing engine (Fabric.js, ~300KB) is not needed to open the app: load it when the browser is idle,
+// and let the few entry points wait for it if someone is faster than that.
+{
+  const lazyFns = ['toggleMarkupToolbar', 'paintDrawingsForPage'];
+  const stubs = {};
+  window.__annReady = new Promise((resolve) => {
+    const go = () => import('./annotations_drawing.js').then(resolve, (e) => { console.warn('Drawing engine failed to load', e); resolve(); });
+    if (window.requestIdleCallback) window.requestIdleCallback(go, { timeout: 1500 }); else setTimeout(go, 600);
+  });
+  lazyFns.forEach((name) => {
+    const stub = async (...args) => {
+      await window.__annReady;
+      if (window[name] !== stub) return window[name](...args);
+    };
+    stubs[name] = stub;
+    window[name] = stub;
+  });
+}
 import './teacher.js';
 import './paper_ui.js';
 import './mind_audio.js';
