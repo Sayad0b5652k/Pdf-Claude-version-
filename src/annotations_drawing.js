@@ -22,7 +22,7 @@ let activeTool = 'pen';
 let activeColor = '#ef4444'; // Red default
 let activeStrokeWidth = 2; // 2: Thin, 6: Medium, 12: Thick
 let activeFill = 'none'; // 'none' | 'rgba' | 'solid'
-let laserFadeMs = 2000;          // how long a laser trail stays
+let laserFadeMs = 4000;          // how long a laser trail stays
 let activeStamp = 'imp';
 let textSticky = false;          // text with a yellow sticky-note background
 let snapShapes = true;           // hold still at the end of a stroke -> straight line / circle / box
@@ -50,8 +50,9 @@ const STAMPS = {
   revise: { label: 'Revise', color: '#d9540e' },
   exam:   { label: 'Q.Exam', color: '#0a7fb5' }
 };
-const MARKER_WIDTH = { 2: 10, 6: 18, 12: 28 };
-const TEXT_SIZE = { 2: 16, 6: 24, 12: 38 };
+const MARKER_WIDTH = { 2: 9, 6: 15, 12: 22 };   // on-screen px (made zoom-proof when the brush is set)
+const pageZoomOf = (fCanvas) => Math.max(0.2, (fCanvas && fCanvas.viewportTransform && fCanvas.viewportTransform[0]) || 1);
+const TEXT_SIZE = { 2: 15, 6: 20, 12: 30 };   // on-screen px at the moment it is placed
 
 // Toolbar layout (compact/full, horizontal/vertical, where it was left) is remembered between sessions.
 let ui = { mode: 'full', orient: 'h', x: null, y: null };
@@ -222,7 +223,15 @@ export function renderMarkupToolbar() {
   const modeBtn = `<button class="mk-hbtn" id="mtool-mode" title="${mini ? 'Expand' : 'Compact'}" aria-label="Expand or compact">${mini ? '⌃' : '⌄'}</button>`;
   const badge = `<span class="markup-status-badge ${activeTool === 'none' ? 'badge-pan' : 'badge-active'}">${activeTool === 'none' ? '🖐️ Pan / Scroll Mode' : `${def ? def.g.replace(/<[^>]+>/g, '') : ''} ${getToolLabel(activeTool)} Active`}</span>`;
 
-  if (mini) {
+  if (mini && !vert) {
+    toolbarEl.innerHTML = `
+      <div class="markup-drag-handle mk-grip" title="Drag to move"><span class="drag-dots">⋮⋮</span></div>
+      <div class="mk-strip">${toolBtns}</div>
+      <button class="mk-colordot" id="mtool-colorpop" title="Colours" aria-label="Colours" style="background:${activeColor}"></button>
+      ${undoBtn}
+      ${modeBtn}
+      ${closeBtn}`;
+  } else if (mini) {
     const glyph = activeTool === 'none' ? '🖐️' : (def ? def.g : '✏️');
     toolbarEl.innerHTML = `
       <div class="markup-drag-handle mk-grip" title="Drag to move"><span class="drag-dots">⋮⋮</span></div>
@@ -263,7 +272,7 @@ export function renderMarkupToolbar() {
   makeToolbarDraggable(toolbarEl);
   bindToolbar(toolbarEl, curPg);
   placeToolbar(toolbarEl, fresh);
-  if (vert && !mini && activeTool === 'stamp') openFlyout('stamp'); else if (!(flyKind === 'color' && vert && !mini)) closeFlyout();
+  if (vert && !mini && activeTool === 'stamp') openFlyout('stamp'); else if (!(flyKind === 'color' && (vert ? !mini : mini))) closeFlyout();
 }
 
 function afterToolChange() {
@@ -328,7 +337,7 @@ function bindToolbar(toolbarEl, curPg) {
   const stickyBtn = $('mtool-sticky');
   if (stickyBtn) stickyBtn.onclick = () => { textSticky = !textSticky; restyleActiveText(); renderMarkupToolbar(); };
   const fadeBtn = $('mtool-fade');
-  if (fadeBtn) fadeBtn.onclick = () => { laserFadeMs = laserFadeMs === 1000 ? 2000 : laserFadeMs === 2000 ? 4000 : 1000; renderMarkupToolbar(); };
+  if (fadeBtn) fadeBtn.onclick = () => { laserFadeMs = laserFadeMs === 2000 ? 4000 : laserFadeMs === 4000 ? 7000 : 2000; renderMarkupToolbar(); };
   const snapBtn = $('mtool-snap');
   if (snapBtn) snapBtn.onclick = () => { snapShapes = !snapShapes; window.toast(snapShapes ? 'Snap on: likhke ruko, shape seedha ho jayega' : 'Snap off'); renderMarkupToolbar(); };
 
@@ -640,19 +649,20 @@ function configureBrush(fCanvas) {
   if (!brush) return;
   brush.shadow = null;
   brush.strokeLineCap = 'round';
+  const z = pageZoomOf(fCanvas);   // widths are chosen in screen px, so a stroke looks the same at any zoom
   if (activeTool === 'marker') {
     brush.color = withAlpha(activeColor, 0.42);
-    brush.width = MARKER_WIDTH[activeStrokeWidth] || 18;
+    brush.width = (MARKER_WIDTH[activeStrokeWidth] || 15) / z;
     brush.strokeLineCap = 'square';
   } else if (activeTool === 'glow') {
     // bright core + coloured halo = neon tube
     brush.color = mixWithWhite(activeColor, 0.55);
-    brush.width = Math.max(3, activeStrokeWidth * 1.4);
+    brush.width = Math.max(3, activeStrokeWidth * 1.4) / z;
     const ShadowClass = fabric.Shadow || fabricModule.Shadow;
-    if (ShadowClass) brush.shadow = new ShadowClass({ color: activeColor, blur: 18, offsetX: 0, offsetY: 0, affectStroke: true });
+    if (ShadowClass) brush.shadow = new ShadowClass({ color: activeColor, blur: 16 / z, offsetX: 0, offsetY: 0, affectStroke: true });
   } else {
     brush.color = activeColor;
-    brush.width = activeStrokeWidth;
+    brush.width = Math.max(1, activeStrokeWidth * 0.9) / z;
   }
   fCanvas.freeDrawingBrush = brush;
 }
@@ -796,6 +806,7 @@ export function syncDrawRegion(pageNum, force) {
   fCanvas.setViewportTransform([z, 0, 0, z, -r.x0, -r.y0]);
   if (typeof fCanvas.calcOffset === 'function') fCanvas.calcOffset();
   container._region = { z, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
+  if (fCanvas.isDrawingMode && DRAW_TOOLS.includes(activeTool)) configureBrush(fCanvas);
   fCanvas.requestRenderAll();
 }
 document.addEventListener('scroll', (e) => {
@@ -841,7 +852,7 @@ function bindLaser(container) {
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (let i = 1; i < n; i++) {
       const a = 1 - (now - L.pts[i].t) / fade;
-      const A = Math.max(0, a * a);
+      const A = Math.max(0, Math.pow(a, 1.15));
       ctx.beginPath(); ctx.moveTo(L.pts[i - 1].x * dpr, L.pts[i - 1].y * dpr); ctx.lineTo(L.pts[i].x * dpr, L.pts[i].y * dpr);
       ctx.shadowColor = col; ctx.shadowBlur = 16 * dpr * A;
       ctx.strokeStyle = withAlpha(col, A); ctx.lineWidth = (2 + 6 * A) * dpr; ctx.stroke();
@@ -879,9 +890,9 @@ function bindLaser(container) {
 /* ------------------------------------------------------------------ */
 /*  Stamps, text and "hold to snap" shapes                              */
 /* ------------------------------------------------------------------ */
-function makeStamp(key, x, y) {
+function makeStamp(key, x, y, z) {
   const S = STAMPS[key] || STAMPS.imp;
-  const sc = activeStrokeWidth <= 2 ? 0.85 : activeStrokeWidth <= 6 ? 1.2 : 1.8;
+  const sc = (activeStrokeWidth <= 2 ? 1.0 : activeStrokeWidth <= 6 ? 1.4 : 2.0) / (z || 1);   // same on-screen size at any zoom
   const TextC = fabric.FabricText || fabric.Text || fabricModule.FabricText || fabricModule.Text;
   const RectC = fabric.Rect || fabricModule.Rect;
   const GroupC = fabric.Group || fabricModule.Group;
@@ -889,14 +900,32 @@ function makeStamp(key, x, y) {
   const box = new RectC({ width: txt.width + 20, height: txt.height + 10, rx: 6, ry: 6, fill: 'rgba(255,255,255,0.001)', stroke: S.color, strokeWidth: 2.4, originX: 'center', originY: 'center' });
   return new GroupC([box, txt], { left: x, top: y, originX: 'center', originY: 'center', angle: -6 + Math.random() * 12, scaleX: sc, scaleY: sc, selectable: false, evented: false, _k: 'stamp' });
 }
-function makeText(x, y) {
+// Own little text box (works with every phone keyboard; the card stays on top so the keyboard never hides it)
+function openTextDialog(initial, onDone) {
+  const old = document.getElementById('mk-textdlg'); if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'mk-textdlg';
+  box.innerHTML = `<textarea rows="2" placeholder="Yahan likho..." maxlength="400"></textarea>
+    <div class="mk-td-row"><button class="mk-td-x" type="button">✕</button><button class="mk-td-ok" type="button">Lagao ✓</button></div>`;
+  document.body.appendChild(box);
+  const ta = box.querySelector('textarea');
+  ta.value = initial || '';
+  const born = performance.now();
+  const close = () => { box.remove(); };
+  const ok = () => { if (performance.now() - born < 350) return; const v = ta.value.trim(); close(); if (v) onDone(v); };
+  box.querySelector('.mk-td-ok').onclick = ok;
+  box.querySelector('.mk-td-x').onclick = () => { if (performance.now() - born < 350) return; close(); };
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ok(); if (e.key === 'Escape') close(); });
+  setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 160);
+}
+function makeText(x, y, z, str) {
   const IT = fabric.IText || fabricModule.IText;
   const dark = textSticky && (activeColor.toLowerCase() === '#ffffff');
-  return new IT('Text', {
-    left: x, top: y, fontSize: TEXT_SIZE[activeStrokeWidth] || 24,
+  return new IT(str || 'Text', {
+    left: x, top: y, fontSize: (TEXT_SIZE[activeStrokeWidth] || 20) / (z || 1),
     fill: dark ? '#18181b' : activeColor,
     fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, sans-serif', fontWeight: '600',
-    backgroundColor: textSticky ? '#fff3a3' : '', padding: textSticky ? 6 : 2, editable: true, _k: 'text'
+    backgroundColor: textSticky ? '#fff3a3' : '', padding: textSticky ? 6 : 2, editable: false, _k: 'text'
   });
 }
 // Straight line / ellipse / rectangle if the drawn stroke is close enough to one. Else null (keep the freehand).
@@ -1082,6 +1111,11 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
   });
 
   // Interactive Shape Creation via Mouse / Touch Dragging
+  fCanvas.on('mouse:dblclick', (options) => {
+    const t = (options && options.target) || fCanvas.getActiveObject();
+    if (!isMarkupActive || !t || !isTextObj(t) || !['text', 'select'].includes(activeTool)) return;
+    openTextDialog(t.text, (str) => { t.set({ text: str }); t.setCoords(); fCanvas.requestRenderAll(); savePageCanvasState(pageNum); });
+  });
   fCanvas.on('mouse:down', (options) => {
     if (!isMarkupActive) return;
 
@@ -1092,7 +1126,7 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
 
     // Stamp: one tap places it
     if (activeTool === 'stamp') {
-      const g = makeStamp(activeStamp, pointer.x, pointer.y);
+      const g = makeStamp(activeStamp, pointer.x, pointer.y, pageZoomOf(fCanvas));
       g.set({ id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), pageNum });
       fCanvas.add(g);
       fCanvas.requestRenderAll();
@@ -1102,14 +1136,15 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
 
     // Text: tap an empty spot to start a new text box (tapping an existing one edits it)
     if (activeTool === 'text') {
-      const ao = fCanvas.getActiveObject();
-      if ((ao && ao.isEditing) || (options.target && isTextObj(options.target))) return;
-      const t = makeText(pointer.x, pointer.y);
-      t.set({ id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), pageNum });
-      fCanvas.add(t);
-      fCanvas.setActiveObject(t);
-      try { t.enterEditing(); t.selectAll(); } catch (err) {}
-      fCanvas.requestRenderAll();
+      if (options.target && isTextObj(options.target)) return;   // tap on existing text: select / drag it; double tap edits
+      const px = pointer.x, py = pointer.y, zz = pageZoomOf(fCanvas);
+      openTextDialog('', (str) => {
+        const t = makeText(px, py, zz, str);
+        t.set({ id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), pageNum });
+        fCanvas.add(t);
+        fCanvas.requestRenderAll();
+        savePageCanvasState(pageNum);
+      });
       return;
     }
 
@@ -1369,7 +1404,8 @@ async function savePageCanvasState(pageNum) {
   const fCanvas = fabricCanvases.get(pageNum);
   if (!fCanvas || !window.State || !window.State.currentFile) return;
 
-  const jsonObj = fCanvas.toJSON(['id', 'pageNum', '_k']);
+  const KEEP = ['id', 'pageNum', '_k'];   // fabric v6+: extra props go through toObject(), not toJSON()
+  const jsonObj = typeof fCanvas.toObject === 'function' ? fCanvas.toObject(KEEP) : fCanvas.toJSON(KEEP);
   if (jsonObj && typeof jsonObj === 'object') {
     delete jsonObj.viewportTransform;
   }
