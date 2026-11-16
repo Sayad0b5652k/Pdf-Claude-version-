@@ -622,8 +622,8 @@ html[data-theme="dark"] .marker-mark {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  animation: bounce-subtle 1.8s infinite ease-in-out;
 }
+.sheet.open .sheet-scroll-hint { animation: bounce-subtle 1.8s infinite ease-in-out; }   /* only while the sheet is actually showing */
 
 @keyframes bounce-subtle {
   0%, 100% { transform: translateY(0); }
@@ -1433,9 +1433,11 @@ html.touch-device .textLayer span {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *, *::before, *::after {
     animation-duration: .001s !important;
+    animation-iteration-count: 1 !important;   /* an infinite 1ms loop would repaint every frame */
     transition-duration: .001s !important;
+    scroll-behavior: auto !important;
   }
 }
 
