@@ -430,7 +430,7 @@ export function renderAnalyticsCard(files, readingStats) {
   return `
     <div class="card" style="padding:20px; margin-bottom:22px; border:1px solid var(--border, #d8ddd5); background:var(--surface, #f8faf6); border-radius:20px; box-shadow:var(--shadow-sm);">
       <!-- Header Section -->
-      <div style="margin-bottom:18px;">
+      <div style="margin-bottom:18px; padding-right:46px;">
         <div style="font-size:18px; font-weight:800; color:var(--text, #1c241e); line-height:1.2; letter-spacing:-0.01em;">
           Reading Analytics
         </div>
@@ -719,8 +719,17 @@ export function openBookMenu(fileId){
     ${inRecents ? sheetRow('x', 'Remove from Continue reading', 'act-remove-recents') : (f.hideFromRecents ? sheetRow('rotate', 'Restore to Continue reading', 'act-add-recents') : '')}
     ${sheetRow('edit','Rename','act-rename')}
     ${sheetRow('folder','Set folder / subject','act-folder')}
+    ${(window.State.files && window.State.files.length >= 2) ? sheetRow('merge', 'Merge with other books', 'act-merge') : ''}
     ${sheetRow('trash','Delete from app','act-delete', true)}
   `);
+  const actMergeBtn = document.getElementById('act-merge');
+  if (actMergeBtn) {
+    actMergeBtn.onclick = () => {
+      if (typeof window.openMergeBookPicker === 'function') {
+        window.openMergeBookPicker(f.id);
+      }
+    };
+  }
   document.getElementById('act-pin').onclick = async ()=>{
     const isNowPinned = !f.pinned;
     f.pinned = isNowPinned;

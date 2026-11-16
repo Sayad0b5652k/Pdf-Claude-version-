@@ -1,12 +1,12 @@
+// @ts-nocheck
 /* Exam plan (lives on the back of the Reading Analytics card).
-   The student picks subjects (books) + an exam date for each; chapters come from the book's TOC (or page blocks when
+   The student picks subjects (books) + an exam date + priority for each; chapters come from the book's TOC (or page blocks when
    there is none). Each day the app shows "aaj ka checklist": a stateless calculation from what is still pending, so a
    missed day simply spreads the remaining chapters over the days that are left. */
 
 const DAY = 86400000;
 const localISO = (t) => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const startOfDay = (t) => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
-const fmtDay = (t) => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 const esc = (s) => window.escapeHtml(String(s ?? ''));
 const bookName = (f) => (f && f.name ? f.name.replace(/\.pdf$/i, '') : 'Book');
 
@@ -64,7 +64,7 @@ export async function detectChapters(file) {
 
 /* ---------------- the daily maths (pure, exported for tests) ---------------- */
 
-/** plan = { subjects:[{fileId, examDate, chapters:[{id,title,start,end}], done:{id: dayStamp}, source}] } */
+/** plan = { subjects:[{fileId, examDate, priority, chapters:[{id,title,start,end}], done:{id: dayStamp}, source}] } */
 export function computeToday(plan, now = Date.now(), dueByFile = {}) {
   const today = startOfDay(now);
   const subs = ((plan && plan.subjects) || []).map((s) => {
@@ -72,11 +72,16 @@ export function computeToday(plan, now = Date.now(), dueByFile = {}) {
     const daysLeft = Math.round((exam - today) / DAY);
     const chapters = s.chapters || [];
     const done = s.done || {};
+    const priority = s.priority === 'high' ? 'high' : 'normal';
     const pages = (c) => Math.max(1, c.end - c.start + 1);
     const pending = chapters.filter((c) => !done[c.id]);
     const doneToday = chapters.filter((c) => done[c.id] === today);
     const revisionDays = daysLeft > 6 ? Math.max(2, Math.round(daysLeft * 0.2)) : 0;
     const readDays = Math.max(1, daysLeft - revisionDays);
+    const remainingPages = pending.reduce((a, c) => a + pages(c), 0);
+    const doneTodayPages = doneToday.reduce((a, c) => a + pages(c), 0);
+    const weight = priority === 'high' ? 1.35 : 1;
+    const budget = Math.max(1, Math.ceil(((remainingPages + doneTodayPages) / readDays) * weight));
     let phase = 'reading';
     if (daysLeft < 0) phase = 'over';
     else if (daysLeft === 0) phase = 'examday';
@@ -84,21 +89,19 @@ export function computeToday(plan, now = Date.now(), dueByFile = {}) {
     else if (revisionDays > 0 && daysLeft <= revisionDays) phase = 'revision';
     const items = [];
     if (phase === 'reading') {
-      const donePages = doneToday.reduce((a, c) => a + pages(c), 0);
-      const remaining = pending.reduce((a, c) => a + pages(c), 0);
-      const budget = Math.ceil((remaining + donePages) / readDays);
-      let acc = donePages;
+      let acc = doneTodayPages;
       doneToday.forEach((c) => items.push({ ...c, done: true }));
       for (const c of pending) { if (acc >= budget) break; items.push({ ...c, done: false }); acc += pages(c); }
     } else if (phase === 'finished' || phase === 'revision' || phase === 'examday') {
       doneToday.forEach((c) => items.push({ ...c, done: true }));
     }
     return {
-      fileId: s.fileId, exam, examDate: s.examDate, daysLeft, phase, items,
+      fileId: s.fileId, exam, examDate: s.examDate, priority, daysLeft, revisionDays, readDays,
+      dailyPages: Math.ceil(remainingPages / readDays), remainingPages, phase, items,
       total: chapters.length, doneCount: chapters.length - pending.length, due: dueByFile[s.fileId] || 0,
     };
   });
-  subs.sort((a, b) => (a.daysLeft < 0) - (b.daysLeft < 0) || a.exam - b.exam);
+  subs.sort((a, b) => (a.daysLeft < 0) - (b.daysLeft < 0) || a.exam - b.exam || (b.priority === 'high') - (a.priority === 'high'));
   return { subjects: subs, today };
 }
 
@@ -112,7 +115,7 @@ async function loadPlan(files) {
   // old single-book plan -> first subject with page blocks
   const f = (files || []).find((x) => x.id === p.fileId);
   if (!f || !p.examDate) return null;
-  return { version: 2, createdAt: p.createdAt || Date.now(), subjects: [{ fileId: f.id, examDate: p.examDate, chapters: pageBlocks(f.pageCount), source: 'pages', done: {} }] };
+  return { version: 2, createdAt: p.createdAt || Date.now(), subjects: [{ fileId: f.id, examDate: p.examDate, priority: 'normal', chapters: pageBlocks(f.pageCount), source: 'pages', done: {} }] };
 }
 async function savePlan(p) { await window.DB.setting('studyPlan', p); }
 
@@ -135,7 +138,7 @@ export async function studyPlanBackHtml(files) {
   if (!live || !live.length) {
     window._spPending = 0;
     return `${head()}<div class="sp-big">Exam date set karo</div>
-      <div class="sp-sub">Subjects chuno, har ek ka exam date do. Chapters TOC se aayenge aur roz ka checklist ban jayega.</div>
+      <div class="sp-sub">Subjects chuno, har ek ka exam date do. Chapters TOC se aayenge aur roz ka smart checklist ban jayega.</div>
       <button id="sp-edit" class="btn btn-primary sp-btn" type="button">Plan banao</button>`;
   }
   const c = computeToday({ subjects: live }, Date.now(), await dueMap());
@@ -143,26 +146,33 @@ export async function studyPlanBackHtml(files) {
   const next = c.subjects.find((s) => s.daysLeft >= 0);
   const todayAll = c.subjects.flatMap((s) => s.items), todayDone = todayAll.filter((i) => i.done).length;
   window._spPending = todayAll.length - todayDone;
+  const paceLabel = next && next.remainingPages > 0 && next.daysLeft > 0
+    ? ` · ~${next.dailyPages}p/day`
+    : '';
   const hero = next
-    ? `<div class="sp-hero"><div class="sp-num"><b>${next.daysLeft}</b><span>${next.daysLeft === 1 ? 'din baaki' : 'din baaki'}</span></div>
-        <div class="sp-hero-r"><span class="sp-eyebrow">EXAM PLAN</span><span class="sp-subj-name">${esc(name(next.fileId))}</span>
-        <span class="sp-today ${todayAll.length && todayDone === todayAll.length ? 'ok' : ''}">${todayAll.length ? `Aaj ${todayDone}/${todayAll.length} ✓` : 'Aaj chhutti 🎉'}</span></div></div>`
+    ? `<div class="sp-hero"><div class="sp-num"><b>${next.daysLeft}</b><span>din baaki</span></div>
+        <div class="sp-hero-r"><span class="sp-eyebrow">EXAM PLAN${next.priority === 'high' ? ' · ⚡ HIGH' : ''}</span><span class="sp-subj-name">${esc(name(next.fileId))}</span>
+        <span class="sp-today ${todayAll.length && todayDone === todayAll.length ? 'ok' : ''}">${todayAll.length ? `Aaj ${todayDone}/${todayAll.length} ✓` : 'Aaj chhutti 🎉'}${paceLabel}</span></div></div>`
     : head();
   let rows = '';
   for (const s of c.subjects) {
-    const nm = esc(name(s.fileId));
-    if (s.phase === 'over') { rows += `<div class="sp-note-row">${nm}: exam ho gaya</div>`; continue; }
-    if (s.phase === 'examday') { rows += `<div class="sp-note-row">${nm}: <b>exam aaj hai</b>${s.due ? ` · ${s.due} cards revise karo` : ''}</div>`; continue; }
+    const nm = esc(name(s.fileId).slice(0, 22));
+    const dueChip = s.due ? `<button type="button" class="sp-rev-btn" data-rev-file="${esc(s.fileId)}">${s.due} cards ➔</button>` : '';
+    if (s.phase === 'over') { rows += `<div class="sp-note-row"><span class="sp-note-txt">${nm}: exam ho gaya</span></div>`; continue; }
+    if (s.phase === 'examday') { rows += `<div class="sp-note-row"><span class="sp-note-txt">${nm}: <b>exam aaj hai</b></span>${dueChip}</div>`; continue; }
     s.items.forEach((it) => {
       rows += `<div class="sp-row ${it.done ? 'on' : ''}">
         <button class="sp-ck" type="button" data-file="${esc(s.fileId)}" data-ch="${esc(it.id)}" aria-pressed="${it.done}" aria-label="Done"></button>
-        <div class="sp-rt"><b>${esc(it.title)}</b><span>${esc(name(s.fileId).slice(0, 22))} · pp. ${it.start}–${it.end}</span></div>
+        <div class="sp-rt sp-open-read" data-file="${esc(s.fileId)}" data-page="${it.start}" title="Tap to read pp. ${it.start}–${it.end}">
+          <b>${s.priority === 'high' ? '⚡ ' : ''}${esc(it.title)}</b>
+          <span>${esc(name(s.fileId).slice(0, 20))} · pp. ${it.start}–${it.end} · <u>Read</u></span>
+        </div>
         <button class="sp-q" type="button" data-file="${esc(s.fileId)}" data-page="${it.start}">Quiz</button>
       </div>`;
     });
-    if (s.phase === 'finished') rows += `<div class="sp-note-row">${nm}: sab chapters ho gaye ✅${s.due ? ` · ${s.due} cards due` : ''}</div>`;
-    else if (s.phase === 'revision') rows += `<div class="sp-note-row">${nm}: ab sirf revision · <b>${s.due}</b> cards due</div>`;
-    else if (!s.items.some((i) => !i.done)) rows += `<div class="sp-note-row">${nm}: aaj ka goal poora ✅</div>`;
+    if (s.phase === 'finished') rows += `<div class="sp-note-row"><span class="sp-note-txt">${nm}: sab chapters ho gaye ✅</span>${dueChip}</div>`;
+    else if (s.phase === 'revision') rows += `<div class="sp-note-row"><span class="sp-note-txt">${nm}: revision (${s.daysLeft}d left)</span>${dueChip}</div>`;
+    else if (!s.items.some((i) => !i.done)) rows += `<div class="sp-note-row"><span class="sp-note-txt">${nm}: aaj ka goal poora ✅</span>${dueChip}</div>`;
   }
   const active = c.subjects.filter((s) => s.phase !== 'over');
   const tot = active.reduce((a, s) => a + s.total, 0), dn = active.reduce((a, s) => a + s.doneCount, 0);
@@ -190,6 +200,22 @@ export function bindStudyPlanBack(files) {
       window.renderDashboard && window.renderDashboard(false);
     };
   });
+  document.querySelectorAll('.sp-open-read').forEach((el) => {
+    el.onclick = async () => {
+      if (typeof window.openReader !== 'function') return;
+      await window.openReader(el.dataset.file, Number(el.dataset.page) || 1);
+    };
+  });
+  document.querySelectorAll('.sp-rev-btn').forEach((b) => {
+    b.onclick = (e) => {
+      e.stopPropagation();
+      if (window.State) {
+        window.State.view = 'review';
+        window.pushAppScreen && window.pushAppScreen('review');
+        window.render && window.render();
+      }
+    };
+  });
   document.querySelectorAll('.sp-q').forEach((b) => {
     b.onclick = async () => {
       if (typeof window.openReader !== 'function') return;
@@ -205,10 +231,11 @@ export async function openStudyPlanSheet(files) {
   const old = await loadPlan(files);
   const tomorrow = localISO(Date.now() + DAY);
   let draft = ((old && old.subjects) || []).filter((s) => files.some((f) => f.id === s.fileId)).map((s) => ({
-    fileId: s.fileId, examDate: s.examDate, chapters: s.chapters, source: s.source || 'pages', done: s.done || {},
-    off: new Set(), loading: false,
+    fileId: s.fileId, examDate: s.examDate, priority: s.priority === 'high' ? 'high' : 'normal',
+    chapters: s.chapters, source: s.source || 'pages', done: { ...(s.done || {}) },
+    off: new Set(), loading: false, detailsOpen: false,
   }));
-  if (!draft.length) draft.push({ fileId: files[0].id, examDate: '', chapters: null, source: '', done: {}, off: new Set(), loading: false });
+  if (!draft.length) draft.push({ fileId: files[0].id, examDate: localISO(Date.now() + 30 * DAY), priority: 'normal', chapters: null, source: '', done: {}, off: new Set(), loading: false, detailsOpen: false });
 
   const load = async (s) => {
     s.loading = true; s.chapters = null; s.off = new Set(); paint();
@@ -217,35 +244,107 @@ export async function openStudyPlanSheet(files) {
     s.chapters = r.chapters; s.source = r.source; s.loading = false; paint();
   };
 
+  const describeSubjectPace = (s) => {
+    if (!s.chapters || !s.examDate) return '';
+    const today = startOfDay(Date.now());
+    const exam = startOfDay(new Date(s.examDate + 'T00:00:00').getTime());
+    const daysLeft = Math.round((exam - today) / DAY);
+    if (daysLeft <= 0) return 'Exam date aaj ke baad honi chahiye';
+    const activeChs = s.chapters.filter((c) => !s.off.has(c.id) && !(s.done && s.done[c.id]));
+    const remPages = activeChs.reduce((a, c) => a + Math.max(1, c.end - c.start + 1), 0);
+    const revDays = daysLeft > 6 ? Math.max(2, Math.round(daysLeft * 0.2)) : 0;
+    const readDays = Math.max(1, daysLeft - revDays);
+    const ppd = Math.ceil((remPages / readDays) * (s.priority === 'high' ? 1.35 : 1));
+    const doneCount = s.chapters.filter((c) => !s.off.has(c.id) && s.done && s.done[c.id]).length;
+    return `~${ppd} pp/day · ${daysLeft}d left${revDays ? ` (${revDays}d revision buffer)` : ''}${doneCount ? ` · ${doneCount} done ✓` : ''}`;
+  };
+
   window.Sheet.open('<div class="sp-sheet" id="sp-root"></div>');
   function paint() {
     const root = document.getElementById('sp-root'); if (!root) return;
     const used = new Set(draft.map((s) => s.fileId));
-    root.innerHTML = `<div class="sp-sheet-h">Exam plan</div>
+    root.innerHTML = `<div class="sp-sheet-h">Exam Plan & Smart Pace</div>
       ${draft.map((s, i) => {
+        const fObj = files.find((f) => f.id === s.fileId);
+        const lastReadPage = (fObj && fObj.lastPage > 1) ? fObj.lastPage : 0;
         const opts = files.map((f) => `<option value="${esc(f.id)}" ${s.fileId === f.id ? 'selected' : ''} ${used.has(f.id) && s.fileId !== f.id ? 'disabled' : ''}>${esc(bookName(f))}</option>`).join('');
+        const paceTxt = describeSubjectPace(s);
+        const presets = [7, 15, 30, 60, 90].map((d) => {
+          const iso = localISO(Date.now() + d * DAY);
+          return `<button type="button" class="sp-pchip ${s.examDate === iso ? 'active' : ''}" data-preset="${i}" data-iso="${iso}">+${d}d</button>`;
+        }).join('');
         const chs = s.loading ? '<div class="sp-note">Chapters nikal raha hoon…</div>'
-          : s.chapters ? `<details class="sp-det"><summary>${s.chapters.length - s.off.size} chapters · ${s.source === 'toc' ? 'TOC se' : 'TOC nahi mila, pages ke blocks'}</summary>
-              ${s.chapters.map((c) => `<label class="sp-chk"><input type="checkbox" data-i="${i}" data-c="${esc(c.id)}" ${s.off.has(c.id) ? '' : 'checked'}><span>${esc(c.title)} <em>pp. ${c.start}–${c.end}</em></span></label>`).join('')}
+          : s.chapters ? `<details class="sp-det" data-det="${i}" ${s.detailsOpen ? 'open' : ''}><summary>${s.chapters.length - s.off.size} chapters · ${s.source === 'toc' ? 'TOC se' : 'Pages ke blocks'}</summary>
+              <div class="sp-PresetsBar" style="margin:6px 0 4px;">
+                <button type="button" class="sp-pchip" data-ch-all="${i}">All</button>
+                <button type="button" class="sp-pchip" data-ch-none="${i}">None</button>
+                ${lastReadPage > 1 ? `<button type="button" class="sp-pchip" data-sync-read="${i}" data-upto="${lastReadPage}">✓ Mark read (≤ p.${lastReadPage})</button>` : ''}
+              </div>
+              ${s.chapters.map((c) => {
+                const isDone = !!(s.done && s.done[c.id]);
+                return `<label class="sp-chk"><input type="checkbox" data-i="${i}" data-c="${esc(c.id)}" ${s.off.has(c.id) ? '' : 'checked'}><span>${esc(c.title)} ${isDone ? '✓' : ''} <em>pp. ${c.start}–${c.end}</em></span></label>`;
+              }).join('')}
             </details>` : '';
         return `<div class="sp-subj">
           <div class="sp-srow"><select data-book="${i}">${opts}</select>${draft.length > 1 ? `<button class="sp-x" data-rm="${i}" aria-label="Hata do" type="button">✕</button>` : ''}</div>
           <input type="date" data-date="${i}" min="${tomorrow}" value="${esc(s.examDate)}">
+          <div class="sp-PresetsBar">
+            ${presets}
+            <button type="button" class="sp-pchip ${s.priority === 'high' ? 'active' : ''}" data-prio="${i}" title="Give 1.35x daily study pace to this subject">⚡ High Priority</button>
+          </div>
+          ${paceTxt ? `<div class="sp-pace-pill" data-pace="${i}">${esc(paceTxt)}</div>` : ''}
           ${chs}</div>`;
       }).join('')}
       ${draft.length < files.length ? '<button id="sp-add" class="btn btn-ghost" type="button" style="width:100%;margin:2px 0 4px;">+ Subject jodo</button>' : ''}
       <button id="sp-save" class="btn btn-primary" type="button" style="width:100%;padding:13px;font-weight:800;" ${draft.some((s) => s.loading || !s.chapters) ? 'disabled' : ''}>Save plan</button>
       ${old ? '<button id="sp-remove" class="btn btn-ghost" type="button" style="width:100%;margin-top:8px;color:var(--danger);">Plan hata do</button>' : ''}`;
+    root.querySelectorAll('[data-det]').forEach((el) => { el.ontoggle = () => { draft[+el.dataset.det].detailsOpen = el.open; }; });
     root.querySelectorAll('[data-book]').forEach((el) => { el.onchange = () => { const s = draft[+el.dataset.book]; s.fileId = el.value; s.done = {}; load(s); }; });
-    root.querySelectorAll('[data-date]').forEach((el) => { el.onchange = () => { draft[+el.dataset.date].examDate = el.value; }; });
+    root.querySelectorAll('[data-date]').forEach((el) => { el.onchange = () => { draft[+el.dataset.date].examDate = el.value; paint(); }; });
+    root.querySelectorAll('[data-preset]').forEach((el) => { el.onclick = () => { draft[+el.dataset.preset].examDate = el.dataset.iso; paint(); }; });
+    root.querySelectorAll('[data-prio]').forEach((el) => { el.onclick = () => { const s = draft[+el.dataset.prio]; s.priority = s.priority === 'high' ? 'normal' : 'high'; paint(); }; });
     root.querySelectorAll('[data-rm]').forEach((el) => { el.onclick = () => { draft.splice(+el.dataset.rm, 1); paint(); }; });
+    root.querySelectorAll('[data-ch-all]').forEach((el) => { el.onclick = () => { const s = draft[+el.dataset.chAll]; s.detailsOpen = true; s.off.clear(); paint(); }; });
+    root.querySelectorAll('[data-ch-none]').forEach((el) => {
+      el.onclick = () => {
+        const s = draft[+el.dataset.chNone];
+        if (s.chapters && s.chapters.length) {
+          s.detailsOpen = true;
+          s.off = new Set(s.chapters.slice(1).map((c) => c.id));
+          paint();
+        }
+      };
+    });
+    root.querySelectorAll('[data-sync-read]').forEach((el) => {
+      el.onclick = () => {
+        const s = draft[+el.dataset.syncRead];
+        s.detailsOpen = true;
+        const upto = Number(el.dataset.upto) || 1;
+        const stamp = startOfDay(Date.now() - DAY);
+        s.done = s.done || {};
+        let marked = 0;
+        (s.chapters || []).forEach((c) => {
+          if (c.end <= upto) { s.done[c.id] = stamp; marked++; }
+        });
+        window.toast(marked ? `${marked} chapters marked read (≤ p.${upto}) ✓` : `No chapters end before p.${upto}`);
+        paint();
+      };
+    });
     root.querySelectorAll('.sp-chk input').forEach((el) => {
-      el.onchange = () => { const s = draft[+el.dataset.i]; if (el.checked) s.off.delete(el.dataset.c); else s.off.add(el.dataset.c); const sm = el.closest('details').querySelector('summary'); sm.textContent = `${s.chapters.length - s.off.size} chapters · ${s.source === 'toc' ? 'TOC se' : 'TOC nahi mila, pages ke blocks'}`; };
+      el.onchange = () => {
+        const idx = +el.dataset.i;
+        const s = draft[idx];
+        if (el.checked) s.off.delete(el.dataset.c); else s.off.add(el.dataset.c);
+        const sm = el.closest('details').querySelector('summary');
+        sm.textContent = `${s.chapters.length - s.off.size} chapters · ${s.source === 'toc' ? 'TOC se' : 'Pages ke blocks'}`;
+        const paceEl = root.querySelector(`[data-pace="${idx}"]`);
+        if (paceEl) paceEl.textContent = describeSubjectPace(s);
+      };
     });
     const add = document.getElementById('sp-add');
     if (add) add.onclick = () => {
       const f = files.find((x) => !used.has(x.id)); if (!f) return;
-      const s = { fileId: f.id, examDate: '', chapters: null, source: '', done: {}, off: new Set(), loading: false };
+      const s = { fileId: f.id, examDate: localISO(Date.now() + 30 * DAY), priority: 'normal', chapters: null, source: '', done: {}, off: new Set(), loading: false };
       draft.push(s); load(s);
     };
     const save = document.getElementById('sp-save');
@@ -256,7 +355,7 @@ export async function openStudyPlanSheet(files) {
         if (s.chapters.length - s.off.size <= 0) { window.toast('Kam se kam ek chapter rakho'); return; }
       }
       const plan = { version: 2, createdAt: (old && old.createdAt) || Date.now(), subjects: draft.map((s) => ({
-        fileId: s.fileId, examDate: s.examDate, source: s.source,
+        fileId: s.fileId, examDate: s.examDate, priority: s.priority || 'normal', source: s.source,
         chapters: s.chapters.filter((c) => !s.off.has(c.id)), done: s.done,
       })) };
       await savePlan(plan);
@@ -274,3 +373,4 @@ window.bindStudyPlanBack = bindStudyPlanBack;
 window.computeStudyToday = computeToday;
 window.studyPlanPickLevel = pickLevel;
 window.studyPlanPageBlocks = pageBlocks;
+window.openStudyPlanSheet = openStudyPlanSheet;

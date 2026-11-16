@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "studio.ai.sayadathar.twa",
+      "sha256_cert_fingerprints": [
+        "09:E8:79:55:BF:4E:4C:3A:6B:CF:F8:CE:D6:0D:01:6C:F5:B0:39:A7:0A:EF:AD:01:AE:00:64:FC:39:AB:41:8C"
+      ]
+    }
+  }
+]

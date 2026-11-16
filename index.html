@@ -20,7 +20,11 @@
       try {
         var savedTheme = localStorage.getItem('sayad_theme') || 'light';
         document.documentElement.dataset.theme = savedTheme;
-        var savedProTheme = (['editorial','notebook'].indexOf(localStorage.getItem('sayad_pro_theme')) >= 0 ? localStorage.getItem('sayad_pro_theme') : 'classic');
+        var savedProTheme = localStorage.getItem('sayad_pro_theme') || 'classic';
+        if (savedProTheme !== 'editorial' && savedProTheme !== 'classic') {
+          savedProTheme = 'classic';
+          localStorage.setItem('sayad_pro_theme', 'classic');
+        }
         document.documentElement.dataset.proTheme = savedProTheme;
         var metaTheme = document.querySelector('meta[name="theme-color"]');
         if (metaTheme) {
@@ -44,7 +48,16 @@
       });
 
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function(){});
+        if ('caches' in window && navigator.onLine !== false) {
+          caches.keys().then(function(keys) {
+            keys.forEach(function(k) {
+              if (k !== 'sayad-v43-sharp-zoom-ocr') caches.delete(k);
+            });
+          }).catch(function(){});
+        }
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(function(reg) {
+          try { reg.update(); } catch (e) {}
+        }).catch(function(){});
       }
     })();
   </script>

@@ -372,14 +372,14 @@ export default function App() {
     };
   }, []);
 
-  const [proTheme, setProTheme] = useState<string>(() => {
+  const [proTheme, _setProTheme] = useState<string>(() => {
+    let raw = 'classic';
     if (typeof window !== 'undefined' && (window as any).State && (window as any).State.proTheme) {
-      return (window as any).State.proTheme;
+      raw = (window as any).State.proTheme;
+    } else if (typeof localStorage !== 'undefined') {
+      raw = localStorage.getItem('sayad_pro_theme') || 'classic';
     }
-    if (typeof localStorage !== 'undefined') {
-      return localStorage.getItem('sayad_pro_theme') || 'classic';
-    }
-    return 'classic';
+    return raw === 'editorial' ? 'editorial' : 'classic';
   });
 
   return (

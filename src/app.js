@@ -12,6 +12,8 @@ import './views_other.js';
 import './reader.js';
 import './page_tools.js';
 import './selection.js';
+import './teacher.js';
+
 // ---- Safety net: one place that notices crashes and a full phone, so nothing fails silently ----
 {
   let lastToast = 0;
@@ -55,7 +57,6 @@ try { if (navigator.storage && navigator.storage.persist) navigator.storage.pers
     window[name] = stub;
   });
 }
-import './teacher.js';
 import './paper_ui.js';
 import './mind_audio.js';
 import './custom_select.js';
@@ -466,7 +467,7 @@ export async function boot(){
   document.documentElement.dataset.theme = window.State.theme;
   try { localStorage.setItem('sayad_theme', window.State.theme); } catch(e){}
   window.State.proTheme = await window.DB.getSetting('proTheme','classic');
-  if (window.State.proTheme !== 'editorial' && window.State.proTheme !== 'notebook') window.State.proTheme = 'classic'; // retired themes fall back to Classic
+  if (window.State.proTheme !== 'editorial') window.State.proTheme = 'classic'; // retired themes fall back to Classic
   document.documentElement.dataset.proTheme = window.State.proTheme;
   try { localStorage.setItem('sayad_pro_theme', window.State.proTheme); } catch(e){}
   syncThemeColorMeta();

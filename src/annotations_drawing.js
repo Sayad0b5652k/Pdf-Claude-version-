@@ -1,48 +1,62 @@
 // @ts-nocheck
 /**
- * Advanced Fabric.js Drawing & Shape Annotations Module for Strata PDF Reader
- * Features:
- * - Freehand Pen drawing
- * - Shapes: Rectangle / Square, Circle / Ellipse, Arrow, Straight Line
- * - Custom Color Palette, Stroke Thickness, and Fill Options
- * - Object Selection, Move, Scale (Resize), Rotate, and Touch-Hold Transformations via Fabric.js
- * - Object Eraser Tool
- * - Per-page Undo / Redo history
- * - IndexedDB persistence for PDF documents
+ * Systematic Studio Annotation & Drawing Engine for S.A.Y.A.D. PDF Reader
+ * Built on Fabric.js v7 with viewport-sliced high-DPI rendering, 2-finger pan/zoom passthrough,
+ * and a systematic, ergonomic floating annotation card.
  */
 
 import * as fabricModule from 'fabric';
 
-// Handle both ES module default and named exports for Fabric.js v5 / v6 compatibility
+// Handle both ES module default and named exports for Fabric.js v5 / v6 / v7 compatibility
 const fabric = fabricModule.fabric || fabricModule;
 
 let isMarkupActive = false;
-// 'none' (pan) | 'select' | 'pen' | 'marker' | 'glow' | 'laser' | 'text' | 'stamp' | 'rectangle' | 'ellipse' | 'arrow' | 'line' | 'eraser'
+// 'none' (pan) | 'select' | 'pen' | 'marker' | 'glow' | 'laser' | 'eraser' | 'text' | 'stamp' | 'rectangle' | 'ellipse' | 'arrow' | 'line'
 let activeTool = 'pen';
+let lastDrawTool = 'pen';
 let activeColor = '#ef4444'; // Red default
-let activeStrokeWidth = 2; // 2: Thin, 6: Medium, 12: Thick
-let activeFill = 'none'; // 'none' | 'rgba' | 'solid'
-let inkHidden = false;            // reading mode: drawings hidden (never deleted)
-let laserFadeMs = 4000;          // how long a laser trail stays
+let activeStrokeWidth = 2;   // 2: Thin, 6: Med, 12: Thick
+let activeFill = 'none';     // 'none' | 'rgba' | 'solid'
+let inkHidden = false;       // reading mode: drawings hidden (never deleted)
+let laserFadeMs = 4000;      // how long a laser trail stays
 let activeStamp = 'imp';
-let textSticky = false;          // text with a yellow sticky-note background
-let snapShapes = true;           // hold still at the end of a stroke -> straight line / circle / box
-let drawingBusy = false;         // a stroke is in progress (the card fades, the draw region must not move)
+let textSticky = false;      // text with a yellow sticky-note background
+let snapShapes = true;       // hold still at the end of a stroke -> straight line / circle / box
+let drawingBusy = false;     // a stroke is in progress (the card fades, the draw region must not move)
+
+// Crisp custom SVG icons for every tool
+const TOOL_ICONS = {
+  select: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></svg>`,
+  pen: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>`,
+  marker: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>`,
+  glow: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`,
+  laser: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" fill="currentColor"/><circle cx="12" cy="12" r="9" stroke-dasharray="3 3"/></svg>`,
+  eraser: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/><path d="m5 11 9 9"/></svg>`,
+  text: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>`,
+  stamp: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  rectangle: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/></svg>`,
+  ellipse: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/></svg>`,
+  arrow: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="19" x2="19" y2="5"/><polyline points="9 5 19 5 19 15"/></svg>`,
+  line: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="4" y1="20" x2="20" y2="4"/></svg>`,
+  focus: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="20" height="8" rx="2"/><line x1="6" y1="4" x2="18" y2="4" stroke-opacity="0.45"/><line x1="6" y1="20" x2="18" y2="20" stroke-opacity="0.45"/></svg>`,
+  pan: `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>`
+};
 
 const TOOL_DEFS = [
-  { id: 'select',    g: '🖐️', t: 'Select — khiskao / bada-chhota karo' },
-  { id: 'pen',       g: '✏️', t: 'Pen — seedha likhna' },
-  { id: 'marker',    g: '🖍️', t: 'Marker — text ko highlight karo' },
-  { id: 'glow',      g: '✨', t: 'Glow pen — chamakta likhna' },
-  { id: 'laser',     g: '🔴', t: 'Laser — dikhao, apne aap gayab (save nahi)' },
-  { id: 'text',      g: '<span class="mk-aa">Aa</span>', t: 'Text — tap karke likho' },
-  { id: 'stamp',     g: '⭐', t: 'Stamp — IMP, ★, ? lagao' },
-  { id: 'rectangle', g: '⬛', t: 'Box' },
-  { id: 'ellipse',   g: '⭕', t: 'Gola / ellipse' },
-  { id: 'arrow',     g: '➔', t: 'Teer (arrow)' },
-  { id: 'line',      g: '➖', t: 'Seedhi line' },
-  { id: 'eraser',    g: '🧹', t: 'Rubber — object par tap karke hatao' }
+  { id: 'select',    label: 'Select', g: TOOL_ICONS.select,    t: 'Select — move, resize or rotate objects' },
+  { id: 'pen',       label: 'Pen',    g: TOOL_ICONS.pen,       t: 'Pen — smooth freehand writing' },
+  { id: 'marker',    label: 'Marker', g: TOOL_ICONS.marker,    t: 'Marker — highlight text clearly' },
+  { id: 'glow',      label: 'Glow',   g: TOOL_ICONS.glow,      t: 'Glow Pen — neon highlight stroke' },
+  { id: 'laser',     label: 'Laser',  g: TOOL_ICONS.laser,     t: 'Laser — pointer trail that fades automatically' },
+  { id: 'eraser',    label: 'Eraser', g: TOOL_ICONS.eraser,    t: 'Eraser — tap or scrub over any drawing to erase' },
+  { id: 'text',      label: 'Text',   g: TOOL_ICONS.text,      t: 'Text — tap anywhere on the page to add a note' },
+  { id: 'stamp',     label: 'Stamp',  g: TOOL_ICONS.stamp,     t: 'Stamp — place IMP, ★, ?, ✓, Revise or Q.Exam' },
+  { id: 'rectangle', label: 'Box',    g: TOOL_ICONS.rectangle, t: 'Box — drag to draw a rectangle' },
+  { id: 'ellipse',   label: 'Circle', g: TOOL_ICONS.ellipse,   t: 'Circle — drag to draw a circle or oval' },
+  { id: 'arrow',     label: 'Arrow',  g: TOOL_ICONS.arrow,     t: 'Arrow — drag to point at key concepts' },
+  { id: 'line',      label: 'Line',   g: TOOL_ICONS.line,      t: 'Line — drag to draw a straight rule' }
 ];
+
 const STAMPS = {
   imp:    { label: 'IMP',    color: '#d92b2b' },
   star:   { label: '★',      color: '#e08a00' },
@@ -51,9 +65,10 @@ const STAMPS = {
   revise: { label: 'Revise', color: '#d9540e' },
   exam:   { label: 'Q.Exam', color: '#0a7fb5' }
 };
-const MARKER_WIDTH = { 2: 9, 6: 15, 12: 22 };   // on-screen px (made zoom-proof when the brush is set)
+
+const MARKER_WIDTH = { 2: 10, 6: 16, 12: 24 };   // on-screen px (made zoom-proof when the brush is set)
 const pageZoomOf = (fCanvas) => Math.max(0.2, (fCanvas && fCanvas.viewportTransform && fCanvas.viewportTransform[0]) || 1);
-const TEXT_SIZE = { 2: 15, 6: 20, 12: 30 };   // on-screen px at the moment it is placed
+const TEXT_SIZE = { 2: 15, 6: 20, 12: 28 };      // on-screen px at the moment it is placed
 
 // Toolbar layout (compact/full, horizontal/vertical, where it was left) is remembered between sessions.
 let ui = { mode: 'full', orient: 'h', x: null, y: null };
@@ -86,7 +101,11 @@ export function isMarkupModeActive() {
 export function setInkHidden(v) {
   inkHidden = !!v;
   document.body.classList.toggle('ink-hidden', inkHidden);
-  const e = document.getElementById('mtool-eye'); if (e) { e.classList.toggle('on', inkHidden); e.title = inkHidden ? 'Drawings dikhao' : 'Drawings chhupao'; }
+  const e = document.getElementById('mtool-eye');
+  if (e) {
+    e.classList.toggle('on', inkHidden);
+    e.title = inkHidden ? 'Drawings dikhao' : 'Drawings chhupao';
+  }
   window.toast(inkHidden ? 'Drawings chhup gaye (delete nahi hue)' : 'Drawings wapas dikh rahe hain');
 }
 export function toggleInkHidden() { setInkHidden(!inkHidden); }
@@ -96,14 +115,19 @@ window.isInkHidden = () => inkHidden;
 function showFirstUseTip() {
   let seen = false;
   try { seen = !!localStorage.getItem('sayad_markup_tip'); } catch (_) {}
-  if (seen) { window.toast('Annotation tools chalu'); return; }
+  if (seen) return;
+  const old = document.getElementById('mk-tip');
+  if (old) old.remove();
   const tb = document.getElementById('markup-toolbar');
   const tip = document.createElement('div');
   tip.id = 'mk-tip';
-  tip.innerHTML = '<span>✍️ 1 ungli = likho · ✌️ 2 ungli = scroll/zoom · ⋮⋮ se card khiskao · 👁 se drawings chhupao</span><button type="button">Samajh gaya</button>';
+  tip.innerHTML = '<span><b>1 ungli</b> = draw · <b>2 ungli</b> = scroll/zoom · <b>⋮⋮</b> se card khiskao · <b>👁</b> se drawings chhupao</span><button type="button">Samajh gaya</button>';
   document.body.appendChild(tip);
   const r = tb ? tb.getBoundingClientRect() : null;
-  tip.style.top = Math.min(window.innerHeight - 90, (r ? r.bottom : 60) + 10) + 'px';
+  if (r && r.bottom + 70 < window.innerHeight) {
+    tip.style.top = (r.bottom + 10) + 'px';
+    tip.style.bottom = 'auto';
+  }
   const bye = () => { try { localStorage.setItem('sayad_markup_tip', '1'); } catch (_) {} tip.remove(); };
   tip.querySelector('button').onclick = bye;
   setTimeout(bye, 9000);
@@ -114,8 +138,6 @@ export function toggleMarkupToolbar() {
   renderMarkupToolbar();
 
   if (isMarkupActive) {
-    // Drawing layers are created lazily (a full Fabric canvas is two extra canvases per page),
-    // so make sure every page that is on screen has one before the first stroke.
     for (const [num, pe] of Object.entries(window.pageEls || {})) {
       if (pe && pe.rendered) paintDrawingsForPage(Number(num));
     }
@@ -128,8 +150,10 @@ export function toggleMarkupToolbar() {
     deselectAllCanvases();
     closeFocusBand();
     closeFlyout();
+    const tip = document.getElementById('mk-tip');
+    if (tip) tip.remove();
     releaseEmptyDrawLayers();
-    window.toast('Annotation tools closed');
+    window.toast('Annotation studio closed');
   }
 }
 
@@ -143,11 +167,10 @@ function releaseEmptyDrawLayers() {
         const container = pe && pe.wrap ? pe.wrap.querySelector('.fabric-canvas-container') : null;
         if (container) container.remove();
       }
-    } catch (e) { /* keep the layer if it cannot be inspected */ }
+    } catch (e) {}
   });
 }
 
-// True when a saved Fabric JSON actually contains drawn objects.
 function drawingHasObjects(json) {
   if (!json) return false;
   if (typeof json === 'string') return !/"objects"\s*:\s*\[\s*\]/.test(json);
@@ -156,7 +179,7 @@ function drawingHasObjects(json) {
 
 function getToolLabel(t) {
   const d = TOOL_DEFS.find(x => x.id === t);
-  return d ? d.t.split(' — ')[0] : 'Scroll / Zoom';
+  return d ? d.label : 'Scroll / Zoom';
 }
 
 function hexToRgb(hex) {
@@ -175,15 +198,23 @@ function withAlpha(hex, a) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Toolbar card: full / mini, horizontal / vertical, draggable         */
+/*  Systematic Studio Toolbar Card: Full / Mini × Horizontal / Vertical */
 /* ------------------------------------------------------------------ */
 function widthWord() { return activeStrokeWidth <= 2 ? 'Thin' : activeStrokeWidth <= 6 ? 'Med' : 'Thick'; }
 function widthClass() { return activeStrokeWidth <= 2 ? '2' : activeStrokeWidth <= 6 ? '6' : '12'; }
 
+function getActiveSelectedObject() {
+  for (const [pNum, fc] of fabricCanvases.entries()) {
+    const ao = fc && typeof fc.getActiveObject === 'function' ? fc.getActiveObject() : null;
+    if (ao) return { pageNum: pNum, fCanvas: fc, obj: ao };
+  }
+  return null;
+}
+
 function swatchesHtml() {
   const custom = !COLOR_PALETTE.some(c => c.toLowerCase() === activeColor.toLowerCase());
   return COLOR_PALETTE.map(c => `
-      <div class="markup-swatch ${activeColor.toLowerCase() === c.toLowerCase() ? 'active' : ''}" data-color="${c}" style="background:${c};"></div>
+      <button type="button" class="markup-swatch ${activeColor.toLowerCase() === c.toLowerCase() ? 'active' : ''}" data-color="${c}" title="Color ${c}" style="background:${c};"></button>
     `).join('') + `
       <label class="markup-swatch markup-custom-swatch ${custom ? 'active' : ''}" title="Custom Color Picker" style="position:relative; background:${custom ? activeColor : 'conic-gradient(from 0deg, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)'}; display:inline-flex; align-items:center; justify-content:center; overflow:hidden;">
         <input type="color" id="mtool-custom-color" value="${activeColor}" style="opacity:0; width:100%; height:100%; position:absolute; top:0; left:0; cursor:pointer;" />
@@ -192,26 +223,104 @@ function swatchesHtml() {
 
 function stampChipsHtml() {
   return Object.entries(STAMPS).map(([k, s]) =>
-    `<button class="mk-stamp-chip ${activeStamp === k ? 'active' : ''}" data-stamp="${k}" style="--sc:${s.color}">${s.label}</button>`).join('');
+    `<button type="button" class="mk-stamp-chip ${activeStamp === k ? 'active' : ''}" data-stamp="${k}" style="--sc:${s.color}">${s.label}</button>`).join('');
 }
 
-function pillsHtml(vertical) {
-  const out = [];
-  const wDot = `<span class="stroke-dot stroke-w-${widthClass()}"></span>`;
-  out.push({ id: 'mtool-width-cycle', title: `Stroke thickness: ${activeStrokeWidth}px`, inner: vertical ? wDot : `${wDot}<span>${widthWord()}</span>`, on: false });
-  if (['rectangle', 'ellipse', 'select'].includes(activeTool)) {
-    out.push({ id: 'mtool-fill-cycle', title: `Shape fill: ${activeFill}`, inner: vertical ? (activeFill === 'none' ? '⚪' : activeFill === 'solid' ? '🔴' : '🌓') : `<span>${activeFill === 'none' ? '⚪' : activeFill === 'solid' ? '🔴' : '🌓'}</span><span>${activeFill === 'none' ? 'No Fill' : activeFill === 'solid' ? 'Soft' : 'Solid'}</span>`, on: activeFill !== 'none' });
+function inspectorHtml(vertical) {
+  const selInfo = getActiveSelectedObject();
+  const hasSel = !!selInfo;
+  const selIsText = hasSel && isTextObj(selInfo.obj);
+
+  if (vertical) {
+    const out = [];
+    const wDot = `<span class="stroke-dot stroke-w-${widthClass()}"></span>`;
+    out.push(`<button type="button" class="markup-pill-btn" id="mtool-width-cycle" title="Thickness: ${widthWord()}">${wDot}</button>`);
+    if (['rectangle', 'ellipse', 'select'].includes(activeTool)) {
+      const fLabel = activeFill === 'none' ? '⚪' : activeFill === 'rgba' ? '🌓' : '🔴';
+      out.push(`<button type="button" class="markup-pill-btn ${activeFill !== 'none' ? 'active' : ''}" id="mtool-fill-cycle" title="Fill: ${activeFill}">${fLabel}</button>`);
+    }
+    if (activeTool === 'text' || selIsText) {
+      out.push(`<button type="button" class="markup-pill-btn ${textSticky ? 'active' : ''}" id="mtool-sticky" title="Sticky background">🟨</button>`);
+    }
+    if (selIsText) {
+      out.push(`<button type="button" class="markup-pill-btn active" id="mtool-edit-text" title="Edit selected text">✎</button>`);
+    }
+    if (hasSel) {
+      out.push(`<button type="button" class="markup-pill-btn mk-del-sel" id="mtool-del-sel" title="Delete selected object">🗑</button>`);
+    }
+    if (activeTool === 'laser') {
+      out.push(`<button type="button" class="markup-pill-btn" id="mtool-fade" title="Laser fade">${laserFadeMs / 1000}s</button>`);
+    }
+    if (['pen', 'glow'].includes(activeTool)) {
+      out.push(`<button type="button" class="markup-pill-btn ${snapShapes ? 'active' : ''}" id="mtool-snap" title="Hold to snap shape">◻</button>`);
+    }
+    return out.join('');
   }
-  if (activeTool === 'text') {
-    out.push({ id: 'mtool-sticky', title: 'Yellow sticky-note background', inner: vertical ? '🟨' : '<span>🟨</span><span>Sticky</span>', on: textSticky });
+
+  // Horizontal systematic inspector bar
+  const segs = [];
+
+  // 1. Direct 3-step size/thickness selector (Thin / Med / Thick)
+  if (activeTool !== 'laser' && activeTool !== 'eraser' && activeTool !== 'none') {
+    const sizeLabel = (activeTool === 'text' || activeTool === 'stamp') ? { 2: 'S', 6: 'M', 12: 'L' } : { 2: 'Thin', 6: 'Med', 12: 'Thick' };
+    segs.push(`
+      <div class="mk-seg-group" title="Size / Thickness">
+        ${[2, 6, 12].map(w => `
+          <button type="button" class="mk-seg-btn ${activeStrokeWidth === w ? 'active' : ''}" data-stroke-w="${w}">
+            <span class="stroke-dot stroke-w-${w}"></span><span>${sizeLabel[w]}</span>
+          </button>
+        `).join('')}
+      </div>
+    `);
   }
-  if (activeTool === 'laser') {
-    out.push({ id: 'mtool-fade', title: 'How long the laser trail stays', inner: vertical ? `${laserFadeMs / 1000}s` : `<span>⏱</span><span>Fade ${laserFadeMs / 1000}s</span>`, on: false });
-  }
+
+  // 2. Tool-specific controls
   if (['pen', 'glow'].includes(activeTool)) {
-    out.push({ id: 'mtool-snap', title: 'Draw, then hold still: it becomes a straight line / circle / box', inner: vertical ? '◻' : '<span>◻</span><span>Snap</span>', on: snapShapes });
+    segs.push(`<button type="button" class="markup-pill-btn ${snapShapes ? 'active' : ''}" id="mtool-snap" title="Draw and hold still for 0.4s to snap into a straight line, circle, or box"><span>◻</span><span>Auto-Snap</span></button>`);
   }
-  return out.map(p => `<button class="markup-pill-btn ${p.on ? 'active' : ''}" id="${p.id}" title="${p.title}">${p.inner}</button>`).join('');
+
+  if (['rectangle', 'ellipse', 'select'].includes(activeTool)) {
+    const fText = activeFill === 'none' ? 'No Fill' : activeFill === 'rgba' ? 'Soft Fill' : 'Solid Fill';
+    const fDot = activeFill === 'none' ? '⚪' : activeFill === 'rgba' ? '🌓' : '🔴';
+    segs.push(`<button type="button" class="markup-pill-btn ${activeFill !== 'none' ? 'active' : ''}" id="mtool-fill-cycle" title="Cycle shape fill mode"><span>${fDot}</span><span>${fText}</span></button>`);
+  }
+
+  if (activeTool === 'text' || selIsText) {
+    segs.push(`<button type="button" class="markup-pill-btn ${textSticky ? 'active' : ''}" id="mtool-sticky" title="Yellow sticky-note card background"><span>🟨</span><span>Sticky</span></button>`);
+  }
+
+  if (selIsText) {
+    segs.push(`<button type="button" class="markup-pill-btn active" id="mtool-edit-text" title="Edit selected text note"><span>✎</span><span>Edit Text</span></button>`);
+  }
+
+  if (hasSel) {
+    segs.push(`<button type="button" class="markup-pill-btn mk-del-sel" id="mtool-del-sel" title="Delete selected object"><span>🗑</span><span>Delete</span></button>`);
+  }
+
+  if (activeTool === 'laser') {
+    segs.push(`
+      <div class="mk-seg-group" title="Laser trail fade duration">
+        ${[2000, 4000, 7000].map(ms => `
+          <button type="button" class="mk-seg-btn ${laserFadeMs === ms ? 'active' : ''}" data-laser-ms="${ms}">
+            <span>Fade ${ms / 1000}s</span>
+          </button>
+        `).join('')}
+      </div>
+    `);
+  }
+
+  if (activeTool === 'eraser') {
+    segs.push(`<span class="mk-hint-inline">Tap or drag across any stroke/shape to erase</span>`);
+  }
+
+  if (activeTool === 'none') {
+    segs.push(`<span class="mk-hint-inline">1-finger scroll & zoom active · Tap a tool to draw</span>`);
+  }
+
+  // Reading Focus Strip button always accessible on the right of inspector
+  segs.push(`<button type="button" class="markup-pill-btn ${focusBandEl ? 'active' : ''}" id="mtool-focus" title="Reading Focus Strip — dims rest of page" style="margin-left:auto;">${TOOL_ICONS.focus}<span>Focus</span></button>`);
+
+  return segs.join('');
 }
 
 export function renderMarkupToolbar() {
@@ -239,73 +348,90 @@ export function renderMarkupToolbar() {
   const def = TOOL_DEFS.find(t => t.id === activeTool);
   toolbarEl.className = `${vert ? 'mk-v' : 'mk-h'} ${mini ? 'mk-mini' : 'mk-full'}${drawingBusy ? ' md-busy' : ''}`;
 
-  const toolBtns = TOOL_DEFS.map(t =>
-    `<button class="markup-tool-btn ${activeTool === t.id ? 'active' : ''}" id="mtool-${t.id}" title="${t.t}" aria-label="${t.t}">${t.g}</button>`).join('') +
-    `<button class="markup-tool-btn ${focusBandEl ? 'active' : ''}" id="mtool-focus" title="Focus band: baaki page dim" aria-label="Focus band">🔦</button>`;
-  const undoBtn = `<button class="markup-tool-btn" id="mtool-undo" title="Undo on Page ${curPg}" aria-label="Undo" ${pageUndo.length <= 1 ? 'disabled style="opacity:0.35; cursor:default;"' : ''}>↩️</button>`;
-  const redoBtn = `<button class="markup-tool-btn" id="mtool-redo" title="Redo on Page ${curPg}" aria-label="Redo" ${pageRedo.length === 0 ? 'disabled style="opacity:0.35; cursor:default;"' : ''}>↪️</button>`;
-  const clearBtn = `<button class="markup-tool-btn" id="mtool-clear-page" title="Clear Page ${curPg}" aria-label="Clear page">🗑️</button>`;
-  const closeBtn = `<button class="markup-tool-btn" id="mtool-close" title="Close Toolbar" aria-label="Close" style="color:var(--danger);">✖️</button>`;
-  const orientBtn = `<button class="mk-hbtn" id="mtool-orient" title="${vert ? 'Make horizontal' : 'Make vertical'}" aria-label="Orientation">${vert ? '⇄' : '⇅'}</button>`;
-  const eyeBtn = `<button class="mk-hbtn${inkHidden ? ' on' : ''}" id="mtool-eye" title="${inkHidden ? 'Drawings dikhao' : 'Drawings chhupao'}" aria-label="Hide or show drawings">👁</button>`;
-  const modeBtn = `<button class="mk-hbtn" id="mtool-mode" title="${mini ? 'Expand' : 'Compact'}" aria-label="Expand or compact">${mini ? '⌃' : '⌄'}</button>`;
-  const badge = `<span class="markup-status-badge ${activeTool === 'none' ? 'badge-pan' : 'badge-active'}">${activeTool === 'none' ? '🖐️ Pan / Scroll Mode' : `${def ? def.g.replace(/<[^>]+>/g, '') : ''} ${getToolLabel(activeTool)} Active`}</span>`;
+  const toolBtnsFull = TOOL_DEFS.map(t =>
+    `<button type="button" class="markup-tool-btn mk-labeled-btn ${activeTool === t.id ? 'active' : ''}" id="mtool-${t.id}" title="${t.t}" aria-label="${t.t}">
+      <span class="mk-t-ico">${t.g}</span>
+      <span class="mk-t-lbl">${t.label}</span>
+    </button>`).join('');
+
+  const toolBtnsMini = TOOL_DEFS.map(t =>
+    `<button type="button" class="markup-tool-btn ${activeTool === t.id ? 'active' : ''}" id="mtool-${t.id}" title="${t.t}" aria-label="${t.t}">${t.g}</button>`).join('') +
+    `<button type="button" class="markup-tool-btn ${focusBandEl ? 'active' : ''}" id="mtool-focus" title="Focus strip" aria-label="Focus strip">${TOOL_ICONS.focus}</button>`;
+
+  const undoBtn = `<button type="button" class="markup-tool-btn mk-act-btn" id="mtool-undo" title="Undo on Page ${curPg}" aria-label="Undo" ${pageUndo.length <= 1 ? 'disabled' : ''}>↩</button>`;
+  const redoBtn = `<button type="button" class="markup-tool-btn mk-act-btn" id="mtool-redo" title="Redo on Page ${curPg}" aria-label="Redo" ${pageRedo.length === 0 ? 'disabled' : ''}>↪</button>`;
+  const clearBtn = `<button type="button" class="markup-tool-btn mk-act-btn" id="mtool-clear-page" title="Clear Page ${curPg} (Undoable)" aria-label="Clear page">🗑</button>`;
+  const closeBtn = `<button type="button" class="mk-hbtn mk-close-btn" id="mtool-close" title="Close Annotation Studio" aria-label="Close">✕</button>`;
+  const orientBtn = `<button type="button" class="mk-hbtn" id="mtool-orient" title="${vert ? 'Switch to Horizontal Card' : 'Switch to Vertical Side Dock'}" aria-label="Orientation">${vert ? '⇄' : '⇅'}</button>`;
+  const eyeBtn = `<button type="button" class="mk-hbtn${inkHidden ? ' on' : ''}" id="mtool-eye" title="${inkHidden ? 'Show drawings (Dikhao)' : 'Hide drawings (Chhupao)'}" aria-label="Hide or show drawings">👁</button>`;
+  const modeBtn = `<button type="button" class="mk-hbtn" id="mtool-mode" title="${mini ? 'Expand Full Studio Card' : 'Minimize to Compact Bar'}" aria-label="Expand or compact">${mini ? '⌃' : '⌄'}</button>`;
+
+  const statusBtn = `<button type="button" class="markup-status-badge ${activeTool === 'none' ? 'badge-pan' : 'badge-active'}" id="mtool-pan-toggle" title="Tap to toggle between Drawing and 1-Finger Scroll/Pan mode">
+    ${activeTool === 'none' ? `${TOOL_ICONS.pan}<span>Scroll Mode · Tap to Draw</span>` : `<span class="mk-status-dot" style="background:${activeColor}"></span><span>${getToolLabel(activeTool)} · Tap for Scroll</span>`}
+  </button>`;
 
   if (mini && !vert) {
     toolbarEl.innerHTML = `
       <div class="markup-drag-handle mk-grip" title="Drag to move"><span class="drag-dots">⋮⋮</span></div>
-      <div class="mk-strip">${toolBtns}</div>
-      <button class="mk-colordot" id="mtool-colorpop" title="Colours" aria-label="Colours" style="background:${activeColor}"></button>
+      <div class="mk-strip">${toolBtnsMini}</div>
+      <div class="mk-sep"></div>
+      <button type="button" class="mk-colordot mk-dot" id="mtool-colorpop" title="Choose Color" aria-label="Colours" style="background:${activeColor}"></button>
       ${undoBtn}
       ${eyeBtn}
       ${modeBtn}
       ${closeBtn}`;
-  } else if (mini) {
-    const glyph = activeTool === 'none' ? '🖐️' : (def ? def.g : '✏️');
+  } else if (mini && vert) {
+    const glyph = activeTool === 'none' ? TOOL_ICONS.pan : (def ? def.g : TOOL_ICONS.pen);
     toolbarEl.innerHTML = `
       <div class="markup-drag-handle mk-grip" title="Drag to move"><span class="drag-dots">⋮⋮</span></div>
-      <button class="mk-toolchip" id="mtool-mode" title="Expand" aria-label="Expand">${glyph}</button>
-      <button class="mk-colordot" id="mtool-cycle-color" title="Next colour" aria-label="Next colour" style="background:${activeColor}"></button>
+      <button type="button" class="mk-toolchip" id="mtool-mode-chip" title="Expand Full Studio" aria-label="Expand">${glyph}</button>
+      <div class="mk-strip">${toolBtnsMini}</div>
+      <div class="mk-sep"></div>
+      <button type="button" class="mk-colordot mk-dot" id="mtool-colorpop" title="Choose Color" aria-label="Choose Color" style="background:${activeColor}"></button>
       ${undoBtn}
       ${modeBtn}
       ${closeBtn}`;
   } else if (vert) {
     toolbarEl.innerHTML = `
-      <div class="markup-drag-handle mk-grip" title="Drag to move"><span class="drag-dots">⋮⋮</span><span class="drag-title">${curPg}</span></div>
-      <div class="mk-vhead">${eyeBtn}${orientBtn}${modeBtn}</div>
-      <div class="mk-tools mk-vscroll">${toolBtns}</div>
+      <div class="markup-drag-handle mk-grip" title="Drag to move">
+        <span class="drag-dots">⋮⋮</span>
+        <div class="mk-vhead markup-head-actions">${eyeBtn}${orientBtn}${modeBtn}${closeBtn}</div>
+      </div>
+      <div class="mk-tools mk-vscroll">${toolBtnsMini}</div>
       <div class="mk-vsep"></div>
-      <button class="mk-colordot" id="mtool-colorpop" title="Colours" aria-label="Colours" style="background:${activeColor}"></button>
-      <div class="mk-vpills">${pillsHtml(true)}</div>
+      <button type="button" class="mk-colordot" id="mtool-colorpop" title="Colours" aria-label="Colours" style="background:${activeColor}"></button>
+      <div class="mk-vpills">${inspectorHtml(true)}</div>
       <div class="mk-vsep"></div>
-      <div class="mk-vacts">${undoBtn}${redoBtn}${clearBtn}${closeBtn}</div>`;
+      <div class="mk-vacts">${undoBtn}${redoBtn}${clearBtn}</div>`;
   } else {
     toolbarEl.innerHTML = `
-      <div class="markup-drag-handle" title="Drag to move toolbox">
-        <div style="display:flex; align-items:center; gap:6px;">
+      <div class="markup-drag-handle" title="Drag header to move card anywhere">
+        <div class="mk-head-left">
           <span class="drag-dots">⋮⋮</span>
-          <span class="drag-title">Pg ${curPg}</span>
+          <span class="drag-title">Page ${curPg}</span>
+          ${statusBtn}
         </div>
-        ${badge}
-        <div class="mk-hr">${eyeBtn}${orientBtn}${modeBtn}</div>
+        <div class="mk-hr">${eyeBtn}${orientBtn}${modeBtn}${closeBtn}</div>
       </div>
-      <div class="mk-tools">${toolBtns}</div>
+      <div class="mk-tools-grid">${toolBtnsFull}</div>
       ${activeTool === 'stamp' ? `<div class="mk-stamps">${stampChipsHtml()}</div>` : ''}
-      <div class="mk-colors">${swatchesHtml()}</div>
+      <div class="mk-inspector">${inspectorHtml(false)}</div>
       <div class="mk-foot">
-        <div class="mk-pills">${pillsHtml(false)}</div>
-        <div class="mk-acts">${undoBtn}${redoBtn}${clearBtn}${closeBtn}</div>
+        <div class="mk-colors">${swatchesHtml()}</div>
+        <div class="mk-acts">${undoBtn}${redoBtn}${clearBtn}</div>
       </div>`;
   }
 
   makeToolbarDraggable(toolbarEl);
   bindToolbar(toolbarEl, curPg);
   placeToolbar(toolbarEl, fresh);
-  if (vert && !mini && activeTool === 'stamp') openFlyout('stamp'); else if (!(flyKind === 'color' && (vert ? !mini : mini))) closeFlyout();
+  if (vert && !mini && activeTool === 'stamp') openFlyout('stamp');
+  else if (!(flyKind === 'color' && (vert || mini))) closeFlyout();
 }
 
 function afterToolChange() {
-  if (inkHidden && activeTool !== 'none') setInkHidden(false);   // picking a tool = you want to see the page's drawings
+  if (activeTool !== 'none') lastDrawTool = activeTool;
+  if (inkHidden && activeTool !== 'none') setInkHidden(false);
   closeTextEditing();
   updateAllPageOverlayPointerEvents();
   renderMarkupToolbar();
@@ -321,12 +447,44 @@ function bindToolbar(toolbarEl, curPg) {
     btn.onclick = (e) => {
       if (e) { e.preventDefault(); e.stopPropagation(); }
       activeTool = (activeTool === t.id) ? 'none' : t.id;
-      if (activeTool === 'stamp' && ui.orient === 'v') flyKind = 'stamp'; else if (flyKind === 'stamp') closeFlyout();
+      if (activeTool === 'stamp' && ui.orient === 'v') flyKind = 'stamp';
+      else if (flyKind === 'stamp') closeFlyout();
       afterToolChange();
     };
   });
+
+  // Status badge toggles between Scroll Mode ('none') and last active drawing tool
+  const panToggle = $('mtool-pan-toggle');
+  if (panToggle) {
+    panToggle.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      activeTool = (activeTool === 'none') ? (lastDrawTool || 'pen') : 'none';
+      afterToolChange();
+    };
+  }
+
   const focusBtn = $('mtool-focus');
   if (focusBtn) focusBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); toggleFocusBand(); renderMarkupToolbar(); };
+
+  // Direct stroke width buttons (Thin / Med / Thick)
+  toolbarEl.querySelectorAll('[data-stroke-w]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      activeStrokeWidth = Number(btn.dataset.strokeW) || 2;
+      updateSelectedObjectStrokeWidth(activeStrokeWidth);
+      updateAllPageOverlayPointerEvents();
+      renderMarkupToolbar();
+    };
+  });
+
+  // Direct laser fade buttons (2s / 4s / 7s)
+  toolbarEl.querySelectorAll('[data-laser-ms]').forEach(btn => {
+    btn.onclick = (e) => {
+      e.preventDefault(); e.stopPropagation();
+      laserFadeMs = Number(btn.dataset.laserMs) || 4000;
+      renderMarkupToolbar();
+    };
+  });
 
   // Colours
   toolbarEl.querySelectorAll('.markup-swatch[data-color]').forEach(sw => {
@@ -347,9 +505,11 @@ function bindToolbar(toolbarEl, curPg) {
   if (pop) pop.onclick = (e) => { e.stopPropagation(); flyKind === 'color' ? closeFlyout() : openFlyout('color'); };
 
   // Stamps
-  toolbarEl.querySelectorAll('.mk-stamp-chip').forEach(ch => { ch.onclick = () => { activeStamp = ch.dataset.stamp; renderMarkupToolbar(); }; });
+  toolbarEl.querySelectorAll('.mk-stamp-chip').forEach(ch => {
+    ch.onclick = () => { activeStamp = ch.dataset.stamp; renderMarkupToolbar(); };
+  });
 
-  // Pills
+  // Inspector Pills
   const widthBtn = $('mtool-width-cycle');
   if (widthBtn) widthBtn.onclick = () => {
     activeStrokeWidth = activeStrokeWidth <= 2 ? 6 : activeStrokeWidth <= 6 ? 12 : 2;
@@ -369,7 +529,31 @@ function bindToolbar(toolbarEl, curPg) {
   const fadeBtn = $('mtool-fade');
   if (fadeBtn) fadeBtn.onclick = () => { laserFadeMs = laserFadeMs === 2000 ? 4000 : laserFadeMs === 4000 ? 7000 : 2000; renderMarkupToolbar(); };
   const snapBtn = $('mtool-snap');
-  if (snapBtn) snapBtn.onclick = () => { snapShapes = !snapShapes; window.toast(snapShapes ? 'Snap on: likhke ruko, shape seedha ho jayega' : 'Snap off'); renderMarkupToolbar(); };
+  if (snapBtn) snapBtn.onclick = () => { snapShapes = !snapShapes; window.toast(snapShapes ? 'Auto-Snap ON: hold still at stroke end to straighten' : 'Auto-Snap OFF'); renderMarkupToolbar(); };
+
+  // Edit Selected Text button
+  const editTxtBtn = $('mtool-edit-text');
+  if (editTxtBtn) {
+    editTxtBtn.onclick = () => {
+      const selInfo = getActiveSelectedObject();
+      if (selInfo && isTextObj(selInfo.obj)) {
+        openTextDialog(selInfo.obj.text, (str) => {
+          selInfo.obj.set({ text: str, dirty: true });
+          selInfo.obj.setCoords();
+          selInfo.fCanvas.requestRenderAll();
+          savePageCanvasState(selInfo.pageNum);
+        });
+      }
+    };
+  }
+
+  // Delete Selected Object button
+  const delSelBtn = $('mtool-del-sel');
+  if (delSelBtn) {
+    delSelBtn.onclick = () => {
+      deleteSelectedObjects();
+    };
+  }
 
   // Actions
   const undo = $('mtool-undo'); if (undo) undo.onclick = () => performUndo(curPg);
@@ -379,11 +563,40 @@ function bindToolbar(toolbarEl, curPg) {
   const eye = $('mtool-eye'); if (eye) eye.onclick = () => toggleInkHidden();
 
   // Layout controls
-  const mode = $('mtool-mode');
-  if (mode) mode.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ui.mode = ui.mode === 'mini' ? 'full' : 'mini'; saveUi(); closeFlyout(); renderMarkupToolbar(); };
+  const toggleMode = (e) => { e.preventDefault(); e.stopPropagation(); ui.mode = ui.mode === 'mini' ? 'full' : 'mini'; saveUi(); closeFlyout(); renderMarkupToolbar(); };
+  const mode = $('mtool-mode'); if (mode) mode.onclick = toggleMode;
+  const modeChip = $('mtool-mode-chip'); if (modeChip) modeChip.onclick = toggleMode;
   const orient = $('mtool-orient');
   if (orient) orient.onclick = (e) => { e.preventDefault(); e.stopPropagation(); ui.orient = ui.orient === 'v' ? 'h' : 'v'; ui.x = ui.y = null; saveUi(); closeFlyout(); renderMarkupToolbar(); };
 }
+
+function deleteSelectedObjects() {
+  const selInfo = getActiveSelectedObject();
+  if (!selInfo) return;
+  const { pageNum, fCanvas, obj } = selInfo;
+  if (kindOf(obj) === 'activeselection' && typeof obj.getObjects === 'function') {
+    obj.getObjects().forEach(child => fCanvas.remove(child));
+  } else {
+    fCanvas.remove(obj);
+  }
+  fCanvas.discardActiveObject();
+  fCanvas.requestRenderAll();
+  savePageCanvasState(pageNum);
+  window.toast('Selected annotation deleted');
+}
+
+// Allow Delete / Backspace key to remove selected annotation object when not typing in an input
+document.addEventListener('keydown', (e) => {
+  if (!isMarkupActive) return;
+  if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    const selInfo = getActiveSelectedObject();
+    if (selInfo) {
+      e.preventDefault();
+      deleteSelectedObjects();
+    }
+  }
+});
 
 function setActiveColor(c) {
   activeColor = c;
@@ -393,15 +606,14 @@ function setActiveColor(c) {
   if (flyKind === 'color') closeFlyout();
 }
 
-// Put the card where it was left, keep it on screen, and give vertical cards a sensible default edge.
 function placeToolbar(el, fresh) {
   const apply = () => {
     const w = el.offsetWidth, h = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
     if (ui.x == null || ui.y == null) {
       if (ui.orient === 'v') {
         el.style.transform = 'none';
-        el.style.left = Math.max(8, vw - w - 8) + 'px';
-        el.style.top = Math.max(8, Math.min(vh - h - 8, 96)) + 'px';
+        el.style.left = Math.max(8, vw - w - 10) + 'px';
+        el.style.top = Math.max(8, Math.min(vh - h - 8, 86)) + 'px';
       } else {
         el.style.left = '50%';
         el.style.top = '58px';
@@ -409,8 +621,8 @@ function placeToolbar(el, fresh) {
       }
     } else {
       el.style.transform = 'none';
-      el.style.left = Math.max(8, Math.min(vw - w - 8, ui.x)) + 'px';
-      el.style.top = Math.max(8, Math.min(vh - h - 8, ui.y)) + 'px';
+      el.style.left = Math.max(6, Math.min(vw - w - 6, ui.x)) + 'px';
+      el.style.top = Math.max(6, Math.min(vh - h - 6, ui.y)) + 'px';
     }
   };
   apply();
@@ -449,14 +661,15 @@ function makeToolbarDraggable(toolbarEl) {
       const dx = moveX - startX;
       const dy = moveY - startY;
       if (ev.cancelable) ev.preventDefault();
-      toolbarEl.style.left = `${Math.max(8, Math.min(window.innerWidth - toolbarEl.offsetWidth - 8, initialLeft + dx))}px`;
-      toolbarEl.style.top = `${Math.max(8, Math.min(window.innerHeight - toolbarEl.offsetHeight - 8, initialTop + dy))}px`;
+      toolbarEl.style.left = `${Math.max(6, Math.min(window.innerWidth - toolbarEl.offsetWidth - 6, initialLeft + dx))}px`;
+      toolbarEl.style.top = `${Math.max(6, Math.min(window.innerHeight - toolbarEl.offsetHeight - 6, initialTop + dy))}px`;
       positionFlyout();
     };
 
     const onPointerUp = () => {
       isDragging = false;
-      ui.x = parseFloat(toolbarEl.style.left); ui.y = parseFloat(toolbarEl.style.top);
+      ui.x = parseFloat(toolbarEl.style.left);
+      ui.y = parseFloat(toolbarEl.style.top);
       saveUi();
       document.removeEventListener('mousemove', onPointerMove);
       document.removeEventListener('mouseup', onPointerUp);
@@ -474,7 +687,7 @@ function makeToolbarDraggable(toolbarEl) {
   handle.ontouchstart = onPointerDown;
 }
 
-/* Side flyout (colours / stamps) used by the vertical card */
+/* Side flyout (colours / stamps) used by the vertical or mini card */
 let flyKind = null;
 function closeFlyout() {
   flyKind = null;
@@ -486,23 +699,43 @@ function openFlyout(kind) {
   if (!tb) return;
   flyKind = kind;
   let f = document.getElementById('mk-fly');
-  if (!f) { f = document.createElement('div'); f.id = 'mk-fly'; (document.querySelector('.view') || document.body).appendChild(f); }
+  if (!f) {
+    f = document.createElement('div');
+    f.id = 'mk-fly';
+    (document.querySelector('.view') || document.body).appendChild(f);
+  }
   f.innerHTML = kind === 'stamp'
-    ? `<div class="mk-fly-title">Stamps</div><div class="mk-fly-grid mk-fly-stamps">${stampChipsHtml()}</div>`
-    : `<div class="mk-fly-title">Colour</div><div class="mk-fly-grid mk-fly-colors">${swatchesHtml()}</div>`;
+    ? `<div class="mk-fly-title">Select Stamp</div><div class="mk-fly-grid mk-fly-stamps">${stampChipsHtml()}</div>`
+    : `<div class="mk-fly-title">Ink Colour</div><div class="mk-fly-grid mk-fly-colors">${swatchesHtml()}</div>`;
   f.querySelectorAll('.markup-swatch[data-color]').forEach(sw => { sw.onclick = () => setActiveColor(sw.dataset.color); });
   const ci = f.querySelector('#mtool-custom-color');
-  if (ci) { const h = e => { if (e.target.value) setActiveColor(e.target.value); }; ci.oninput = h; ci.onchange = h; }
-  f.querySelectorAll('.mk-stamp-chip').forEach(ch => { ch.onclick = () => { activeStamp = ch.dataset.stamp; f.querySelectorAll('.mk-stamp-chip').forEach(c => c.classList.toggle('active', c === ch)); }; });
+  if (ci) {
+    const h = e => { if (e.target.value) setActiveColor(e.target.value); };
+    ci.oninput = h;
+    ci.onchange = h;
+  }
+  f.querySelectorAll('.mk-stamp-chip').forEach(ch => {
+    ch.onclick = () => {
+      activeStamp = ch.dataset.stamp;
+      f.querySelectorAll('.mk-stamp-chip').forEach(c => c.classList.toggle('active', c === ch));
+    };
+  });
   positionFlyout();
 }
 function positionFlyout() {
   const f = document.getElementById('mk-fly'), tb = document.getElementById('markup-toolbar');
   if (!f || !tb) return;
   const r = tb.getBoundingClientRect(), fw = f.offsetWidth, fh = f.offsetHeight;
-  const left = (r.left + r.width / 2 > window.innerWidth / 2) ? r.left - fw - 8 : r.right + 8;
-  f.style.left = Math.max(8, Math.min(window.innerWidth - fw - 8, left)) + 'px';
-  f.style.top = Math.max(8, Math.min(window.innerHeight - fh - 8, r.top + 40)) + 'px';
+  if (ui.orient === 'h') {
+    const left = Math.max(8, Math.min(window.innerWidth - fw - 8, r.left + r.width / 2 - fw / 2));
+    const top = (r.bottom + fh + 12 < window.innerHeight) ? r.bottom + 8 : Math.max(8, r.top - fh - 8);
+    f.style.left = left + 'px';
+    f.style.top = top + 'px';
+  } else {
+    const left = (r.left + r.width / 2 > window.innerWidth / 2) ? r.left - fw - 8 : r.right + 8;
+    f.style.left = Math.max(8, Math.min(window.innerWidth - fw - 8, left)) + 'px';
+    f.style.top = Math.max(8, Math.min(window.innerHeight - fh - 8, r.top + 36)) + 'px';
+  }
 }
 document.addEventListener('pointerdown', (e) => {
   if (!flyKind) return;
@@ -530,14 +763,19 @@ document.addEventListener('pointercancel', touchGone, true);
 document.addEventListener('touchmove', (e) => {
   if (!isMarkupActive || e.touches.length !== 2) return;
   if (!(e.target.closest && e.target.closest('.fabric-canvas-container'))) return;
-  const sc = document.getElementById('reader-scroll'); if (!sc) return;
-  const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2, cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-  if (panLast) { sc.scrollLeft -= cx - panLast.x; sc.scrollTop -= cy - panLast.y; }
+  const sc = document.getElementById('reader-scroll');
+  if (!sc) return;
+  const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+  const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+  if (panLast) {
+    sc.scrollLeft -= cx - panLast.x;
+    sc.scrollTop -= cy - panLast.y;
+  }
   panLast = { x: cx, y: cy };
 }, { capture: true, passive: true });
 
 /* Finger / pen on the page: fade the card out of the way until the stroke ends. */
-const BUSY_TOOLS = ['pen', 'marker', 'glow', 'laser', 'rectangle', 'ellipse', 'arrow', 'line'];
+const BUSY_TOOLS = ['pen', 'marker', 'glow', 'laser', 'rectangle', 'ellipse', 'arrow', 'line', 'eraser'];
 document.addEventListener('pointerdown', (e) => {
   if (!isMarkupActive || !BUSY_TOOLS.includes(activeTool)) return;
   if (!(e.target.closest && e.target.closest('.fabric-canvas-container'))) return;
@@ -575,7 +813,12 @@ function layoutFocusBand() {
   bot.style.top = (focusBand.y + focusBand.h) + 'px';
   bot.style.height = Math.max(0, r.height - focusBand.y - focusBand.h) + 'px';
   const edge = focusBandEl.querySelector('.fb-edge');
-  edge.style.top = focusBand.y + 'px'; edge.style.height = focusBand.h + 'px';
+  edge.style.top = focusBand.y + 'px';
+  edge.style.height = focusBand.h + 'px';
+  const grip = focusBandEl.querySelector('.fb-grip');
+  const size = focusBandEl.querySelector('.fb-size');
+  if (grip) grip.style.top = (focusBand.y + focusBand.h / 2 - 20) + 'px';
+  if (size) size.style.top = (focusBand.y + focusBand.h - 18) + 'px';
 }
 function toggleFocusBand() {
   if (focusBandEl) { closeFocusBand(); return false; }
@@ -590,20 +833,17 @@ function toggleFocusBand() {
       e.preventDefault(); e.stopPropagation();
       el.setPointerCapture(e.pointerId);
       const y0 = e.clientY, by = focusBand.y, bh = focusBand.h;
-      const mv = (ev) => { onMove(ev.clientY - y0, by, bh); layoutFocusBand(); positionGrips(); };
+      const mv = (ev) => { onMove(ev.clientY - y0, by, bh); layoutFocusBand(); };
       const up = () => { el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
       el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
     });
   };
-  const grip = focusBandEl.querySelector('.fb-grip'), size = focusBandEl.querySelector('.fb-size');
-  const positionGrips = () => {
-    grip.style.top = (focusBand.y + focusBand.h / 2 - 20) + 'px';
-    size.style.top = (focusBand.y + focusBand.h - 18) + 'px';
-  };
+  const grip = focusBandEl.querySelector('.fb-grip');
+  const size = focusBandEl.querySelector('.fb-size');
   drag(grip, (dy, by) => { focusBand.y = by + dy; });
   drag(size, (dy, by, bh) => { focusBand.h = bh + dy; });
-  layoutFocusBand(); positionGrips();
-  focusBandEl._relayout = () => { layoutFocusBand(); positionGrips(); };
+  layoutFocusBand();
+  focusBandEl._relayout = () => { layoutFocusBand(); };
   return true;
 }
 window.addEventListener('resize', () => { if (focusBandEl && focusBandEl._relayout) focusBandEl._relayout(); });
@@ -611,7 +851,6 @@ window.addEventListener('resize', () => { if (focusBandEl && focusBandEl._relayo
 function getFillValue(color, fillType) {
   if (fillType === 'none') return 'transparent';
   if (fillType === 'solid') return color;
-  // rgba semi transparent
   if (color.startsWith('#')) {
     const r = parseInt(color.slice(1, 3), 16) || 0;
     const g = parseInt(color.slice(3, 5), 16) || 0;
@@ -629,32 +868,35 @@ function getCanvasElement(fCanvas) {
   return fCanvas.lowerCanvasEl || fCanvas.upperCanvasEl || (fCanvas.elements && fCanvas.elements.container);
 }
 
+// Accurate PDF-scene coordinate extraction across Fabric v5 / v6 / v7 under any viewportTransform
 function getFabricPointer(fCanvas, options) {
   if (options) {
     if (options.scenePoint) return options.scenePoint;
-    if (options.pointer) return options.pointer;
     if (options.absolutePointer) return options.absolutePointer;
   }
   if (typeof fCanvas.getScenePoint === 'function' && options && options.e) {
-    return fCanvas.getScenePoint(options.e);
+    try { return fCanvas.getScenePoint(options.e); } catch (_) {}
   }
   if (typeof fCanvas.getPointer === 'function' && options && options.e) {
-    return fCanvas.getPointer(options.e);
+    try { return fCanvas.getPointer(options.e, false); } catch (_) {}
   }
   const e = options ? options.e : null;
   const canvasEl = getCanvasElement(fCanvas);
   if (canvasEl && e) {
     const rect = canvasEl.getBoundingClientRect();
-    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : (e.clientX !== undefined ? e.clientX : 0);
-    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : (e.clientY !== undefined ? e.clientY : 0);
+    const touch = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]);
+    const clientX = touch ? touch.clientX : (e.clientX !== undefined ? e.clientX : 0);
+    const clientY = touch ? touch.clientY : (e.clientY !== undefined ? e.clientY : 0);
+    const vpt = (fCanvas && fCanvas.viewportTransform) || [1, 0, 0, 1, 0, 0];
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top
+      x: (clientX - rect.left - (vpt[4] || 0)) / (vpt[0] || 1),
+      y: (clientY - rect.top - (vpt[5] || 0)) / (vpt[3] || 1)
     };
   }
   return { x: 0, y: 0 };
 }
 
+// Fabric v6/v7 loadFromJSON(json, reviver) takes reviver as 2nd param and returns a Promise!
 async function safeLoadFromJSON(fCanvas, json, callback) {
   if (!fCanvas || !json) {
     if (callback) callback();
@@ -666,7 +908,6 @@ async function safeLoadFromJSON(fCanvas, json, callback) {
       delete parsed.viewportTransform;
     }
 
-    // Verify contextContainer exists to prevent clearRect crash on unattached canvas
     if (!fCanvas.contextContainer && !fCanvas.getContext) {
       if (callback) callback();
       return;
@@ -676,13 +917,24 @@ async function safeLoadFromJSON(fCanvas, json, callback) {
     const done = () => {
       if (called) return;
       called = true;
+      try {
+        fCanvas.forEachObject(obj => {
+          if (obj && typeof obj.setCoords === 'function') obj.setCoords();
+        });
+      } catch (_) {}
       if (callback) callback();
     };
 
-    const res = fCanvas.loadFromJSON(parsed, done);
-    if (res && typeof res.then === 'function') {
-      await res;
+    const majorVer = parseInt(String(fabric.version || '7').split('.')[0], 10) || 7;
+    if (majorVer >= 6) {
+      await fCanvas.loadFromJSON(parsed);
       done();
+    } else {
+      const res = fCanvas.loadFromJSON(parsed, done);
+      if (res && typeof res.then === 'function') {
+        await res;
+        done();
+      }
     }
   } catch (err) {
     console.warn('Error loading JSON in Fabric:', err);
@@ -698,28 +950,31 @@ export function updateAllPageOverlayPointerEvents() {
 
 const DRAW_TOOLS = ['pen', 'marker', 'glow'];
 const kindOf = (o) => String((o && o.type) || '').replace('-', '').toLowerCase();
-const isTextObj = (o) => kindOf(o) === 'itext';
+const isTextObj = (o) => kindOf(o) === 'itext' || kindOf(o) === 'text' || kindOf(o) === 'fabrictext' || (o && o._k === 'text');
 
 function configureBrush(fCanvas) {
   const PencilBrushClass = fabric.PencilBrush || fabricModule.PencilBrush;
-  const brush = PencilBrushClass ? new PencilBrushClass(fCanvas) : fCanvas.freeDrawingBrush;
+  let brush = fCanvas.freeDrawingBrush;
+  if (!brush && PencilBrushClass) {
+    brush = new PencilBrushClass(fCanvas);
+  }
   if (!brush) return;
   brush.shadow = null;
   brush.strokeLineCap = 'round';
+  brush.strokeLineJoin = 'round';
   const z = pageZoomOf(fCanvas);   // widths are chosen in screen px, so a stroke looks the same at any zoom
   if (activeTool === 'marker') {
-    brush.color = withAlpha(activeColor, 0.42);
-    brush.width = (MARKER_WIDTH[activeStrokeWidth] || 15) / z;
+    brush.color = withAlpha(activeColor, 0.38);
+    brush.width = (MARKER_WIDTH[activeStrokeWidth] || 16) / z;
     brush.strokeLineCap = 'square';
   } else if (activeTool === 'glow') {
-    // bright core + coloured halo = neon tube
     brush.color = mixWithWhite(activeColor, 0.55);
     brush.width = Math.max(3, activeStrokeWidth * 1.4) / z;
     const ShadowClass = fabric.Shadow || fabricModule.Shadow;
     if (ShadowClass) brush.shadow = new ShadowClass({ color: activeColor, blur: 16 / z, offsetX: 0, offsetY: 0, affectStroke: true });
   } else {
     brush.color = activeColor;
-    brush.width = Math.max(1, activeStrokeWidth * 0.9) / z;
+    brush.width = Math.max(1.2, activeStrokeWidth) / z;
   }
   fCanvas.freeDrawingBrush = brush;
 }
@@ -734,16 +989,25 @@ function applyToolToFabricCanvas(fCanvas, pNum) {
   if (outerContainer) {
     outerContainer.setAttribute('data-tool', activeTool);
     outerContainer.style.pointerEvents = enablePointer ? 'auto' : 'none';
+    outerContainer.style.touchAction = enablePointer ? 'none' : 'auto';
   }
   if (fabricWrapper) {
     fabricWrapper.style.pointerEvents = enablePointer ? 'auto' : 'none';
+    fabricWrapper.style.touchAction = enablePointer ? 'none' : 'auto';
   }
   if (canvasEl) {
     canvasEl.style.pointerEvents = enablePointer ? 'auto' : 'none';
+    canvasEl.style.touchAction = enablePointer ? 'none' : 'auto';
   }
   if (fCanvas) {
-    if (fCanvas.upperCanvasEl) fCanvas.upperCanvasEl.style.pointerEvents = enablePointer ? 'auto' : 'none';
-    if (fCanvas.lowerCanvasEl) fCanvas.lowerCanvasEl.style.pointerEvents = enablePointer ? 'auto' : 'none';
+    if (fCanvas.upperCanvasEl) {
+      fCanvas.upperCanvasEl.style.pointerEvents = enablePointer ? 'auto' : 'none';
+      fCanvas.upperCanvasEl.style.touchAction = enablePointer ? 'none' : 'auto';
+    }
+    if (fCanvas.lowerCanvasEl) {
+      fCanvas.lowerCanvasEl.style.pointerEvents = enablePointer ? 'auto' : 'none';
+      fCanvas.lowerCanvasEl.style.touchAction = enablePointer ? 'none' : 'auto';
+    }
   }
 
   // The laser only lives while its tool is active.
@@ -770,19 +1034,23 @@ function applyToolToFabricCanvas(fCanvas, pNum) {
       obj.hasBorders = true;
       obj.cornerColor = '#ff6a2b';
       obj.cornerStrokeColor = '#ffffff';
-      obj.cornerSize = 10;
+      obj.cornerSize = 11;
+      obj.touchCornerSize = 22;
       obj.transparentCorners = false;
+      obj.perPixelTargetFind = false;
     } else if (activeTool === 'eraser') {
       obj.selectable = false;
       obj.evented = true;
+      obj.perPixelTargetFind = false;
     } else if (activeTool === 'text') {
-      const t = isTextObj(obj);   // existing text stays tappable so it can be edited again
+      const t = isTextObj(obj);
       obj.selectable = t;
       obj.evented = t;
     } else {
       obj.selectable = false;
       obj.evented = false;
     }
+    if (typeof obj.setCoords === 'function') obj.setCoords();
   });
 
   fCanvas.requestRenderAll();
@@ -797,8 +1065,10 @@ function restyleActiveText() {
   fabricCanvases.forEach((fc, n) => {
     const ao = fc.getActiveObject();
     if (ao && isTextObj(ao)) {
-      ao.set({ backgroundColor: textSticky ? '#fff3a3' : '', padding: textSticky ? 6 : 2 });
-      fc.requestRenderAll(); savePageCanvasState(n);
+      ao.set({ backgroundColor: textSticky ? '#fff3a3' : '', padding: textSticky ? 6 : 2, dirty: true });
+      ao.setCoords();
+      fc.requestRenderAll();
+      savePageCanvasState(n);
     }
   });
 }
@@ -806,9 +1076,6 @@ function restyleActiveText() {
 /* ------------------------------------------------------------------ */
 /*  Draw region: the Fabric canvas only covers what is on screen        */
 /* ------------------------------------------------------------------ */
-// A full-page canvas at 600% zoom is tens of millions of pixels and every stroke redraws all of them.
-// So each page's canvas is just the visible part (plus a margin), moved with the scroll; the scene
-// (the objects, in PDF units) is untouched, only the viewport transform shifts.
 const MAX_DRAW_PX = 6e6;
 let drawSyncTimer = null;
 export function scheduleDrawSync() {
@@ -819,6 +1086,7 @@ export function scheduleDrawSync() {
   }, 90);
 }
 export function syncDrawRegion(pageNum, force) {
+  if (document.getElementById('mk-textdlg') && !force) return;
   const fCanvas = fabricCanvases.get(pageNum);
   const pe = window.pageEls ? window.pageEls[pageNum] : null;
   if (!fCanvas || !pe || !pe.wrap) return;
@@ -838,11 +1106,11 @@ export function syncDrawRegion(pageNum, force) {
     x1: Math.min(cssW, (sr.right - wr.left) / k), y1: Math.min(cssH, (sr.bottom - wr.top) / k)
   };
   if (vis.x1 - vis.x0 < 4 || vis.y1 - vis.y0 < 4) {
-    // Off screen: give the bitmap back, keep the objects.
     if (container._region) {
       container._region = null;
       fCanvas.setDimensions({ width: 1, height: 1 });
-      container.style.width = '1px'; container.style.height = '1px';
+      container.style.width = '1px';
+      container.style.height = '1px';
     }
     return;
   }
@@ -857,11 +1125,14 @@ export function syncDrawRegion(pageNum, force) {
     if ((r.x1 - r.x0) * (r.y1 - r.y0) * dpr * dpr <= MAX_DRAW_PX) break;
   }
   const rw = Math.max(1, Math.ceil(r.x1 - r.x0)), rh = Math.max(1, Math.ceil(r.y1 - r.y0));
-  container.style.left = r.x0 + 'px'; container.style.top = r.y0 + 'px';
-  container.style.width = rw + 'px'; container.style.height = rh + 'px';
+  container.style.left = r.x0 + 'px';
+  container.style.top = r.y0 + 'px';
+  container.style.width = rw + 'px';
+  container.style.height = rh + 'px';
   fCanvas.setDimensions({ width: rw, height: rh });
   fCanvas.setViewportTransform([z, 0, 0, z, -r.x0, -r.y0]);
   if (typeof fCanvas.calcOffset === 'function') fCanvas.calcOffset();
+  fCanvas.forEachObject(obj => { if (obj && typeof obj.setCoords === 'function') obj.setCoords(); });
   container._region = { z, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1 };
   if (fCanvas.isDrawingMode && DRAW_TOOLS.includes(activeTool)) configureBrush(fCanvas);
   fCanvas.requestRenderAll();
@@ -881,17 +1152,20 @@ function disposeLaser(L) {
   if (L.cv) { L.cv.width = 0; L.cv.height = 0; L.cv.remove(); L.cv = null; }
 }
 function bindLaser(container) {
-  const L = { pts: [], down: false, raf: 0, cv: null, dpr: 1 };
+  const L = { pts: [], down: false, raf: 0, cv: null, dpr: 1, strokeId: 0 };
   container._laser = L;
   const rect = () => container.getBoundingClientRect();
-  const add = (e) => { const r = rect(); L.pts.push({ x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now() }); };
+  const add = (e) => {
+    const r = rect();
+    L.pts.push({ x: e.clientX - r.left, y: e.clientY - r.top, t: performance.now(), s: L.strokeId });
+  };
   const ctx2d = () => {
     const r = rect(); const dpr = window.devicePixelRatio || 1;
     const w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
     if (!L.cv) {
       L.cv = document.createElement('canvas');
       L.cv.className = 'laser-cv';
-      L.cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:3';
+      L.cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:25;';
       container.appendChild(L.cv);
     }
     if (L.cv.width !== w || L.cv.height !== h) { L.cv.width = w; L.cv.height = h; }
@@ -908,17 +1182,25 @@ function bindLaser(container) {
     const col = activeColor;
     ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (let i = 1; i < n; i++) {
+      // Never connect separate strokes!
+      if (L.pts[i].s !== L.pts[i - 1].s) continue;
       const a = 1 - (now - L.pts[i].t) / fade;
       const A = Math.max(0, Math.pow(a, 1.15));
-      ctx.beginPath(); ctx.moveTo(L.pts[i - 1].x * dpr, L.pts[i - 1].y * dpr); ctx.lineTo(L.pts[i].x * dpr, L.pts[i].y * dpr);
+      ctx.beginPath();
+      ctx.moveTo(L.pts[i - 1].x * dpr, L.pts[i - 1].y * dpr);
+      ctx.lineTo(L.pts[i].x * dpr, L.pts[i].y * dpr);
       ctx.shadowColor = col; ctx.shadowBlur = 16 * dpr * A;
       ctx.strokeStyle = withAlpha(col, A); ctx.lineWidth = (2 + 6 * A) * dpr; ctx.stroke();
       ctx.shadowBlur = 0; ctx.strokeStyle = `rgba(255,255,255,${(A * 0.9).toFixed(3)})`; ctx.lineWidth = (0.8 + 1.6 * A) * dpr; ctx.stroke();
     }
-    if (n) {
-      const p = L.pts[n - 1];
-      const ha = L.down ? 1 : Math.max(0, 1 - (now - p.t) / fade);
-      const pulse = 0.85 + 0.15 * Math.sin(now / 90);
+    // Also render single-tap laser dots or stroke tips per stroke
+    for (let i = 0; i < n; i++) {
+      const isStrokeEnd = (i === n - 1) || (L.pts[i + 1].s !== L.pts[i].s);
+      if (!isStrokeEnd) continue;
+      const p = L.pts[i];
+      const isLatest = (i === n - 1);
+      const ha = (isLatest && L.down) ? 1 : Math.max(0, 1 - (now - p.t) / fade);
+      const pulse = isLatest ? (0.85 + 0.15 * Math.sin(now / 90)) : 0.9;
       ctx.shadowColor = col; ctx.shadowBlur = 22 * dpr * ha;
       ctx.fillStyle = withAlpha(col, ha); ctx.beginPath(); ctx.arc(p.x * dpr, p.y * dpr, 7 * pulse * dpr, 0, 6.283); ctx.fill();
       ctx.shadowBlur = 0; ctx.fillStyle = `rgba(255,255,255,${ha.toFixed(3)})`; ctx.beginPath(); ctx.arc(p.x * dpr, p.y * dpr, 2.8 * dpr, 0, 6.283); ctx.fill();
@@ -928,13 +1210,18 @@ function bindLaser(container) {
   };
   const kick = () => { if (!L.raf) L.raf = requestAnimationFrame(frame); };
   container.addEventListener('pointerdown', (e) => {
-    if (!isMarkupActive || activeTool !== 'laser') return;
-    L.down = true; add(e);
+    if (!isMarkupActive || activeTool !== 'laser' || multiTouch) return;
+    if (e.cancelable) e.preventDefault();
+    L.strokeId = (L.strokeId || 0) + 1;
+    L.down = true;
+    add(e);
     try { container.setPointerCapture(e.pointerId); } catch (_) {}
     kick();
   });
   container.addEventListener('pointermove', (e) => {
     if (!L.down || activeTool !== 'laser') return;
+    if (multiTouch) { L.down = false; L.pts = []; return; }
+    if (e.cancelable) e.preventDefault();
     const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     (evs.length ? evs : [e]).forEach(add);
     kick();
@@ -949,42 +1236,126 @@ function bindLaser(container) {
 /* ------------------------------------------------------------------ */
 function makeStamp(key, x, y, z) {
   const S = STAMPS[key] || STAMPS.imp;
-  const sc = (activeStrokeWidth <= 2 ? 1.0 : activeStrokeWidth <= 6 ? 1.4 : 2.0) / (z || 1);   // same on-screen size at any zoom
+  const sc = (activeStrokeWidth <= 2 ? 1.0 : activeStrokeWidth <= 6 ? 1.35 : 1.8) / (z || 1);
   const TextC = fabric.FabricText || fabric.Text || fabricModule.FabricText || fabricModule.Text;
   const RectC = fabric.Rect || fabricModule.Rect;
   const GroupC = fabric.Group || fabricModule.Group;
-  const txt = new TextC(S.label, { fontSize: 16, fontWeight: '800', fontFamily: 'Inter, system-ui, sans-serif', fill: S.color, originX: 'center', originY: 'center' });
-  const box = new RectC({ width: txt.width + 20, height: txt.height + 10, rx: 6, ry: 6, fill: 'rgba(255,255,255,0.001)', stroke: S.color, strokeWidth: 2.4, originX: 'center', originY: 'center' });
-  return new GroupC([box, txt], { left: x, top: y, originX: 'center', originY: 'center', angle: -6 + Math.random() * 12, scaleX: sc, scaleY: sc, selectable: false, evented: false, _k: 'stamp' });
+  const txt = new TextC(S.label, {
+    left: 0, top: 0, fontSize: 16, fontWeight: '800',
+    fontFamily: 'Plus Jakarta Sans, Inter, system-ui, sans-serif',
+    fill: S.color, originX: 'center', originY: 'center'
+  });
+  const box = new RectC({
+    left: 0, top: 0, width: (txt.width || 36) + 20, height: (txt.height || 18) + 10,
+    rx: 6, ry: 6, fill: 'rgba(255,255,255,0.92)', stroke: S.color, strokeWidth: 2.4,
+    originX: 'center', originY: 'center'
+  });
+  return new GroupC([box, txt], {
+    left: x, top: y, originX: 'center', originY: 'center',
+    angle: -4 + Math.random() * 8, scaleX: sc, scaleY: sc,
+    selectable: false, evented: false, _k: 'stamp'
+  });
 }
-// Own little text box (works with every phone keyboard; the card stays on top so the keyboard never hides it)
+
+// Structured text modal dialog (works reliably with phone virtual keyboards)
 function openTextDialog(initial, onDone) {
-  const old = document.getElementById('mk-textdlg'); if (old) old.remove();
+  const old = document.getElementById('mk-textdlg');
+  if (old) old.remove();
   const box = document.createElement('div');
   box.id = 'mk-textdlg';
-  box.innerHTML = `<textarea rows="2" placeholder="Yahan likho..." maxlength="400"></textarea>
-    <div class="mk-td-row"><button class="mk-td-x" type="button">✕</button><button class="mk-td-ok" type="button">Lagao ✓</button></div>`;
+  box.innerHTML = `
+    <div class="mk-td-box">
+      <div class="mk-td-title">Add Text / Sticky Note</div>
+      <textarea class="mk-td-in" rows="3" placeholder="Type your note or label here..." maxlength="500"></textarea>
+      <div class="mk-td-row">
+        <button class="mk-td-btn mk-td-x" type="button">Cancel</button>
+        <button class="mk-td-btn ok mk-td-ok" type="button">Place on Page ✓</button>
+      </div>
+    </div>`;
   document.body.appendChild(box);
   const ta = box.querySelector('textarea');
   ta.value = initial || '';
   const born = performance.now();
-  const close = () => { box.remove(); };
-  const ok = () => { if (performance.now() - born < 350) return; const v = ta.value.trim(); close(); if (v) onDone(v); };
-  box.querySelector('.mk-td-ok').onclick = ok;
-  box.querySelector('.mk-td-x').onclick = () => { if (performance.now() - born < 350) return; close(); };
-  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) ok(); if (e.key === 'Escape') close(); });
-  setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 160);
-}
-function makeText(x, y, z, str) {
-  const IT = fabric.IText || fabricModule.IText;
-  const dark = textSticky && (activeColor.toLowerCase() === '#ffffff');
-  return new IT(str || 'Text', {
-    left: x, top: y, fontSize: (TEXT_SIZE[activeStrokeWidth] || 20) / (z || 1),
-    fill: dark ? '#18181b' : activeColor,
-    fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, sans-serif', fontWeight: '600',
-    backgroundColor: textSticky ? '#fff3a3' : '', padding: textSticky ? 6 : 2, editable: false, _k: 'text'
+  let doneCalled = false;
+  const close = () => {
+    if (box.parentNode) box.remove();
+    setTimeout(() => scheduleDrawSync(), 180);
+  };
+  const ok = (ev) => {
+    if (ev) {
+      if (ev.cancelable) ev.preventDefault();
+      ev.stopPropagation();
+    }
+    if (doneCalled || performance.now() - born < 120) return;
+    const v = (ta.value || '').trim();
+    doneCalled = true;
+    try { ta.blur(); } catch (_) {}
+    close();
+    if (v) {
+      onDone(v);
+    } else {
+      window.toast && window.toast('Kuch text likho phir Place on Page dabao');
+    }
+  };
+  const cancel = (ev) => {
+    if (ev) {
+      if (ev.cancelable) ev.preventDefault();
+      ev.stopPropagation();
+    }
+    if (doneCalled || performance.now() - born < 120) return;
+    doneCalled = true;
+    try { ta.blur(); } catch (_) {}
+    close();
+  };
+  const okBtn = box.querySelector('.mk-td-ok');
+  const xBtn = box.querySelector('.mk-td-x');
+  // Use pointerdown + click so tapping while mobile virtual keyboard is open fires immediately without getting swallowed by keyboard collapse
+  okBtn.addEventListener('pointerdown', ok);
+  okBtn.addEventListener('click', ok);
+  xBtn.addEventListener('pointerdown', cancel);
+  xBtn.addEventListener('click', cancel);
+  box.addEventListener('pointerdown', (e) => {
+    if (e.target === box && performance.now() - born > 300) cancel(e);
   });
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      ok(e);
+    }
+    if (e.key === 'Escape') cancel(e);
+  });
+  setTimeout(() => {
+    try {
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    } catch (_) {}
+  }, 80);
 }
+
+function makeText(x, y, z, str) {
+  const TextClass = fabric.FabricText || fabric.IText || fabricModule.FabricText || fabricModule.IText || fabric.Text || fabricModule.Text;
+  const isWhite = activeColor.toLowerCase() === '#ffffff';
+  const dark = (textSticky && (isWhite || activeColor.toLowerCase() === '#eab308')) || (!textSticky && isWhite);
+  const t = new TextClass(str || 'Note', {
+    left: x,
+    top: y,
+    originX: 'left',
+    originY: 'top',
+    fontSize: (TEXT_SIZE[activeStrokeWidth] || 20) / (z || 1),
+    fill: dark ? '#18181b' : activeColor,
+    fontFamily: 'Plus Jakarta Sans, Inter, system-ui, -apple-system, sans-serif',
+    fontWeight: '700',
+    backgroundColor: textSticky ? '#fff3a3' : (isWhite ? '#fff3a3' : 'rgba(255,255,255,0.82)'),
+    padding: textSticky ? 7 : 4,
+    editable: false,
+    objectCaching: false,
+    _k: 'text'
+  });
+  if (typeof t.initDimensions === 'function') t.initDimensions();
+  if (typeof t.setCoords === 'function') t.setCoords();
+  return t;
+}
+
 // Straight line / ellipse / rectangle if the drawn stroke is close enough to one. Else null (keep the freehand).
 function snapStrokeToShape(pts, path) {
   const n = pts.length;
@@ -1055,7 +1426,7 @@ export function ensurePageDrawLayer(pageNum) {
     container.style.position = 'absolute';
     container.style.top = '0';
     container.style.left = '0';
-    container.style.width = '1px';   // set by syncDrawRegion: only the visible part of the page gets a bitmap
+    container.style.width = '1px';
     container.style.height = '1px';
     container.style.zIndex = '18';
     container.style.pointerEvents = (isMarkupActive && activeTool !== 'none') ? 'auto' : 'none';
@@ -1071,36 +1442,16 @@ export function ensurePageDrawLayer(pageNum) {
       height: 1,
       isDrawingMode: false,
       selection: true,
-      enablePointerEvents: true
+      enablePointerEvents: true,
+      preserveObjectStacking: true
     });
 
-    // Ensure baseline undo stack has initial empty state
     let stack = undoStacks.get(pageNum) || [];
     if (stack.length === 0) {
-      const emptyObj = { version: '5.3.0', objects: [] };
+      const emptyObj = { version: fabric.version || '7.4.0', objects: [] };
       stack.push(JSON.stringify(emptyObj));
       undoStacks.set(pageNum, stack);
     }
-
-    // Handle 2-finger multi-touch for zoom & pan passthrough
-    container.addEventListener('touchstart', (e) => {
-      if (e.touches && e.touches.length >= 2) {
-        container.style.pointerEvents = 'none';
-        setTimeout(() => {
-          if (container && isMarkupActive && activeTool !== 'none') {
-            container.style.pointerEvents = 'auto';
-          }
-        }, 400);
-      }
-    }, { passive: true });
-
-    container.addEventListener('touchend', (e) => {
-      if (!e.touches || e.touches.length < 2) {
-        if (container && isMarkupActive && activeTool !== 'none') {
-          container.style.pointerEvents = 'auto';
-        }
-      }
-    });
 
     // Forward trackpad / mouse wheel scrolling
     container.addEventListener('wheel', (e) => {
@@ -1124,13 +1475,58 @@ export function ensurePageDrawLayer(pageNum) {
   return fCanvas;
 }
 
+// Helper for forgiving touch / scrub erasing at scene point (px, py)
+function findObjectNearPoint(fCanvas, pt, radius) {
+  const objs = fCanvas.getObjects ? fCanvas.getObjects() : [];
+  for (let i = objs.length - 1; i >= 0; i--) {
+    const obj = objs[i];
+    if (!obj || !obj.visible) continue;
+    try {
+      if (typeof obj.setCoords === 'function') obj.setCoords();
+      if (typeof obj.containsPoint === 'function' && obj.containsPoint(pt)) return obj;
+      const br = typeof obj.getBoundingRect === 'function' ? obj.getBoundingRect(true) : null;
+      if (br) {
+        // Check in scene space using object's bounding box + padding
+        const left = (obj.left !== undefined) ? (obj.originX === 'center' ? obj.left - (obj.getScaledWidth ? obj.getScaledWidth() / 2 : 0) : obj.left) : 0;
+        const top = (obj.top !== undefined) ? (obj.originY === 'center' ? obj.top - (obj.getScaledHeight ? obj.getScaledHeight() / 2 : 0) : obj.top) : 0;
+        const w = obj.getScaledWidth ? obj.getScaledWidth() : (obj.width || 0);
+        const h = obj.getScaledHeight ? obj.getScaledHeight() : (obj.height || 0);
+        if (pt.x >= left - radius && pt.x <= left + w + radius && pt.y >= top - radius && pt.y <= top + h + radius) {
+          // For paths, verify point is reasonably close to at least one path command
+          if (kindOf(obj) === 'path' && Array.isArray(obj.path)) {
+            for (const cmd of obj.path) {
+              const cx = cmd[cmd.length - 2], cy = cmd[cmd.length - 1];
+              if (typeof cx === 'number' && typeof cy === 'number' && Math.hypot(pt.x - cx, pt.y - cy) <= radius * 2.2) {
+                return obj;
+              }
+            }
+          } else {
+            return obj;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 function bindFabricCanvasEvents(fCanvas, pageNum) {
   let isDrawingShape = false;
   let activeShapeObj = null;
   let startX = 0, startY = 0;
+  let isScrubErasing = false;
+  let erasedAnyInStroke = false;
+  let lastTextTapTime = 0, lastTextTapObj = null;
+  let downTargetObj = null;
 
-  // Hold-to-snap bookkeeping: where the stroke went and when it last really moved
+  // Hold-to-snap bookkeeping
   let strokePts = [], lastMoveT = 0, lastPt = null;
+
+  // Refresh toolbar when selection changes so 'Delete Selected' / 'Edit Text' pills appear
+  const onSelUpdate = () => { if (isMarkupActive) renderMarkupToolbar(); };
+  fCanvas.on('selection:created', onSelUpdate);
+  fCanvas.on('selection:updated', onSelUpdate);
+  fCanvas.on('selection:cleared', onSelUpdate);
 
   // Path Created (Freehand Pen / Marker / Glow)
   fCanvas.on('path:created', (e) => {
@@ -1138,7 +1534,7 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
     if (!path) return;
     if (multiTouchUsed) { fCanvas.remove(path); fCanvas.requestRenderAll(); return; }
     const kind = activeTool;
-    if (snapShapes && (kind === 'pen' || kind === 'glow') && strokePts.length >= 8 && (performance.now() - lastMoveT) >= 420) {
+    if (snapShapes && (kind === 'pen' || kind === 'glow') && strokePts.length >= 8 && (performance.now() - lastMoveT) >= 400) {
       const snapped = snapStrokeToShape(strokePts, path);
       if (snapped) {
         fCanvas.remove(path);
@@ -1147,82 +1543,108 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
         try { navigator.vibrate && navigator.vibrate(12); } catch (_) {}
       }
     }
+    if (kind === 'marker') {
+      path.set({ globalCompositeOperation: 'multiply' });
+    }
     path.set({
       id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       pageNum,
       _k: kind
     });
-    path.selectable = false; path.evented = false;
+    path.selectable = false;
+    path.evented = false;
+    if (typeof path.setCoords === 'function') path.setCoords();
     savePageCanvasState(pageNum);
   });
 
   // Empty text boxes disappear; real ones are saved
   fCanvas.on('text:editing:exited', (e) => {
     const t = e && e.target;
-    if (t && !(t.text || '').trim()) { fCanvas.remove(t); fCanvas.discardActiveObject(); fCanvas.requestRenderAll(); }
+    if (t && !(t.text || '').trim()) {
+      fCanvas.remove(t);
+      fCanvas.discardActiveObject();
+      fCanvas.requestRenderAll();
+    }
     savePageCanvasState(pageNum);
   });
 
   // Object modified (Move, Resize, Rotate)
-  fCanvas.on('object:modified', () => {
+  fCanvas.on('object:modified', (e) => {
+    if (e && e.target && typeof e.target.setCoords === 'function') e.target.setCoords();
     savePageCanvasState(pageNum);
   });
 
-  // Interactive Shape Creation via Mouse / Touch Dragging
+  // Desktop double-click on text object opens editor
   fCanvas.on('mouse:dblclick', (options) => {
     const t = (options && options.target) || fCanvas.getActiveObject();
     if (!isMarkupActive || !t || !isTextObj(t) || !['text', 'select'].includes(activeTool)) return;
-    openTextDialog(t.text, (str) => { t.set({ text: str }); t.setCoords(); fCanvas.requestRenderAll(); savePageCanvasState(pageNum); });
+    openTextDialog(t.text, (str) => {
+      t.set({ text: str, dirty: true });
+      if (typeof t.initDimensions === 'function') t.initDimensions();
+      if (typeof t.setCoords === 'function') t.setCoords();
+      fCanvas.requestRenderAll();
+      savePageCanvasState(pageNum);
+    });
   });
+
   fCanvas.on('mouse:down', (options) => {
     if (!isMarkupActive || multiTouch) return;
 
     const pointer = getFabricPointer(fCanvas, options);
+    const z = pageZoomOf(fCanvas);
     startX = pointer.x;
     startY = pointer.y;
-    strokePts = [pointer]; lastPt = pointer; lastMoveT = performance.now();
+    strokePts = [pointer];
+    lastPt = pointer;
+    lastMoveT = performance.now();
 
-    // Stamp: one tap places it
-    if (activeTool === 'stamp') {
-      const g = makeStamp(activeStamp, pointer.x, pointer.y, pageZoomOf(fCanvas));
-      g.set({ id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), pageNum });
-      fCanvas.add(g);
-      fCanvas.requestRenderAll();
-      savePageCanvasState(pageNum);
+    const targetObj = (options && options.target) || findObjectNearPoint(fCanvas, pointer, 10 / z);
+    downTargetObj = targetObj;
+
+    // Mobile double-tap on text object in 'select' or 'text' mode opens text editor
+    if (targetObj && isTextObj(targetObj) && ['text', 'select'].includes(activeTool)) {
+      const now = performance.now();
+      if (lastTextTapObj === targetObj && (now - lastTextTapTime) < 420) {
+        lastTextTapTime = 0;
+        lastTextTapObj = null;
+        downTargetObj = null;
+        openTextDialog(targetObj.text, (str) => {
+          targetObj.set({ text: str, dirty: true });
+          if (typeof targetObj.initDimensions === 'function') targetObj.initDimensions();
+          if (typeof targetObj.setCoords === 'function') targetObj.setCoords();
+          fCanvas.requestRenderAll();
+          savePageCanvasState(pageNum);
+        });
+        return;
+      }
+      lastTextTapTime = now;
+      lastTextTapObj = targetObj;
+    }
+
+    // Stamp and Text are placed on mouse:up so touch release doesn't accidentally hit the modal or get swallowed
+    if (activeTool === 'stamp' || activeTool === 'text') {
       return;
     }
 
-    // Text: tap an empty spot to start a new text box (tapping an existing one edits it)
-    if (activeTool === 'text') {
-      if (options.target && isTextObj(options.target)) return;   // tap on existing text: select / drag it; double tap edits
-      const px = pointer.x, py = pointer.y, zz = pageZoomOf(fCanvas);
-      openTextDialog('', (str) => {
-        const t = makeText(px, py, zz, str);
-        t.set({ id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), pageNum });
-        fCanvas.add(t);
-        fCanvas.requestRenderAll();
-        savePageCanvasState(pageNum);
-      });
-      return;
-    }
-
-    // Eraser Tool action
+    // Eraser Tool action (supports both single tap AND scrub/drag erasing)
     if (activeTool === 'eraser') {
-      const target = options.target;
-      if (target) {
-        fCanvas.remove(target);
+      isScrubErasing = true;
+      erasedAnyInStroke = false;
+      const hit = targetObj || findObjectNearPoint(fCanvas, pointer, 14 / z);
+      if (hit) {
+        fCanvas.remove(hit);
         fCanvas.discardActiveObject();
-        savePageCanvasState(pageNum);
         fCanvas.requestRenderAll();
-        window.toast('Object erased');
+        erasedAnyInStroke = true;
       }
       return;
     }
 
-    // Shape creation
+    // Shape creation (Box, Circle, Line, Arrow)
     if (['rectangle', 'ellipse', 'line', 'arrow'].includes(activeTool)) {
       isDrawingShape = true;
       const fill = getFillValue(activeColor, activeFill);
+      const sw = Math.max(1.2, activeStrokeWidth) / z;
 
       const RectClass = fabric.Rect || fabricModule.Rect;
       const EllipseClass = fabric.Ellipse || fabricModule.Ellipse;
@@ -1236,14 +1658,16 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
           height: 1,
           fill: fill,
           stroke: activeColor,
-          strokeWidth: activeStrokeWidth,
+          strokeWidth: sw,
           strokeUniform: true,
           originX: 'left',
           originY: 'top',
-          rx: 4,
-          ry: 4,
+          rx: 4 / z,
+          ry: 4 / z,
+          objectCaching: false,
           selectable: false,
-          evented: false
+          evented: false,
+          _k: 'rectangle'
         });
       } else if (activeTool === 'ellipse' && EllipseClass) {
         activeShapeObj = new EllipseClass({
@@ -1253,24 +1677,28 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
           ry: 0.5,
           fill: fill,
           stroke: activeColor,
-          strokeWidth: activeStrokeWidth,
+          strokeWidth: sw,
           strokeUniform: true,
           originX: 'left',
           originY: 'top',
+          objectCaching: false,
           selectable: false,
-          evented: false
+          evented: false,
+          _k: 'ellipse'
         });
       } else if (activeTool === 'line' && LineClass) {
         activeShapeObj = new LineClass([startX, startY, startX, startY], {
           stroke: activeColor,
-          strokeWidth: activeStrokeWidth,
+          strokeWidth: sw,
           strokeUniform: true,
           strokeLineCap: 'round',
+          objectCaching: false,
           selectable: false,
-          evented: false
+          evented: false,
+          _k: 'line'
         });
       } else if (activeTool === 'arrow') {
-        activeShapeObj = createFabricArrow(startX, startY, startX, startY, activeColor, activeStrokeWidth);
+        activeShapeObj = createFabricArrow(startX, startY, startX + 1, startY + 1, activeColor, sw, z);
       }
 
       if (activeShapeObj) {
@@ -1280,70 +1708,180 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
   });
 
   fCanvas.on('mouse:move', (options) => {
+    if (multiTouch) return;
+    const z = pageZoomOf(fCanvas);
+    const movePt = getFabricPointer(fCanvas, options);
+
     if (fCanvas.isDrawingMode && drawingBusy) {
-      const pt = getFabricPointer(fCanvas, options);
-      strokePts.push(pt);
-      const z = (window.pageEls && window.pageEls[pageNum] && window.pageEls[pageNum].scale) || 1;
-      if (!lastPt || Math.hypot(pt.x - lastPt.x, pt.y - lastPt.y) * z > 3) { lastMoveT = performance.now(); lastPt = pt; }
+      strokePts.push(movePt);
+      if (!lastPt || Math.hypot(movePt.x - lastPt.x, movePt.y - lastPt.y) * z > 3) {
+        lastMoveT = performance.now();
+        lastPt = movePt;
+      }
+      return;
     }
+
+    lastPt = movePt;
+
+    // Continuous scrub-erasing while dragging finger
+    if (activeTool === 'eraser' && isScrubErasing) {
+      const hit = (options && options.target) || findObjectNearPoint(fCanvas, movePt, 14 / z);
+      if (hit) {
+        fCanvas.remove(hit);
+        fCanvas.discardActiveObject();
+        fCanvas.requestRenderAll();
+        erasedAnyInStroke = true;
+      }
+      return;
+    }
+
     if (!isDrawingShape || !activeShapeObj) return;
 
-    const pointer = getFabricPointer(fCanvas, options);
+    const pointer = movePt;
     const minX = Math.min(startX, pointer.x);
     const minY = Math.min(startY, pointer.y);
     const w = Math.max(1, Math.abs(pointer.x - startX));
     const h = Math.max(1, Math.abs(pointer.y - startY));
+    const sw = Math.max(1.2, activeStrokeWidth) / z;
 
     if (activeTool === 'rectangle') {
       activeShapeObj.set({
         left: minX,
         top: minY,
         width: w,
-        height: h
+        height: h,
+        dirty: true
       });
+      activeShapeObj.setCoords();
     } else if (activeTool === 'ellipse') {
       activeShapeObj.set({
         left: minX,
         top: minY,
         rx: w / 2,
-        ry: h / 2
+        ry: h / 2,
+        dirty: true
       });
+      activeShapeObj.setCoords();
     } else if (activeTool === 'line') {
       activeShapeObj.set({
+        x1: startX,
+        y1: startY,
         x2: pointer.x,
-        y2: pointer.y
+        y2: pointer.y,
+        dirty: true
       });
+      activeShapeObj.setCoords();
     } else if (activeTool === 'arrow') {
       fCanvas.remove(activeShapeObj);
-      activeShapeObj = createFabricArrow(startX, startY, pointer.x, pointer.y, activeColor, activeStrokeWidth);
+      activeShapeObj = createFabricArrow(startX, startY, pointer.x, pointer.y, activeColor, sw, z);
       fCanvas.add(activeShapeObj);
     }
 
     fCanvas.requestRenderAll();
   });
 
-  fCanvas.on('mouse:up', () => {
-    if (multiTouchUsed && isDrawingShape && activeShapeObj) { fCanvas.remove(activeShapeObj); isDrawingShape = false; activeShapeObj = null; fCanvas.requestRenderAll(); return; }
+  fCanvas.on('mouse:up', (options) => {
+    if (activeTool === 'eraser' && isScrubErasing) {
+      isScrubErasing = false;
+      if (erasedAnyInStroke) {
+        savePageCanvasState(pageNum);
+      }
+      erasedAnyInStroke = false;
+      return;
+    }
+
+    if (!multiTouchUsed && (activeTool === 'stamp' || activeTool === 'text')) {
+      const pointer = lastPt || getFabricPointer(fCanvas, options);
+      const z = pageZoomOf(fCanvas);
+      const dragDistScreen = Math.hypot((pointer.x ?? startX) - startX, (pointer.y ?? startY) - startY) * z;
+      if (dragDistScreen < 18) {
+        const px = startX;
+        const py = startY;
+
+        if (activeTool === 'stamp') {
+          const g = makeStamp(activeStamp, px, py, z);
+          g.set({ id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5), pageNum });
+          fCanvas.add(g);
+          if (typeof g.setCoords === 'function') g.setCoords();
+          fCanvas.requestRenderAll();
+          savePageCanvasState(pageNum);
+          return;
+        }
+
+        if (activeTool === 'text') {
+          if (downTargetObj && isTextObj(downTargetObj)) {
+            downTargetObj = null;
+            return;
+          }
+          downTargetObj = null;
+          openTextDialog('', (str) => {
+            const liveCanvas = ensurePageDrawLayer(pageNum) || fCanvas;
+            syncDrawRegion(pageNum, true);
+            const liveZ = pageZoomOf(liveCanvas) || z || 1;
+            const t = makeText(px, py, liveZ, str);
+            t.set({
+              id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+              pageNum
+            });
+            liveCanvas.add(t);
+            applyToolToFabricCanvas(liveCanvas, pageNum);
+            if (typeof t.setCoords === 'function') t.setCoords();
+            liveCanvas.requestRenderAll();
+            savePageCanvasState(pageNum);
+            window.toast && window.toast('Text page pe place ho gaya ✓');
+            setTimeout(() => {
+              syncDrawRegion(pageNum, true);
+              liveCanvas.requestRenderAll();
+            }, 140);
+            setTimeout(() => {
+              syncDrawRegion(pageNum, true);
+              liveCanvas.requestRenderAll();
+            }, 340);
+          });
+          return;
+        }
+      }
+      downTargetObj = null;
+      return;
+    }
+
+    if (multiTouchUsed && isDrawingShape && activeShapeObj) {
+      fCanvas.remove(activeShapeObj);
+      isDrawingShape = false;
+      activeShapeObj = null;
+      fCanvas.requestRenderAll();
+      return;
+    }
+
     if (isDrawingShape && activeShapeObj) {
       isDrawingShape = false;
+      const pointer = getFabricPointer(fCanvas, options);
+      const z = pageZoomOf(fCanvas);
+      const dragDistScreen = Math.hypot(pointer.x - startX, pointer.y - startY) * z;
+
+      // Ignore accidental micro-taps (< 5px on screen) so we don't leave invisible 1px shapes
+      if (dragDistScreen < 5) {
+        fCanvas.remove(activeShapeObj);
+        activeShapeObj = null;
+        fCanvas.requestRenderAll();
+        return;
+      }
+
       activeShapeObj.set({
         id: 'draw_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-        pageNum
+        pageNum,
+        objectCaching: true,
+        dirty: true
       });
+      if (typeof activeShapeObj.setCoords === 'function') activeShapeObj.setCoords();
 
-      // Switch automatically to select tool so user can adjust/move/resize immediately
-      activeTool = 'select';
-      renderMarkupToolbar();
-      updateAllPageOverlayPointerEvents();
-
-      fCanvas.setActiveObject(activeShapeObj);
       savePageCanvasState(pageNum);
       activeShapeObj = null;
     }
   });
 }
 
-function createFabricArrow(x1, y1, x2, y2, color, strokeWidth) {
+function createFabricArrow(x1, y1, x2, y2, color, strokeWidth, z = 1) {
   const LineClass = fabric.Line || fabricModule.Line;
   const TriangleClass = fabric.Triangle || fabricModule.Triangle;
   const GroupClass = fabric.Group || fabricModule.Group;
@@ -1352,12 +1890,14 @@ function createFabricArrow(x1, y1, x2, y2, color, strokeWidth) {
   const dy = y2 - y1;
   const angle = Math.atan2(dy, dx) * (180 / Math.PI);
 
-  const headLength = Math.max(12, strokeWidth * 3.5);
+  const headLength = Math.max(11 / z, strokeWidth * 3.6);
 
   const line = new LineClass([x1, y1, x2, y2], {
     stroke: color,
     strokeWidth: strokeWidth,
-    strokeLineCap: 'round'
+    strokeUniform: true,
+    strokeLineCap: 'round',
+    objectCaching: false
   });
 
   const triangle = new TriangleClass({
@@ -1368,13 +1908,16 @@ function createFabricArrow(x1, y1, x2, y2, color, strokeWidth) {
     width: headLength,
     height: headLength,
     fill: color,
-    angle: angle + 90
+    angle: angle + 90,
+    objectCaching: false
   });
 
   if (GroupClass) {
     return new GroupClass([line, triangle], {
       selectable: false,
-      evented: false
+      evented: false,
+      objectCaching: false,
+      _k: 'arrow'
     });
   }
 
@@ -1388,6 +1931,8 @@ function updateSelectedObjectColor(color) {
     const activeObj = fCanvas.getActiveObject();
     if (activeObj) {
       applyColorToFabricObject(activeObj, color);
+      activeObj.set({ dirty: true });
+      if (typeof activeObj.setCoords === 'function') activeObj.setCoords();
       fCanvas.requestRenderAll();
       savePageCanvasState(pNum);
     }
@@ -1396,15 +1941,35 @@ function updateSelectedObjectColor(color) {
 
 function applyColorToFabricObject(obj, color) {
   if (!obj) return;
+  const k = obj._k || kindOf(obj);
   if (['group', 'activeselection'].includes(kindOf(obj))) {
     const children = typeof obj.getObjects === 'function' ? obj.getObjects() : (obj._objects || []);
     children.forEach(child => applyColorToFabricObject(child, color));
-  } else {
-    if (obj.stroke) obj.set('stroke', color);
-    if (obj.fill && obj.fill !== 'transparent' && obj.fill !== 'none') {
-      obj.set('fill', getFillValue(color, activeFill));
-    }
+    obj.set({ dirty: true });
+    return;
   }
+  if (isTextObj(obj)) {
+    obj.set({ fill: color, dirty: true });
+    return;
+  }
+  if (kindOf(obj) === 'triangle') {
+    obj.set({ fill: color, dirty: true });
+    return;
+  }
+  if (k === 'marker') {
+    obj.set({ stroke: withAlpha(color, 0.38), dirty: true });
+    return;
+  }
+  if (k === 'glow') {
+    obj.set({ stroke: mixWithWhite(color, 0.55), dirty: true });
+    if (obj.shadow) obj.shadow.color = color;
+    return;
+  }
+  if (obj.stroke) obj.set('stroke', color);
+  if (obj.fill && obj.fill !== 'transparent' && obj.fill !== 'none' && !String(obj.fill).startsWith('rgba(255,255,255')) {
+    obj.set('fill', getFillValue(color, activeFill === 'none' ? 'rgba' : activeFill));
+  }
+  obj.set({ dirty: true });
 }
 
 function updateSelectedObjectStrokeWidth(width) {
@@ -1413,20 +1978,37 @@ function updateSelectedObjectStrokeWidth(width) {
 
     const activeObj = fCanvas.getActiveObject();
     if (activeObj) {
-      applyStrokeWidthToFabricObject(activeObj, width);
+      const z = pageZoomOf(fCanvas);
+      applyStrokeWidthToFabricObject(activeObj, width, z);
+      activeObj.set({ dirty: true });
+      if (typeof activeObj.setCoords === 'function') activeObj.setCoords();
       fCanvas.requestRenderAll();
       savePageCanvasState(pNum);
     }
   });
 }
 
-function applyStrokeWidthToFabricObject(obj, width) {
+function applyStrokeWidthToFabricObject(obj, width, z = 1) {
   if (!obj) return;
+  if (isTextObj(obj)) {
+    obj.set({ fontSize: (TEXT_SIZE[width] || 20) / z, dirty: true });
+    return;
+  }
+  if (obj._k === 'stamp') {
+    const sc = (width <= 2 ? 1.0 : width <= 6 ? 1.35 : 1.8) / z;
+    obj.set({ scaleX: sc, scaleY: sc, dirty: true });
+    return;
+  }
   if (['group', 'activeselection'].includes(kindOf(obj))) {
     const children = typeof obj.getObjects === 'function' ? obj.getObjects() : (obj._objects || []);
-    children.forEach(child => applyStrokeWidthToFabricObject(child, width));
-  } else {
-    if ('strokeWidth' in obj) obj.set('strokeWidth', width);
+    children.forEach(child => applyStrokeWidthToFabricObject(child, width, z));
+    obj.set({ dirty: true });
+    return;
+  }
+  if (obj._k === 'marker') {
+    obj.set({ strokeWidth: (MARKER_WIDTH[width] || 16) / z, dirty: true });
+  } else if ('strokeWidth' in obj && obj.stroke) {
+    obj.set({ strokeWidth: Math.max(1.2, width) / z, dirty: true });
   }
 }
 
@@ -1435,6 +2017,8 @@ function updateSelectedObjectFill(fill) {
     const activeObj = fCanvas.getActiveObject();
     if (activeObj) {
       applyFillToFabricObject(activeObj, fill);
+      activeObj.set({ dirty: true });
+      if (typeof activeObj.setCoords === 'function') activeObj.setCoords();
       fCanvas.requestRenderAll();
       savePageCanvasState(pNum);
     }
@@ -1443,11 +2027,12 @@ function updateSelectedObjectFill(fill) {
 
 function applyFillToFabricObject(obj, fill) {
   if (!obj) return;
+  if (isTextObj(obj) || obj._k === 'stamp' || obj._k === 'arrow') return;
   if (['group', 'activeselection'].includes(kindOf(obj))) {
     const children = typeof obj.getObjects === 'function' ? obj.getObjects() : (obj._objects || []);
     children.forEach(child => applyFillToFabricObject(child, fill));
-  } else if (obj.type !== 'path') {
-    obj.set('fill', fill);
+  } else if (kindOf(obj) !== 'path' && kindOf(obj) !== 'line') {
+    obj.set({ fill, dirty: true });
   }
 }
 
@@ -1463,28 +2048,26 @@ async function savePageCanvasState(pageNum) {
   const fCanvas = fabricCanvases.get(pageNum);
   if (!fCanvas || !window.State || !window.State.currentFile) return;
 
-  const KEEP = ['id', 'pageNum', '_k'];   // fabric v6+: extra props go through toObject(), not toJSON()
+  const KEEP = ['id', 'pageNum', '_k', 'globalCompositeOperation'];
   const jsonObj = typeof fCanvas.toObject === 'function' ? fCanvas.toObject(KEEP) : fCanvas.toJSON(KEEP);
   if (jsonObj && typeof jsonObj === 'object') {
     delete jsonObj.viewportTransform;
   }
   const jsonStr = JSON.stringify(jsonObj);
 
-  // Undo stack management: ensure base state exists if stack is empty
   let stack = undoStacks.get(pageNum) || [];
   if (stack.length === 0) {
-    const emptyObj = { version: jsonObj.version || '5.3.0', objects: [] };
+    const emptyObj = { version: jsonObj.version || '7.4.0', objects: [] };
     stack.push(JSON.stringify(emptyObj));
   }
 
   if (stack[stack.length - 1] !== jsonStr) {
     stack.push(jsonStr);
-    if (stack.length > 30) stack.shift(); // Limit to 30 steps
+    if (stack.length > 30) stack.shift();
     undoStacks.set(pageNum, stack);
-    redoStacks.set(pageNum, []); // Clear redo on new action
+    redoStacks.set(pageNum, []);
   }
 
-  // Save to IndexedDB
   const record = {
     id: `fabric_draw_f${window.State.currentFile.id}_p${pageNum}`,
     fileId: window.State.currentFile.id,
@@ -1507,11 +2090,8 @@ export async function paintDrawingsForPage(pageNum, preloadedAnnots) {
   try {
     if (!window.State || !window.State.currentFile) return;
 
-    // While markup mode is open (or a layer already exists) the layer is needed straight away.
     let fCanvas = (isMarkupActive || fabricCanvases.has(pageNum)) ? ensurePageDrawLayer(pageNum) : null;
-
     const pe = window.pageEls ? window.pageEls[pageNum] : null;
-    const currentScale = pe?.scale || 1.0;
 
     let annots = preloadedAnnots;
     if (!annots) {
@@ -1525,7 +2105,6 @@ export async function paintDrawingsForPage(pageNum, preloadedAnnots) {
 
     const drawingRecord = annots.find(a => a.page === pageNum && a.kind === 'drawing' && a.json);
 
-    // Nothing drawn on this page and no reason to draw: skip creating the Fabric canvases.
     if (!fCanvas) {
       if (!drawingRecord || !drawingHasObjects(drawingRecord.json)) return;
       if (!window.pageEls || window.pageEls[pageNum] !== pe || !pe || !pe.rendered) return;
@@ -1541,8 +2120,10 @@ export async function paintDrawingsForPage(pageNum, preloadedAnnots) {
           if (fCanvas && typeof fCanvas.requestRenderAll === 'function') fCanvas.requestRenderAll();
 
           let stack = undoStacks.get(pageNum) || [];
-          if (stack.length === 0) {
-            stack.push(drawingRecord.json);
+          if (stack.length <= 1) {
+            const emptyObj = { version: fabric.version || '7.4.0', objects: [] };
+            stack = [JSON.stringify(emptyObj)];
+            if (drawingHasObjects(drawingRecord.json)) stack.push(drawingRecord.json);
             undoStacks.set(pageNum, stack);
           }
         } catch (applyErr) {
@@ -1594,7 +2175,7 @@ export async function performUndo(pageNum) {
       };
       await window.DB.put('annotations', record);
       renderMarkupToolbar();
-      window.toast(`Undone on Page ${pageNum}`);
+      window.toast(`Undo on Page ${pageNum}`);
     });
   }
 }
@@ -1627,7 +2208,7 @@ export async function performRedo(pageNum) {
       };
       await window.DB.put('annotations', record);
       renderMarkupToolbar();
-      window.toast(`Redone on Page ${pageNum}`);
+      window.toast(`Redo on Page ${pageNum}`);
     });
   }
 }
@@ -1639,15 +2220,16 @@ export async function clearPageDrawings(pageNum) {
     fCanvas = ensurePageDrawLayer(curPg);
   }
 
+  const objs = (fCanvas && fCanvas.getObjects) ? [...fCanvas.getObjects()] : [];
+  if (objs.length === 0) {
+    window.toast(`Page ${curPg} has no drawings to clear`);
+    return;
+  }
+
   if (fCanvas) {
     fCanvas.discardActiveObject();
-    const objs = fCanvas.getObjects ? [...fCanvas.getObjects()] : [];
     objs.forEach(obj => {
-      try {
-        fCanvas.remove(obj);
-      } catch (e) {
-        console.warn('Error removing object:', e);
-      }
+      try { fCanvas.remove(obj); } catch (e) {}
     });
     fCanvas.clear();
     syncDrawRegion(curPg, true);
@@ -1656,30 +2238,9 @@ export async function clearPageDrawings(pageNum) {
     fCanvas.requestRenderAll();
   }
 
-  const emptyBaseStr = JSON.stringify({ version: '5.3.0', objects: [] });
-  undoStacks.set(curPg, [emptyBaseStr]);
-  redoStacks.set(curPg, []);
-
-  if (window.State && window.State.currentFile) {
-    try {
-      const fileId = window.State.currentFile.id;
-      const allAnnots = await window.DB.byIndex('annotations', 'fileId', fileId);
-      if (allAnnots && Array.isArray(allAnnots)) {
-        for (const a of allAnnots) {
-          if (Number(a.page) === curPg && a.kind === 'drawing') {
-            await window.DB.del('annotations', a.id);
-          }
-        }
-      }
-      const id = `fabric_draw_f${fileId}_p${curPg}`;
-      await window.DB.del('annotations', id);
-    } catch (err) {
-      console.error('Error clearing DB annotations:', err);
-    }
-  }
-
-  renderMarkupToolbar();
-  window.toast(`Cleared drawings on Page ${curPg}`);
+  // Push empty state onto undoStack instead of wiping it so Clear Page is 100% undoable!
+  await savePageCanvasState(curPg);
+  window.toast(`Cleared Page ${curPg} · Tap ↩ Undo to restore`);
 }
 
 // Expose globals for reader integration
@@ -1690,4 +2251,9 @@ window.ensurePageDrawLayer = ensurePageDrawLayer;
 window.destroyPageDrawLayer = destroyPageDrawLayer;
 window.isMarkupModeActive = isMarkupModeActive;
 window.syncDrawRegion = syncDrawRegion;
-window.markupDebug = { state: () => ({ activeTool, activeColor, activeStrokeWidth, ui: { ...ui }, laserFadeMs, snapShapes, focusBand: !!focusBandEl }), setTool: (t) => { activeTool = t; afterToolChange(); }, setUi: (u) => { Object.assign(ui, u); renderMarkupToolbar(); }, canvases: () => fabricCanvases };
+window.markupDebug = {
+  state: () => ({ activeTool, activeColor, activeStrokeWidth, ui: { ...ui }, laserFadeMs, snapShapes, focusBand: !!focusBandEl }),
+  setTool: (t) => { activeTool = t; afterToolChange(); },
+  setUi: (u) => { Object.assign(ui, u); renderMarkupToolbar(); },
+  canvases: () => fabricCanvases
+};

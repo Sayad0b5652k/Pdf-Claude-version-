@@ -1,0 +1,2237 @@
+// @ts-nocheck
+import { fixLegacyHindi, fixLegacyItems, pageIsLegacyHindi } from "../hindi_fix.js";
+
+// --- MICROSOFT NEURAL & ELEVENLABS & TTS ENGINES ---
+export const MICROSOFT_NEURAL_VOICES = [
+  // 🇮🇳 Hindi & Indian Accents (Clear & Natural)
+  { id: 'hi-IN-SwaraNeural', name: '👩 Swara — Hindi & English (Natural Female)', lang: 'hi-IN', category: 'Hindi & Indian Accents', gender: 'female' },
+  { id: 'hi-IN-MadhurNeural', name: '👨 Madhur — Hindi & English (Deep Male)', lang: 'hi-IN', category: 'Hindi & Indian Accents', gender: 'male' },
+  { id: 'en-IN-NeerjaNeural', name: '👩 Neerja — Indian English (Educator Female)', lang: 'en-IN', category: 'Hindi & Indian Accents', gender: 'female' },
+  { id: 'en-IN-PrabhatNeural', name: '👨 Prabhat — Indian English (Clear Male)', lang: 'en-IN', category: 'Hindi & Indian Accents', gender: 'male' },
+
+  // 🇺🇸 English US (High Definition)
+  { id: 'en-US-JennyNeural', name: '👩 Jenny — Conversational US Female', lang: 'en-US', category: 'English (US & UK)', gender: 'female' },
+  { id: 'en-US-GuyNeural', name: '👨 Guy — Deep US Male', lang: 'en-US', category: 'English (US & UK)', gender: 'male' },
+  { id: 'en-US-AriaNeural', name: '👩 Aria — Academic & Expressive Female', lang: 'en-US', category: 'English (US & UK)', gender: 'female' },
+  { id: 'en-US-ChristopherNeural', name: '👨 Christopher — News & Academic Male', lang: 'en-US', category: 'English (US & UK)', gender: 'male' },
+  { id: 'en-US-EricNeural', name: '👨 Eric — Friendly & Calm Male', lang: 'en-US', category: 'English (US & UK)', gender: 'male' },
+  { id: 'en-US-AnaNeural', name: '👧 Ana — Soft & Gentle Female', lang: 'en-US', category: 'English (US & UK)', gender: 'female' },
+
+  // 🇬🇧 English UK
+  { id: 'en-GB-SoniaNeural', name: '👩 Sonia — British English Educator', lang: 'en-GB', category: 'English (US & UK)', gender: 'female' },
+  { id: 'en-GB-RyanNeural', name: '👨 Ryan — British English Narrator', lang: 'en-GB', category: 'English (US & UK)', gender: 'male' },
+  { id: 'en-GB-LibbyNeural', name: '👩 Libby — British English Warm Female', lang: 'en-GB', category: 'English (US & UK)', gender: 'female' },
+
+  // 🏛️ Regional Indian Languages
+  { id: 'bn-IN-TanishaaNeural', name: '👩 Tanishaa — Bengali (Female)', lang: 'bn-IN', category: 'Regional Indian', gender: 'female' },
+  { id: 'ta-IN-PallaviNeural', name: '👩 Pallavi — Tamil (Female)', lang: 'ta-IN', category: 'Regional Indian', gender: 'female' },
+  { id: 'te-IN-ShrutiNeural', name: '👩 Shruti — Telugu (Female)', lang: 'te-IN', category: 'Regional Indian', gender: 'female' },
+  { id: 'mr-IN-AarohiNeural', name: '👩 Aarohi — Marathi (Female)', lang: 'mr-IN', category: 'Regional Indian', gender: 'female' },
+  { id: 'ur-IN-GulNeural', name: '👩 Gul — Urdu (Female)', lang: 'ur-IN', category: 'Regional Indian', gender: 'female' }
+];
+
+let activeMicrosoftAudio = null;
+let msRequestSeq = 0;      // bumped on every stop: a late network reply from an older request must not play
+const msAudioCache = new Map();   // prefetched sentence audio (key -> Promise<data>)
+
+function ttsCancelled() { const e = new Error('TTS request superseded'); e.cancelled = true; return e; }
+
+export function stopMicrosoftAudio() {
+  msRequestSeq++;
+  if (activeMicrosoftAudio) {
+    try {
+      activeMicrosoftAudio.pause();
+      activeMicrosoftAudio.currentTime = 0;
+    } catch (e) {}
+    activeMicrosoftAudio = null;
+  }
+}
+
+export function stopAllTTSAudio() {
+  stopMicrosoftAudio();
+  stopElevenAudio();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+/** Hindi text on an English-only voice is silent/garbled, so switch to a Hindi voice for Devanagari text. */
+export function pickMicrosoftVoiceForText(text, chosenId) {
+  const chosen = chosenId || 'hi-IN-SwaraNeural';
+  if (ttsLangOf(text) !== 'hi') return chosen;
+  const v = MICROSOFT_NEURAL_VOICES.find(x => x.id === chosen);
+  if (v && /^(hi|mr|ur|bn|ta|te)-/i.test(v.lang)) return chosen;
+  return v && v.gender === 'male' ? 'hi-IN-MadhurNeural' : 'hi-IN-SwaraNeural';
+}
+
+function msCacheKey(text, voice, rate, pitch) { return `${voice}|${rate}|${pitch}|${text}`; }
+
+function fetchMicrosoftAudioData(text, voice, rate, pitch) {
+  const key = msCacheKey(text, voice, rate, pitch);
+  const hit = msAudioCache.get(key);
+  if (hit) { msAudioCache.delete(key); return hit; }
+  return doFetchMicrosoft(text, voice, rate, pitch);
+}
+
+function doFetchMicrosoft(text, voice, rate, pitch) {
+  return (async () => {
+    const res = await fetchWithTimeout('/api/tts/synthesize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, voice, rate, pitch })
+    }, 30000);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Microsoft TTS failed with status ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.audioBase64) throw new Error('No audio generated by Microsoft TTS service');
+    return data;
+  })();
+}
+
+/** Starts fetching the next sentence's audio while the current one plays, so there is no gap between sentences. */
+export function prefetchMicrosoftNeural(text, voiceId, options = {}) {
+  try {
+    if (!text || !text.trim()) return;
+    const settings = getTTSSettings();
+    const voice = pickMicrosoftVoiceForText(text, voiceId || settings.microsoftVoiceId);
+    const rate = typeof options.rate === 'number' ? options.rate : (settings.rate || 1.0);
+    const pitch = typeof options.pitch === 'number' ? options.pitch : (settings.pitch || 1.0);
+    const key = msCacheKey(text, voice, rate, pitch);
+    if (msAudioCache.has(key)) return;
+    const pr = doFetchMicrosoft(text, voice, rate, pitch);
+    pr.catch(() => { msAudioCache.delete(key); });
+    msAudioCache.set(key, pr);
+    while (msAudioCache.size > 3) msAudioCache.delete(msAudioCache.keys().next().value);
+  } catch (e) {}
+}
+
+export async function speakWithMicrosoftNeural(text, voiceId, options = {}) {
+  stopAllTTSAudio();
+  const mySeq = msRequestSeq;
+
+  const settings = getTTSSettings();
+  const targetVoice = pickMicrosoftVoiceForText(text, voiceId || settings.microsoftVoiceId);
+  const rate = typeof options.rate === 'number' ? options.rate : (settings.rate || 1.0);
+  const pitch = typeof options.pitch === 'number' ? options.pitch : (settings.pitch || 1.0);
+
+  const data = await fetchMicrosoftAudioData(text, targetVoice, rate, pitch);
+  if (mySeq !== msRequestSeq) throw ttsCancelled();
+
+  const audioSrc = `data:${data.mimeType || 'audio/mp3'};base64,${data.audioBase64}`;
+  const audio = new Audio(audioSrc);
+  activeMicrosoftAudio = audio;
+
+  const boundaries = Array.isArray(data.wordBoundaries) ? data.wordBoundaries : [];
+  if (options.onAudio) { try { options.onAudio(audio, boundaries.length > 0); } catch (e) {} }
+
+  return new Promise((resolve, reject) => {
+    let animFrame = null;
+    let nextBoundaryIdx = 0;
+
+    const trackWordBoundaries = () => {
+      if (activeMicrosoftAudio !== audio || audio.ended) {
+        if (animFrame) cancelAnimationFrame(animFrame);
+        return;
+      }
+      if (!audio.paused) {
+        const currentMs = audio.currentTime * 1000;
+        while (nextBoundaryIdx < boundaries.length && currentMs >= boundaries[nextBoundaryIdx].offsetMs) {
+          const b = boundaries[nextBoundaryIdx];
+          if (options.onWordBoundary) {
+            options.onWordBoundary({
+              boundaryIndex: nextBoundaryIdx,
+              offsetMs: b.offsetMs,
+              durationMs: b.durationMs,
+              text: b.text,
+              length: b.length
+            });
+          }
+          nextBoundaryIdx++;
+        }
+      }
+      animFrame = requestAnimationFrame(trackWordBoundaries);
+    };
+
+    audio.onplay = () => {
+      if (options.onStart) options.onStart();
+      if (boundaries.length && !animFrame) animFrame = requestAnimationFrame(trackWordBoundaries);
+    };
+
+    audio.onended = () => {
+      if (animFrame) cancelAnimationFrame(animFrame);
+      if (activeMicrosoftAudio === audio) activeMicrosoftAudio = null;
+      if (options.onEnd) options.onEnd();
+      resolve(data);
+    };
+
+    audio.onerror = (e) => {
+      if (animFrame) cancelAnimationFrame(animFrame);
+      if (activeMicrosoftAudio === audio) activeMicrosoftAudio = null;
+      if (mySeq !== msRequestSeq) { reject(ttsCancelled()); return; }
+      if (options.onError) options.onError(e);
+      reject(e);
+    };
+
+    audio.play().catch((playErr) => {
+      if (animFrame) cancelAnimationFrame(animFrame);
+      if (activeMicrosoftAudio === audio) activeMicrosoftAudio = null;
+      reject(mySeq !== msRequestSeq ? ttsCancelled() : playErr);
+    });
+  });
+}
+
+export async function previewMicrosoftVoice(voiceId, onStart, onEnd) {
+  stopAllTTSAudio();
+  const v = MICROSOFT_NEURAL_VOICES.find(x => x.id === voiceId) || MICROSOFT_NEURAL_VOICES[0];
+  const samplePhrase = v.lang.startsWith('hi')
+    ? `नमस्ते! मैं माइक्रोसॉफ्ट न्यूरल वॉइस हूँ। मैं आपकी पुस्तकें और नोट्स साफ़ आवाज़ में पढ़ सकता हूँ।`
+    : `Hello! I am ${v.name.split('—')[0].replace(/^[^\w\s]+/, '').trim()}, powered by Microsoft Neural Voice. I am ready to read your documents clearly.`;
+
+  await speakWithMicrosoftNeural(samplePhrase, voiceId, {
+    onStart,
+    onEnd: () => {
+      if (onEnd) onEnd();
+    },
+    onError: () => {
+      if (onEnd) onEnd();
+    }
+  });
+}
+
+export const DEFAULT_ELEVENLABS_KEY = '';
+
+export function getElevenLabsApiKey() {
+  return localStorage.getItem('sayad_elevenlabs_key') || (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_ELEVENLABS_API_KEY) || (typeof process !== 'undefined' && process.env && process.env.ELEVENLABS_API_KEY) || '';
+}
+
+export function saveElevenLabsApiKey(key) {
+  if (key) {
+    localStorage.setItem('sayad_elevenlabs_key', key.trim());
+  } else {
+    localStorage.removeItem('sayad_elevenlabs_key');
+  }
+}
+
+export const ELEVENLABS_DEFAULT_VOICES = [
+  // 🎓 Academic, Educational & Professional (Best for Study & Books)
+  { id: 'nPczCjzI2devNBz1zQrb', name: '👨 Brian — Deep, Resonant & Comforting (Recommended)', category: 'Academic & Deep', gender: 'male', accent: 'American', preview_url: 'https://api.us.elevenlabs.io/v1/voices/nPczCjzI2devNBz1zQrb/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiIyZGQzZTcyYy00ZmQzLTQyZjEtOTNlYS1hYmM1ZDRlNWFhMWQubXAzIiwidGltZXN0YW1wIjoxNzg2OTE0MDAwMDAwMDAwfQ%3D%3D' },
+  { id: 'Xb7hH8MSUJpSbSDYk0k2', name: '👩 Alice — Clear & Engaging Educator', category: 'Academic & Educator', gender: 'female', accent: 'British', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/Xb7hH8MSUJpSbSDYk0k2/d10f7534-11f6-41fe-a012-2de1e482d336.mp3' },
+  { id: 'JBFqnCBsd6RMkjVDRZzb', name: '👨 George — Warm & Captivating Storyteller', category: 'Storyteller & Warm', gender: 'male', accent: 'British', preview_url: 'https://api.us.elevenlabs.io/v1/voices/JBFqnCBsd6RMkjVDRZzb/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiJlNjIwNmQxYS0wNzIxLTQ3ODctYWFmYi0wNmE2ZTcwNWNhYzUubXAzIiwidGltZXN0YW1wIjoxNzg2OTE0MDAwMDAwMDAwfQ%3D%3D' },
+  { id: 'EXAVITQu4vr4xnSDxMaL', name: '👩 Sarah — Mature, Reassuring & Confident', category: 'Professional & Clear', gender: 'female', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/EXAVITQu4vr4xnSDxMaL/01a3e33c-6e99-4ee7-8543-ff2216a32186.mp3' },
+  { id: 'onwK4e9ZLuTAKqWW03F9', name: '👨 Daniel — Steady British Broadcaster', category: 'Formal & News', gender: 'male', accent: 'British', preview_url: 'https://api.us.elevenlabs.io/v1/voices/onwK4e9ZLuTAKqWW03F9/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiI3ZWVlMDIzNi0xYTcyLTRiODYtYjMwMy01ZGNhZGMwMDdiYTkubXAzIiwidGltZXN0YW1wIjoxNzg2OTE0MDAwMDAwMDAwfQ%3D%3D' },
+  { id: 'hpp4J3VqNfWAUOO0d1Us', name: '👩 Bella — Professional, Bright & Warm', category: 'Academic & Warm', gender: 'female', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/hpp4J3VqNfWAUOO0d1Us/dab0f5ba-3aa4-48a8-9fad-f138fea1126d.mp3' },
+  { id: 'XrExE9yKIg1WjnnlVkGX', name: '👩 Matilda — Knowledgeable & Professional', category: 'Academic Female', gender: 'female', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/XrExE9yKIg1WjnnlVkGX/b930e18d-6b4d-466e-bab2-0ae97c6d8535.mp3' },
+  { id: 'pNInz6obpgDQGcFmaJgB', name: '👨 Adam — Firm, Bold & Authoritative', category: 'Authoritative', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/pNInz6obpgDQGcFmaJgB/d6905d7a-dd26-4187-bfff-1bd3a5ea7cac.mp3' },
+
+  // 🎙️ Conversational & Expressive Narrators
+  { id: 'IKne3meq5aSn9XLyUdCD', name: '👨 Charlie — Deep, Confident & Energetic', category: 'Dynamic Male', gender: 'male', accent: 'Australian', preview_url: 'https://api.us.elevenlabs.io/v1/voices/IKne3meq5aSn9XLyUdCD/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiIxMDJkZTZmMi0yMmVkLTQzZTAtYTFmMS0xMTFmYTc1YzU0ODEubXAzIiwidGltZXN0YW1wIjoxNzg2OTE0MDAwMDAwMDAwfQ%3D%3D' },
+  { id: 'CwhRBWXzGAHq8TQ4Fs17', name: '👨 Roger — Laid-Back, Casual & Resonant', category: 'Resonant & Relaxed', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/CwhRBWXzGAHq8TQ4Fs17/58ee3ff5-f6f2-4628-93b8-e38eb31806b0.mp3' },
+  { id: 'cgSgspJ2msm6clMCkdW9', name: '👩 Jessica — Playful, Bright & Warm', category: 'Friendly & Warm', gender: 'female', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/cgSgspJ2msm6clMCkdW9/56a97bf8-b69b-448f-846c-c3a11683d45a.mp3' },
+  { id: 'cjVigY5qzO86Huf0OWal', name: '👨 Eric — Smooth & Trustworthy', category: 'Smooth & Calm', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/cjVigY5qzO86Huf0OWal/d098fda0-6456-4030-b3d8-63aa048c9070.mp3' },
+  { id: 'pFZP5JQG7iQjIQuC4Bku', name: '👩 Lily — Velvety Actress & Expressive', category: 'Expressive British', gender: 'female', accent: 'British', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/pFZP5JQG7iQjIQuC4Bku/89b68b35-b3dd-4348-a84a-a3c13a3c2b30.mp3' },
+  { id: 'TX3LPaxmHKxFdv7VOQHJ', name: '👨 Liam — Energetic & Modern', category: 'Modern & Quick', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/TX3LPaxmHKxFdv7VOQHJ/63148076-6363-42db-aea8-31424308b92c.mp3' },
+  { id: 'SAz9YHcvj6GT2YYXdXww', name: '🎙️ River — Relaxed, Neutral & Informative', category: 'Neutral & Calm', gender: 'neutral', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/SAz9YHcvj6GT2YYXdXww/e6c95f0b-2227-491a-b3d7-2249240decb7.mp3' },
+  { id: 'FGY2WhTYpPnrIDTdsKH5', name: '👩 Laura — Enthusiast & Expressive', category: 'Enthusiastic', gender: 'female', accent: 'American', preview_url: 'https://api.us.elevenlabs.io/v1/voices/FGY2WhTYpPnrIDTdsKH5/previews/audio?payload=eyJ2b2ljZV9zb3VyY2UiOiJwcmVtYWRlIiwiZmlsZW5hbWUiOiI2NzM0MTc1OS1hZDA4LTQxYTUtYmU2ZS1kZTEyZmU0NDg2MTgubXAzIiwidGltZXN0YW1wIjoxNzg2OTE0MDAwMDAwMDAwfQ%3D%3D' },
+  { id: 'iP95p4xoKVk53GoZ742B', name: '👨 Chris — Charming & Down-to-Earth', category: 'Casual Conversational', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/iP95p4xoKVk53GoZ742B/3f4bde72-cc48-40dd-829f-57fbf906f4d7.mp3' },
+  { id: 'bIHbv24MWmeRgasZH58o', name: '👨 Will — Relaxed Optimist', category: 'Calm & Friendly', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/bIHbv24MWmeRgasZH58o/8caf8f3d-ad29-4980-af41-53f20c72d7a4.mp3' },
+  { id: 'pqHfZKP75CvOlQylNhV4', name: '👨 Bill — Wise, Mature & Balanced', category: 'Mature Narrator', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/pqHfZKP75CvOlQylNhV4/d782b3ff-84ba-4029-848c-acf01285524d.mp3' },
+  { id: 'SOYHLrjzK2X1ezoPC6cr', name: '👨 Harry — Fierce & Strong Character', category: 'Dramatic', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/SOYHLrjzK2X1ezoPC6cr/86d178f6-f4b6-4e0e-85be-3de19f490794.mp3' },
+  { id: 'N2lVS1w4EtoT3dr4eOWO', name: '👨 Callum — Husky Character Narrator', category: 'Husky Voice', gender: 'male', accent: 'American', preview_url: 'https://storage.googleapis.com/eleven-public-prod/premade/voices/N2lVS1w4EtoT3dr4eOWO/ac833bd8-ffda-4938-9ebc-b0f99ca25481.mp3' }
+];
+
+let activeElevenAudio = null;
+let activePreviewAudio = null;
+
+let elevenRequestSeq = 0;
+
+export function stopElevenAudio() {
+  elevenRequestSeq++;
+  if (activeElevenAudio) {
+    try {
+      activeElevenAudio.pause();
+      activeElevenAudio.currentTime = 0;
+    } catch (e) {}
+    activeElevenAudio = null;
+  }
+  if (activePreviewAudio) {
+    try {
+      activePreviewAudio.pause();
+      activePreviewAudio.currentTime = 0;
+    } catch (e) {}
+    activePreviewAudio = null;
+  }
+}
+
+export async function fetchElevenLabsVoices() {
+  const apiKey = getElevenLabsApiKey();
+  if (!apiKey) return ELEVENLABS_DEFAULT_VOICES;
+
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/voices', {
+      headers: { 'xi-api-key': apiKey }
+    });
+    if (!res.ok) return ELEVENLABS_DEFAULT_VOICES;
+    const data = await res.json();
+    if (data && data.voices && data.voices.length > 0) {
+      const dynamicList = data.voices.map(v => ({
+        id: v.voice_id,
+        name: `${v.labels?.gender === 'female' ? '👩' : '👨'} ${v.name}`,
+        category: v.labels?.use_case || v.category || 'Custom Voice',
+        gender: v.labels?.gender || 'neutral',
+        accent: v.labels?.accent || 'English',
+        preview_url: v.preview_url
+      }));
+      window.State.cachedElevenVoices = dynamicList;
+      return dynamicList;
+    }
+  } catch (err) {
+    console.warn('Could not fetch live ElevenLabs voices, using verified catalog:', err);
+  }
+  return ELEVENLABS_DEFAULT_VOICES;
+}
+
+export function getAllElevenLabsVoices() {
+  return (window.State && window.State.cachedElevenVoices) || ELEVENLABS_DEFAULT_VOICES;
+}
+
+export async function previewElevenVoice(voiceId, onStart, onEnd) {
+  stopElevenAudio();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+
+  const voices = getAllElevenLabsVoices();
+  const found = voices.find(v => v.id === voiceId);
+
+  // If we have an instant pre-cached preview URL from ElevenLabs, use it directly
+  if (found && found.preview_url) {
+    try {
+      const audio = new Audio(found.preview_url);
+      activePreviewAudio = audio;
+      if (onStart) onStart();
+      audio.onended = () => {
+        activePreviewAudio = null;
+        if (onEnd) onEnd();
+      };
+      audio.onerror = () => {
+        activePreviewAudio = null;
+        if (onEnd) onEnd();
+      };
+      await audio.play();
+      return;
+    } catch (err) {
+      console.warn('Audio preview URL failed, falling back to direct synthesis:', err);
+    }
+  }
+
+  // Fallback: synthesize short sample text directly
+  const samplePhrase = `Hello! This is ${found ? found.name.replace(/^[^\w]+/, '') : 'this voice'}. I am ready to read your documents clearly.`;
+  await speakWithElevenLabs(samplePhrase, voiceId, {
+    onStart,
+    onEnd: () => {
+      if (onEnd) onEnd();
+    },
+    onError: () => {
+      if (onEnd) onEnd();
+    }
+  });
+}
+
+export async function speakWithElevenLabs(text, voiceId, options = {}) {
+  const apiKey = getElevenLabsApiKey();
+  if (!apiKey) {
+    throw new Error('ElevenLabs API Key is missing');
+  }
+
+  stopElevenAudio();
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  const myElevenSeq = elevenRequestSeq;
+
+  // Ensure target voice is a valid ID from the active list
+  const validVoices = getAllElevenLabsVoices();
+  let targetVoice = voiceId || getTTSSettings().elevenVoiceId;
+  const isMatch = validVoices.some(v => v.id === targetVoice);
+  if (!targetVoice || !isMatch) {
+    targetVoice = 'nPczCjzI2devNBz1zQrb'; // Default to Brian (Deep, Resonant & Clear)
+  }
+
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${targetVoice}`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'xi-api-key': apiKey
+    },
+    body: JSON.stringify({
+      text: text,
+      model_id: 'eleven_turbo_v2_5',
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.75
+      }
+    })
+  });
+
+  if (!res.ok) {
+    const errObj = await res.json().catch(() => ({}));
+    throw new Error(errObj?.detail?.message || `ElevenLabs error (${res.status})`);
+  }
+
+  const blob = await res.blob();
+  if (myElevenSeq !== elevenRequestSeq) throw ttsCancelled();
+  const audioUrl = URL.createObjectURL(blob);
+  const audio = new Audio(audioUrl);
+  activeElevenAudio = audio;
+  if (options.onAudio) { try { options.onAudio(audio); } catch (e) {} }
+
+  return new Promise((resolve, reject) => {
+    const release = () => { try { URL.revokeObjectURL(audioUrl); } catch (e) {} if (activeElevenAudio === audio) activeElevenAudio = null; };
+    audio.onplay = () => {
+      if (options.onStart) options.onStart();
+    };
+
+    audio.onended = () => {
+      release();
+      if (options.onEnd) options.onEnd();
+      resolve();
+    };
+
+    audio.onerror = (e) => {
+      release();
+      if (myElevenSeq !== elevenRequestSeq) { reject(ttsCancelled()); return; }
+      if (options.onError) options.onError(e);
+      reject(e);
+    };
+
+    audio.play().catch((err) => { release(); reject(myElevenSeq !== elevenRequestSeq ? ttsCancelled() : err); });
+  });
+}
+
+// --- TTS & VOICE MANAGER ---
+let ttsTimer = null;
+let lastBoundaryTs = 0;
+let activeTTSSentences = [];
+let activeTTSSentenceIdx = 0;
+let activeTTSWordIdx = 0;
+let activeTTSPageNum = 1;
+let currentTTSUtterance = null;
+let isTTSCancelledByUser = false;
+let isReadingActive = false;
+let isTTSWidgetVisible = false;
+let currentUtteranceId = 0;
+
+export function getTTSSettings() {
+  if (window.State.ttsSettings) return window.State.ttsSettings;
+  let saved = null;
+  try {
+    const raw = localStorage.getItem('pdf_reader_tts_settings');
+    if (raw) saved = JSON.parse(raw);
+  } catch (e) {}
+  window.State.ttsSettings = saved || {
+    engine: 'microsoft', // 'microsoft' | 'elevenlabs' | 'system'
+    microsoftVoiceId: 'hi-IN-SwaraNeural',
+    preset: 'male_deep',
+    useElevenLabs: false,
+    elevenVoiceId: 'nPczCjzI2devNBz1zQrb',
+    voiceURI: '',
+    pitch: 1.0,
+    rate: 1.0,
+    autoAdvance: true
+  };
+  return window.State.ttsSettings;
+}
+
+export function saveTTSSettings(settings) {
+  window.State.ttsSettings = { ...getTTSSettings(), ...settings };
+  try {
+    localStorage.setItem('pdf_reader_tts_settings', JSON.stringify(window.State.ttsSettings));
+  } catch (e) {}
+}
+
+export function isElevenLabsActive() {
+  const settings = getTTSSettings();
+  const key = getElevenLabsApiKey();
+  return Boolean(key && settings.engine === 'elevenlabs' && settings.useElevenLabs !== false);
+}
+
+export function isMicrosoftNeuralActive() {
+  const settings = getTTSSettings();
+  return settings.engine === 'microsoft' || !settings.engine;
+}
+
+export function getActiveVoiceDisplayName() {
+  const settings = getTTSSettings();
+  const engine = settings.engine || 'microsoft';
+
+  if (engine === 'microsoft') {
+    const msVoices = MICROSOFT_NEURAL_VOICES;
+    const found = msVoices.find(v => v.id === settings.microsoftVoiceId) || msVoices[0];
+    return {
+      type: 'microsoft',
+      name: found ? found.name.split('—')[0].replace(/^[^\w\s]+/, '').trim() : 'Swara',
+      fullName: found ? found.name : '👩 Swara — Hindi & English (Natural Female)',
+      category: found?.category || 'Hindi & Indian Accents',
+      badge: 'Microsoft Neural'
+    };
+  } else if (engine === 'elevenlabs' && isElevenLabsActive()) {
+    const elevenVoices = getAllElevenLabsVoices();
+    const found = elevenVoices.find(v => v.id === settings.elevenVoiceId) || elevenVoices[0];
+    return {
+      type: 'elevenlabs',
+      name: found ? found.name.split('—')[0].replace(/^[^\w\s]+/, '').trim() : 'Brian',
+      fullName: found ? found.name : '👨 Brian — Deep, Resonant & Comforting',
+      category: found?.category || 'AI Voice',
+      badge: 'ElevenLabs AI'
+    };
+  } else {
+    const sysVoices = getSystemVoices();
+    let sysName = 'System Default';
+    if (settings.voiceURI) {
+      const v = sysVoices.find(x => x.voiceURI === settings.voiceURI);
+      if (v) sysName = v.name;
+    } else {
+      const v = findBestVoiceForPreset(settings.preset, sysVoices);
+      if (v) sysName = v.name;
+    }
+    const presetNames = {
+      male_deep: 'Deep Male',
+      female_soft: 'Natural Female',
+      fast: 'Fast Narrator',
+      calm: 'Calm Reader',
+      custom: 'Custom Voice'
+    };
+    return {
+      type: 'system',
+      name: presetNames[settings.preset] || sysName.split(' ')[0],
+      fullName: sysName,
+      category: 'Browser Voice',
+      badge: 'System TTS'
+    };
+  }
+}
+
+export function getSystemVoices() {
+  if (!('speechSynthesis' in window)) return [];
+  return window.speechSynthesis.getVoices() || [];
+}
+
+export function findBestVoiceForPreset(preset, voices) {
+  if (!voices || !voices.length) return null;
+  const settings = getTTSSettings();
+  if (preset === 'custom' && settings.voiceURI) {
+    const found = voices.find(v => v.voiceURI === settings.voiceURI);
+    if (found) return found;
+  }
+
+  const englishVoices = voices.filter(v => v.lang && v.lang.startsWith('en'));
+  const pool = englishVoices.length ? englishVoices : voices;
+
+  if (preset === 'male_deep') {
+    const maleKW = ['male', 'david', 'mark', 'george', 'guy', 'daniel', 'google us english', 'alex', 'natural'];
+    const match = pool.find(v => maleKW.some(kw => v.name.toLowerCase().includes(kw)));
+    if (match) return match;
+  } else if (preset === 'female_soft') {
+    const femaleKW = ['female', 'zira', 'samantha', 'victoria', 'karen', 'fiona', 'susan', 'google uk english female', 'natural'];
+    const match = pool.find(v => femaleKW.some(kw => v.name.toLowerCase().includes(kw)));
+    if (match) return match;
+  }
+  return pool[0] || voices[0];
+}
+
+export function applyPresetSettings(preset) {
+  const current = getTTSSettings();
+  let updated = { ...current, preset, engine: 'system', useElevenLabs: false };
+
+  if (preset === 'male_deep') {
+    updated.pitch = 0.70;
+    updated.rate = 0.95;
+  } else if (preset === 'female_soft') {
+    updated.pitch = 1.15;
+    updated.rate = 1.00;
+  } else if (preset === 'fast') {
+    updated.pitch = 1.00;
+    updated.rate = 1.35;
+  } else if (preset === 'calm') {
+    updated.pitch = 0.85;
+    updated.rate = 0.80;
+  }
+  saveTTSSettings(updated);
+  return updated;
+}
+
+export function clearTTSHighlights() {
+  activeWordEl = null;
+  document.querySelectorAll('.tts-word-active, .highlight').forEach(el => {
+    el.classList.remove('tts-word-active', 'highlight');
+  });
+  document.querySelectorAll('.tts-sentence-active').forEach(el => {
+    el.classList.remove('tts-sentence-active');
+  });
+  document.querySelectorAll('.tts-s-active').forEach(el => {
+    el.classList.remove('tts-s-active');
+  });
+  document.querySelectorAll('.has-tts-active').forEach(el => {
+    el.classList.remove('has-tts-active');
+  });
+}
+
+export function ensureFloatingTTSCapsule() {
+  let widget = document.getElementById('tts-floating-widget');
+  if (!widget) {
+    widget = document.createElement('div');
+    widget.id = 'tts-floating-widget';
+    document.body.appendChild(widget);
+  }
+  return widget;
+}
+
+export function hideFloatingTTSCapsule(side = 'right') {
+  const widget = document.getElementById('tts-floating-widget');
+  if (widget) {
+    if (side === 'left') {
+      widget.classList.add('tts-collapsed-left');
+      widget.classList.remove('tts-collapsed');
+    } else {
+      widget.classList.add('tts-collapsed');
+      widget.classList.remove('tts-collapsed-left');
+    }
+  }
+}
+
+export function showFloatingTTSCapsule() {
+  isTTSWidgetVisible = true;
+  const widget = ensureFloatingTTSCapsule();
+  if (widget) {
+    widget.style.display = 'block';
+    widget.classList.remove('tts-collapsed');
+    widget.classList.remove('tts-collapsed-left');
+  }
+}
+
+export function pauseTTS() {
+  ttsClearAdvance();
+  isReadingActive = false;
+  isTTSCancelledByUser = true;
+  stopAllTTSAudio();
+  if (ttsTimer) { clearTimeout(ttsTimer); clearInterval(ttsTimer); ttsTimer = null; }
+  clearTTSHighlights();
+  syncTTSControllerState();
+}
+
+export function turnOffTTS() {
+  ttsClearAdvance();
+  isReadingActive = false;
+  isTTSWidgetVisible = false;
+  isTTSCancelledByUser = true;
+  stopAllTTSAudio();
+  if (ttsTimer) { clearTimeout(ttsTimer); clearInterval(ttsTimer); ttsTimer = null; }
+  clearTTSHighlights();
+  if (typeof window.closeOledBlackoutVisualizer === 'function') {
+    window.closeOledBlackoutVisualizer();
+  }
+  const widget = document.getElementById('tts-floating-widget');
+  if (widget) {
+    widget.style.display = 'none';
+    widget.remove();
+  }
+  syncTTSControllerState();
+}
+
+let ttsCapsuleWindowHandlers = null;
+
+export function renderFloatingTTSCapsule() {
+  if (!isTTSWidgetVisible || !window.State || !window.State.currentDoc) {
+    const w = document.getElementById('tts-floating-widget');
+    if (w) {
+      w.style.display = 'none';
+      w.remove();
+    }
+    return;
+  }
+
+  const widget = ensureFloatingTTSCapsule();
+  widget.style.display = 'block';
+
+  const pageNum = window.State ? (window.State.currentPage || 1) : 1;
+  const numPages = window.State ? (window.State.numPages || 1) : 1;
+  const settings = getTTSSettings();
+  const voiceInfo = getActiveVoiceDisplayName();
+  const isSpeaking = isReadingActive && (Boolean(activeMicrosoftAudio) || Boolean(activeElevenAudio) || Boolean(window.speechSynthesis && window.speechSynthesis.speaking));
+
+  widget.innerHTML = `
+    <!-- Expanded Floating Rectangular Capsule Box -->
+    <div id="tts-capsule-bar" class="tts-capsule-bar" title="Drag Left/Right to Hide, Drag Up/Down to Move or Turn Off">
+      <div class="tts-capsule-left">
+        <button id="tts-cap-prev-s" class="tts-cap-icon-btn" title="Previous Sentence">
+          ⏮️
+        </button>
+        <button id="tts-cap-play" class="tts-cap-btn-main ${isSpeaking ? 'active' : ''}" title="${isSpeaking ? 'Pause Reading' : 'Start Reading'}">
+          ${isSpeaking ? '⏹️' : '▶️'}
+        </button>
+        <button id="tts-cap-next-s" class="tts-cap-icon-btn" title="Next Sentence">
+          ⏭️
+        </button>
+        <div class="tts-cap-info">
+          <div class="tts-cap-pg font-mono">Pg ${pageNum}/${numPages}</div>
+          <div class="tts-cap-status" style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:90px;" title="${voiceInfo.fullName}">
+            ${isSpeaking ? `🔊 ${voiceInfo.name}` : `✨ ${voiceInfo.name}`}
+          </div>
+        </div>
+      </div>
+
+      <div class="tts-cap-speeds">
+        ${[0.8, 1.0, 1.25, 1.5, 2.0].map(s => `
+          <button class="tts-cap-speed-chip ${Math.abs(settings.rate - s) < 0.05 ? 'active' : ''}" data-speed="${s}">
+            ${s}x
+          </button>
+        `).join('')}
+      </div>
+
+      <div class="tts-cap-right">
+        <button id="tts-cap-voice" class="tts-cap-icon-btn" title="Voice &amp; Character Settings (${voiceInfo.fullName})">
+          ⚙️
+        </button>
+        <button id="tts-cap-close" class="tts-cap-icon-btn close-btn" title="Turn Off Read Aloud">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- Edge Tab when Collapsed -->
+    <div id="tts-edge-tab" class="tts-edge-tab" title="Click or Drag to open Read Aloud controls">
+      <div class="tts-edge-tab-inner">
+        <span class="tts-edge-icon">🔊</span>
+        <span class="tts-edge-label">READ</span>
+      </div>
+    </div>
+  `;
+
+  const prevSBtn = document.getElementById('tts-cap-prev-s');
+  if (prevSBtn) {
+    prevSBtn.onclick = (e) => {
+      e.stopPropagation();
+      skipTTSSentence(-1);
+    };
+  }
+
+  const nextSBtn = document.getElementById('tts-cap-next-s');
+  if (nextSBtn) {
+    nextSBtn.onclick = (e) => {
+      e.stopPropagation();
+      skipTTSSentence(1);
+    };
+  }
+
+  const playBtn = document.getElementById('tts-cap-play');
+  if (playBtn) {
+    playBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (isReadingActive) {
+        pauseTTS();
+        window.toast('Paused reading');
+      } else {
+        runPageReadAloud(activeTTSSentences.length && activeTTSPageNum ? activeTTSPageNum : (window.State.currentPage || 1), {
+          resume: true,
+          onStart: () => renderFloatingTTSCapsule(),
+          onEnd: () => renderFloatingTTSCapsule(),
+          onStop: () => renderFloatingTTSCapsule()
+        });
+      }
+    };
+  }
+
+  document.querySelectorAll('.tts-cap-speed-chip').forEach(chip => {
+    chip.onclick = (e) => {
+      e.stopPropagation();
+      const spd = parseFloat(chip.dataset.speed);
+      saveTTSSettings({ rate: spd });
+      if (isReadingActive) {
+        // Continue playback at current sentence with new speed seamlessly
+        continuePlaybackWithCurrentSettings();
+      } else {
+        renderFloatingTTSCapsule();
+      }
+    };
+  });
+
+  const voiceBtn = document.getElementById('tts-cap-voice');
+  if (voiceBtn) {
+    voiceBtn.onclick = (e) => {
+      e.stopPropagation();
+      openVoiceSettingsModal();
+    };
+  }
+
+  const closeBtn = document.getElementById('tts-cap-close');
+  if (closeBtn) {
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      turnOffTTS();
+      window.toast('Read Aloud turned off ⏹️');
+    };
+  }
+
+  const edgeTab = document.getElementById('tts-edge-tab');
+  if (edgeTab) {
+    edgeTab.onclick = (e) => {
+      e.stopPropagation();
+      showFloatingTTSCapsule();
+    };
+  }
+
+  // --- Interactive Gesture/Drag Handling ---
+  const capBar = document.getElementById('tts-capsule-bar');
+  if (capBar) {
+    let startX = 0, startY = 0, deltaX = 0, deltaY = 0, isDragging = false;
+
+    const onPointerDown = (e) => {
+      if (e.target.closest('button, input, select')) return;
+      isDragging = true;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      startX = clientX;
+      startY = clientY;
+      deltaX = 0;
+      deltaY = 0;
+    };
+
+    const onPointerMove = (e) => {
+      if (!isDragging) return;
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      deltaX = clientX - startX;
+      deltaY = clientY - startY;
+
+      widget.style.transform = `translate(calc(-50% + ${deltaX}px), ${deltaY}px)`;
+    };
+
+    const onPointerUp = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      widget.style.transform = '';
+
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+      const isTopDocked = widget.classList.contains('tts-top-docked');
+
+      if (absX > 35 && absX > absY * 1.3) {
+        if (deltaX < 0) {
+          hideFloatingTTSCapsule('left');
+          window.toast('Reader hidden to left edge ⬅️');
+        } else {
+          hideFloatingTTSCapsule('right');
+          window.toast('Reader hidden to right edge ➡️');
+        }
+      } else if (absY > 25) {
+        if (isTopDocked) {
+          if (deltaY < -25) {
+            turnOffTTS();
+            window.toast('Read Aloud turned off ⏹️');
+          } else if (deltaY > 25) {
+            widget.classList.remove('tts-top-docked');
+            window.toast('Moved to bottom ⬇️');
+          }
+        } else {
+          if (deltaY > 25) {
+            turnOffTTS();
+            window.toast('Read Aloud turned off ⏹️');
+          } else if (deltaY < -25) {
+            widget.classList.add('tts-top-docked');
+            window.toast('Docked to top ⬆️');
+          }
+        }
+      }
+
+      startX = 0; startY = 0; deltaX = 0; deltaY = 0;
+    };
+
+    if (ttsCapsuleWindowHandlers) {
+      window.removeEventListener('mousemove', ttsCapsuleWindowHandlers.move);
+      window.removeEventListener('mouseup', ttsCapsuleWindowHandlers.up);
+      window.removeEventListener('touchmove', ttsCapsuleWindowHandlers.move);
+      window.removeEventListener('touchend', ttsCapsuleWindowHandlers.up);
+    }
+    ttsCapsuleWindowHandlers = { move: onPointerMove, up: onPointerUp };
+
+    capBar.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+
+    capBar.addEventListener('touchstart', onPointerDown, { passive: true });
+    window.addEventListener('touchmove', onPointerMove, { passive: true });
+    window.addEventListener('touchend', onPointerUp, { passive: true });
+  }
+}
+
+/* ===== Read-aloud text model: sentences, words, language, timing ===== */
+
+/** 'hi' when the text is mostly Devanagari, otherwise 'en'. */
+export function ttsLangOf(text) {
+  const t = String(text || '');
+  const dev = (t.match(/[ऀ-ॿ]/g) || []).length;
+  const lat = (t.match(/[A-Za-z]/g) || []).length;
+  return dev > 0 && dev >= lat * 0.4 ? 'hi' : 'en';
+}
+
+const TTS_SENT_END = /[.!?।॥]+["'”’)\]]*$/;
+const TTS_ABBR = /^(?:dr|mr|mrs|ms|prof|sr|jr|st|vs|etc|fig|figs|no|nos|vol|pp|eg|ie|e\.g|i\.e|cf|eq|ch|sec|rs|approx|dept|a\.m|p\.m|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\.$/i;
+
+function ttsEndsSentence(spoken, isFirstWord) {
+  const w = spoken.replace(/["'”’)\]]+$/g, '');
+  if (!TTS_SENT_END.test(spoken)) return false;
+  if (TTS_ABBR.test(w) || /^[A-Za-z]\.$/.test(w)) return false;           // "Dr." / "A."
+  if (isFirstWord && /^\(?\d{1,3}[.)]$/.test(w)) return false;            // "1." list numbering
+  if (/^\d+\.\d*$/.test(w) && w.length > 2 && !/\.$/.test(w)) return false;
+  return true;
+}
+
+/** Rough syllable count (English and Devanagari); used to time highlights when the engine gives no word events. */
+function ttsSyllables(word) {
+  const core = String(word || '').replace(/[^\p{L}\p{M}\p{N}]/gu, '');
+  if (!core) return 0;
+  if (/[ऀ-ॿ]/.test(core)) {
+    const ch = [...core];
+    let syl = 0;
+    for (let i = 0; i < ch.length; i++) {
+      const c = ch[i];
+      if (/[ऄ-औॠॡ]/.test(c)) syl++;
+      else if (/[ा-ौॢॣ]/.test(c)) syl++;
+      else if (/[क-हक़-य़]/.test(c)) {
+        let n = ch[i + 1];
+        if (n === '़') n = ch[i + 2];
+        if (!n || !/[ा-्ॢॣ]/.test(n)) syl++;
+      }
+    }
+    if (syl > 1 && /[क-हक़-य़]$/.test(core)) syl--;     // schwa deletion at word end
+    return Math.max(1, syl);
+  }
+  if (/^\d+$/.test(core)) return Math.max(1, Math.round(core.length * 1.5));
+  const lower = core.toLowerCase().replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
+  return Math.max(1, (lower.match(/[aeiouy]+/g) || []).length);
+}
+
+/** Estimated time one word takes to speak, in ms (at rate 1.0 this is about 160 words per minute). */
+export function ttsWordMs(word, rate = 1) {
+  const w = String(word || '');
+  let ms = ttsSyllables(w) * 190 + 70;
+  if (/[,;:—]$/.test(w)) ms += 170;
+  else if (/[.!?।॥]["'”)]*$/.test(w)) ms += 320;
+  return Math.max(60, Math.round(ms / (rate || 1)));
+}
+
+/** Resolves the live DOM element of a word, re-tagging the page if the text layer was rebuilt (zoom / re-render). */
+function refreshSentenceEls(sentence) {
+  const w0 = sentence.words[0];
+  if (w0 && w0.el && w0.el.isConnected) return true;
+  const pe = window.pageEls && window.pageEls[sentence.pageNum];
+  if (!pe || !pe.textLayerDiv) return false;
+  const r = tagTTSWordSpans(pe.textLayerDiv, sentence.pageNum);
+  const fresh = r.sentences[sentence.idx];
+  if (!fresh || fresh.words.length !== sentence.words.length) return false;
+  sentence.words.forEach((w, i) => { w.el = fresh.words[i].el; w.parentSpan = fresh.words[i].parentSpan; });
+  sentence.parentSpans = fresh.parentSpans;
+  sentence.parentSpans.forEach(sp => sp.classList.add('tts-sentence-active'));
+  return true;
+}
+
+let activeWordEl = null;
+
+function ensureWordVisible(el) {
+  const scrollEl = document.getElementById('reader-scroll');
+  if (!scrollEl || !el) return;
+  const sRect = scrollEl.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  if (r.top < sRect.top + 40 || r.bottom > sRect.bottom - 60) {
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {}
+  }
+}
+
+/** Highlights exactly one word (cheap: touches only the previous and the new element). */
+function setActiveWord(sentence, idx) {
+  if (!sentence || !sentence.words) return;
+  const w = sentence.words[idx];
+  if (!w) return;
+  if (!w.el || !w.el.isConnected) { if (!refreshSentenceEls(sentence)) return; }
+  const el = sentence.words[idx].el;
+  if (!el) return;
+  activeTTSWordIdx = idx;
+  if (el === activeWordEl) return;
+  if (activeWordEl) activeWordEl.classList.remove('tts-word-active', 'highlight');
+  el.classList.add('tts-word-active', 'highlight');
+  activeWordEl = el;
+  ensureWordVisible(el);
+}
+
+/** Maps an engine's word events (text only) to page words by walking the spoken string, so hyphens, numbers and skipped tokens cannot knock the highlight out of sync. */
+function makeBoundaryMapper(sentence, spokenText, startCharOffset, startWIdx) {
+  const hay = spokenText.toLowerCase();
+  const words = sentence.words;
+  let cursor = 0;
+  let last = startWIdx;
+  const wordAt = (charPos) => {
+    let lo = 0, hi = words.length - 1, ans = 0;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (words[mid].startChar <= charPos) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  };
+  return (wb) => {
+    const t = String(wb && wb.text || '').toLowerCase().trim();
+    if (!t) return last;
+    let p = hay.indexOf(t, cursor);
+    if (p < 0 || p - cursor > 60) {
+      const t2 = t.replace(/[^\p{L}\p{M}\p{N}]/gu, '');
+      p = t2 ? hay.indexOf(t2, cursor) : -1;
+      if (p >= 0 && p - cursor <= 60) { cursor = p + t2.length; }
+      else p = -1;
+    } else cursor = p + t.length;
+    let idx;
+    if (p >= 0) idx = wordAt(p + startCharOffset);
+    else {
+      idx = Math.min(last + 1, words.length - 1);                      // lost track: step one word
+      cursor = Math.max(cursor, (words[idx].startChar - startCharOffset) + (words[idx].spoken || '').length);
+    }
+    if (idx < last) idx = last;                                         // never move backwards
+    last = idx;
+    return idx;
+  };
+}
+
+const ttsTimingFactor = { en: 1, hi: 1 };   // actual/estimated duration, learned from finished sentences (self-calibrating)
+let ttsAdvanceTimer = null;                 // pending "turn to next page" timeout
+
+function ttsClearAdvance() { if (ttsAdvanceTimer) { clearTimeout(ttsAdvanceTimer); ttsAdvanceTimer = null; } }
+function ttsScheduleAdvance(fn, ms) { ttsClearAdvance(); ttsAdvanceTimer = setTimeout(() => { ttsAdvanceTimer = null; fn(); }, ms); }
+
+function ttsWordStarts(sentence, startWIdx, rate) {
+  const starts = [];
+  let t = 0;
+  for (let i = startWIdx; i < sentence.words.length; i++) {
+    starts.push(t);
+    t += ttsWordMs(sentence.words[i].spoken, rate);
+  }
+  return { starts, total: t };
+}
+
+/** No word events from the engine (many phones): advance highlights on a clock built from syllable counts. */
+function startTimedHighlight(sentence, startWIdx, rate, utterId, isStillNative) {
+  const raw = ttsWordStarts(sentence, startWIdx, rate);
+  const k = ttsTimingFactor[sentence.lang === 'hi' ? 'hi' : 'en'] || 1;
+  const starts = raw.starts.map(x => x * k);
+  const t0 = performance.now();
+  let i = 0;
+  const tick = () => {
+    ttsTimer = null;
+    if (utterId !== currentUtteranceId || !isReadingActive || isTTSCancelledByUser) return;
+    if (isStillNative && isStillNative()) return;
+    const el = performance.now() - t0;
+    while (i + 1 < starts.length && starts[i + 1] <= el) i++;
+    setActiveWord(sentence, startWIdx + i);
+    if (i + 1 < starts.length) ttsTimer = setTimeout(tick, Math.max(25, starts[i + 1] - el));
+  };
+  if (starts.length > 1) ttsTimer = setTimeout(tick, Math.max(25, starts[1]));
+  return { t0, rawTotal: raw.total };
+}
+
+function ttsLearnSpeed(lang, rawTotal, actualMs) {
+  if (!(rawTotal > 400) || !(actualMs > 300)) return;
+  const f = Math.min(2, Math.max(0.5, (actualMs - 60) / rawTotal));
+  const key = lang === 'hi' ? 'hi' : 'en';
+  ttsTimingFactor[key] = ttsTimingFactor[key] * 0.4 + f * 0.6;
+}
+
+/** Audio without word events (ElevenLabs): follow the real playback position, scaled to the real duration. */
+function startAudioSyncedHighlight(audio, sentence, startWIdx, rate, utterId) {
+  const { starts, total } = ttsWordStarts(sentence, startWIdx, rate);
+  if (starts.length < 2) return;
+  let raf = null;
+  const loop = () => {
+    if (utterId !== currentUtteranceId || !isReadingActive || isTTSCancelledByUser || audio.ended) return;
+    if (!audio.paused) {
+      const dur = audio.duration;
+      const pos = isFinite(dur) && dur > 0 ? (audio.currentTime / dur) * total : audio.currentTime * 1000;
+      let i = 0;
+      while (i + 1 < starts.length && starts[i + 1] <= pos) i++;
+      setActiveWord(sentence, startWIdx + i);
+    }
+    raf = requestAnimationFrame(loop);
+  };
+  raf = requestAnimationFrame(loop);
+}
+
+function tagTTSWordSpans(textLayerDiv, pageNum) {
+  if (!textLayerDiv) return { fullText: '', sentences: [], wordsMap: [] };
+  const pgNum = pageNum || activeTTSPageNum || 1;
+
+  const outerSpans = [...textLayerDiv.querySelectorAll('span')].filter(s => !s.classList.contains('tts-w'));
+
+  // 1) make sure every word is its own span
+  const allWordEls = [];
+  for (const span of outerSpans) {
+    const text = span.textContent || '';
+    if (!text.trim()) continue;
+    let wordSpans = [...span.querySelectorAll('.tts-w')];
+    if (wordSpans.length === 0) {
+      const parts = text.split(/(\s+)/);
+      span.innerHTML = '';
+      parts.forEach(pt => {
+        if (!pt) return;
+        if (/\S/.test(pt)) {
+          const wSpan = document.createElement('span');
+          wSpan.className = 'tts-w';
+          wSpan.textContent = pt;
+          span.appendChild(wSpan);
+        } else {
+          span.appendChild(document.createTextNode(pt));
+        }
+      });
+      wordSpans = [...span.querySelectorAll('.tts-w')];
+    }
+    wordSpans.forEach(el => allWordEls.push({ el, span }));
+  }
+
+  // 2) what is actually spoken: legacy-font Hindi (Kruti Dev etc.) is converted to Unicode, one token per word
+  const rawTokens = allWordEls.map(x => x.el.textContent);
+  let spokenTokens = rawTokens;
+  try {
+    const joined = rawTokens.join(' ');
+    const pageLegacy = pageIsLegacyHindi(joined);
+    const fixed = fixLegacyHindi(joined, { pageLegacy });
+    const parts = fixed.split(/\s+/).filter(Boolean);
+    if (parts.length === rawTokens.length) spokenTokens = parts;
+    else if (pageLegacy) spokenTokens = rawTokens.map(t => fixLegacyHindi(t, { pageLegacy: true }));
+  } catch (e) { spokenTokens = rawTokens; }
+
+  let globalWordIdx = 0;
+  let globalSentenceIdx = 0;
+  const sentences = [];
+  const wordsMap = [];
+  let currentSentenceText = '';
+  let currentSentenceWords = [];
+  let currentSentenceSpans = new Set();
+
+  function finalizeSentence() {
+    if (!currentSentenceWords.length) return;
+    const sentenceText = currentSentenceText.trim();
+    if (!sentenceText) return;
+    const sObj = {
+      idx: globalSentenceIdx,
+      pageNum: pgNum,
+      text: sentenceText,
+      lang: ttsLangOf(sentenceText),
+      words: currentSentenceWords,
+      parentSpans: Array.from(currentSentenceSpans)
+    };
+    sObj.words.forEach(w => { if (w.el) w.el.setAttribute('data-tts-s-idx', globalSentenceIdx.toString()); });
+    sentences.push(sObj);
+    globalSentenceIdx++;
+    currentSentenceText = '';
+    currentSentenceWords = [];
+    currentSentenceSpans = new Set();
+  }
+
+  allWordEls.forEach(({ el: wEl, span }, k) => {
+    const wText = rawTokens[k];
+    const spoken = (spokenTokens[k] || wText);
+    const localWordIdx = currentSentenceWords.length;
+    wEl.setAttribute('data-word-index', globalWordIdx.toString());
+    wEl.setAttribute('data-tts-s-idx', globalSentenceIdx.toString());
+    wEl.setAttribute('data-tts-w-idx', localWordIdx.toString());
+
+    const startChar = currentSentenceText.length;
+    currentSentenceText += spoken + ' ';
+    const endChar = currentSentenceText.length;
+
+    const wObj = { idx: globalWordIdx, sIdx: globalSentenceIdx, el: wEl, parentSpan: span, startChar, endChar, text: wText, spoken };
+    currentSentenceWords.push(wObj);
+    currentSentenceSpans.add(span);
+    wordsMap.push(wObj);
+    globalWordIdx++;
+
+    const n = currentSentenceWords.length;
+    if (ttsEndsSentence(spoken.trim(), n === 1)) finalizeSentence();
+    else if ((n >= 28 && /[,;:—]$/.test(spoken)) || n >= 60) finalizeSentence();   // very long run-ons are read in parts
+  });
+
+  finalizeSentence();
+
+  const fullText = sentences.map(s => s.text).join(' ');
+
+  // tap a word to start reading from it (works on any page, even one that is not the active reading page)
+  if (!textLayerDiv.dataset.ttsClickSetup) {
+    textLayerDiv.dataset.ttsClickSetup = 'true';
+    textLayerDiv.dataset.ttsPage = String(pgNum);
+    textLayerDiv.addEventListener('click', (e) => {
+      if (!isReadingActive) return;
+      const target = e.target.closest('.tts-w') || e.target.closest('span');
+      if (!target) return;
+      if (window.getSelection && String(window.getSelection()).trim()) return;     // user is selecting text, not tapping
+      const sIdxAttr = target.getAttribute('data-tts-s-idx');
+      const wIdxAttr = target.getAttribute('data-tts-w-idx');
+      if (sIdxAttr === null) return;
+      const pg = parseInt(textLayerDiv.dataset.ttsPage || '0', 10) || activeTTSPageNum;
+      playTTSFrom(pg, parseInt(sIdxAttr, 10), wIdxAttr !== null ? parseInt(wIdxAttr, 10) : 0);
+    });
+  }
+
+  return { fullText, sentences, wordsMap };
+}
+
+/** Start (or jump) reading at a sentence/word of a page. */
+export function playTTSFrom(pageNum, sIdx, wIdx = 0) {
+  ttsClearAdvance();
+  isReadingActive = true;
+  isTTSCancelledByUser = false;
+  if (pageNum === activeTTSPageNum && activeTTSSentences.length && window.playTTSSentenceAt) {
+    window.playTTSSentenceAt(sIdx, wIdx);
+  } else {
+    runPageReadAloud(pageNum, { startSentence: sIdx, startWord: wIdx, onStart: () => renderFloatingTTSCapsule(), onEnd: () => renderFloatingTTSCapsule(), onStop: () => renderFloatingTTSCapsule() });
+  }
+}
+
+export async function preparePageTTSData(pageNum) {
+  const pgNum = pageNum || window.State.currentPage || 1;
+  if (window.renderPage && window.pageEls && window.pageEls[pgNum]) {
+    const pe = window.pageEls[pgNum];
+    if (!pe.rendered) {
+      await window.renderPage(pgNum);
+    }
+  }
+
+  const pe = window.pageEls ? window.pageEls[pgNum] : null;
+  if (!pe || !pe.textLayerDiv) {
+    const fallbackText = await getCurrentPageText(pgNum);
+    return { text: fallbackText, sentences: [], wordsMap: [] };
+  }
+
+  const { fullText, sentences, wordsMap } = tagTTSWordSpans(pe.textLayerDiv, pgNum);
+  return { text: fullText, sentences, wordsMap, pe };
+}
+
+export function runTTS(text, options = {}) {
+  isTTSCancelledByUser = false;
+
+  if (activeMicrosoftAudio || activeElevenAudio || (window.speechSynthesis && window.speechSynthesis.speaking)) {
+    if (!options.forcePlay) {
+      isTTSCancelledByUser = true;
+      stopAllTTSAudio();
+      if (ttsTimer) clearInterval(ttsTimer);
+      clearTTSHighlights();
+      window.toast('Stopped reading aloud');
+      if (options.onStop) options.onStop();
+      return;
+    }
+  }
+
+  stopAllTTSAudio();
+
+  if (!text || !text.trim()) {
+    window.toast('No text available to read aloud');
+    return;
+  }
+
+  isReadingActive = true;
+  isTTSCancelledByUser = false;
+
+  const settings = getTTSSettings();
+  const engine = settings.engine || 'microsoft';
+
+  if (engine === 'microsoft') {
+    window.toast('🎙️ Reading with Microsoft Neural Voice…');
+    speakWithMicrosoftNeural(text, settings.microsoftVoiceId || 'hi-IN-SwaraNeural', {
+      rate: settings.rate || 1.0,
+      pitch: settings.pitch || 1.0,
+      onStart: () => {
+        isReadingActive = true;
+        if (options.onStart) options.onStart();
+      },
+      onEnd: () => {
+        if (isTTSCancelledByUser || !isReadingActive) return;
+        isReadingActive = false;
+        if (options.onEnd) options.onEnd();
+        else window.toast('Finished reading');
+      },
+      onError: (err) => {
+        if (isTTSCancelledByUser || !isReadingActive) return;
+        window.toast('Microsoft voice unavailable, falling back to system voice');
+        runSystemTTSFallback(text, options);
+      }
+    }).catch(err => {
+      if ((err && err.cancelled) || isTTSCancelledByUser || !isReadingActive) return;
+      runSystemTTSFallback(text, options);
+    });
+    return;
+  }
+
+  const elevenKey = getElevenLabsApiKey();
+  if (engine === 'elevenlabs' && elevenKey && settings.useElevenLabs !== false) {
+    window.toast('✨ Reading with ElevenLabs AI Voice…');
+    speakWithElevenLabs(text, settings.elevenVoiceId, {
+      onStart: () => {
+        isReadingActive = true;
+        if (options.onStart) options.onStart();
+      },
+      onEnd: () => {
+        if (isTTSCancelledByUser || !isReadingActive) return;
+        isReadingActive = false;
+        if (options.onEnd) options.onEnd();
+        else window.toast('Finished reading');
+      },
+      onError: (err) => {
+        if (isTTSCancelledByUser || !isReadingActive) return;
+        window.toast('ElevenLabs error, falling back to system voice');
+        runSystemTTSFallback(text, options);
+      }
+    }).catch(err => {
+      if ((err && err.cancelled) || isTTSCancelledByUser || !isReadingActive) return;
+      runSystemTTSFallback(text, options);
+    });
+    return;
+  }
+
+  runSystemTTSFallback(text, options);
+}
+
+function runSystemTTSFallback(text, options = {}) {
+  if (!('speechSynthesis' in window)) {
+    window.toast('Text-to-speech not supported in this browser');
+    return;
+  }
+
+  const settings = getTTSSettings();
+  const utter = new SpeechSynthesisUtterance(text);
+
+  const lang = ttsLangOf(text);
+  const voice = pickSystemVoice(lang, settings.preset);
+  if (voice) utter.voice = voice;
+  utter.lang = voice && voice.lang ? voice.lang : (lang === 'hi' ? 'hi-IN' : 'en-US');
+
+  utter.pitch = typeof options.pitch === 'number' ? options.pitch : (settings.pitch || 1.0);
+  utter.rate = typeof options.rate === 'number' ? options.rate : (settings.rate || 1.0);
+
+  utter.onstart = () => {
+    isReadingActive = true;
+    if (options.onStart) options.onStart();
+    else window.toast('🔊 Reading aloud…');
+  };
+
+  utter.onboundary = (e) => {
+    if (!isReadingActive || isTTSCancelledByUser) return;
+    if (options.onBoundary) options.onBoundary(e);
+  };
+
+  utter.onend = () => {
+    if (isTTSCancelledByUser || !isReadingActive) return;
+    isReadingActive = false;
+    if (ttsTimer) clearInterval(ttsTimer);
+    clearTTSHighlights();
+    if (options.onEnd) options.onEnd();
+    else window.toast('Finished reading');
+  };
+
+  utter.onerror = (e) => {
+    if (isTTSCancelledByUser || !isReadingActive) return;
+    isReadingActive = false;
+    if (ttsTimer) clearInterval(ttsTimer);
+    clearTTSHighlights();
+    if (options.onError) options.onError(e);
+  };
+
+  window.speechSynthesis.speak(utter);
+}
+
+function ensureSentenceInReaderView(sentence) {
+  if (!sentence) return;
+  const scrollEl = document.getElementById('reader-scroll');
+  if (!scrollEl) return;
+
+  const targetEl = (sentence.words && sentence.words[0] && sentence.words[0].el) || 
+                   (sentence.parentSpans && sentence.parentSpans[0]);
+  if (!targetEl) return;
+
+  const sRect = scrollEl.getBoundingClientRect();
+  const tRect = targetEl.getBoundingClientRect();
+
+  if (tRect.top < sRect.top + 30 || tRect.bottom > sRect.bottom - 40) {
+    targetEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+export function continuePlaybackWithCurrentSettings() {
+  if (!isReadingActive || !activeTTSSentences || !activeTTSSentences.length) {
+    renderFloatingTTSCapsule();
+    return;
+  }
+  const sIdx = activeTTSSentenceIdx || 0;
+  const wIdx = activeTTSWordIdx || 0;
+  if (window.playTTSSentenceAt) {
+    window.playTTSSentenceAt(sIdx, wIdx);
+  }
+}
+
+export function skipTTSSentence(direction = 1) {
+  if (!activeTTSSentences || !activeTTSSentences.length) return;
+  ttsClearAdvance();
+  currentUtteranceId++;
+  if (ttsTimer) { clearTimeout(ttsTimer); clearInterval(ttsTimer); ttsTimer = null; }
+  stopAllTTSAudio();
+  // prev/next also works while paused: it simply resumes reading from there
+  isReadingActive = true;
+  isTTSCancelledByUser = false;
+
+  const targetIdx = activeTTSSentenceIdx + direction;
+  if (targetIdx >= 0 && targetIdx < activeTTSSentences.length) {
+    if (window.playTTSSentenceAt) {
+      window.playTTSSentenceAt(targetIdx, 0);
+    }
+  } else if (targetIdx >= activeTTSSentences.length) {
+    const nextPage = activeTTSPageNum + 1;
+    if (nextPage <= (window.State.numPages || 1)) {
+      if (window.scrollToPage) window.scrollToPage(nextPage);
+      ttsScheduleAdvance(() => runPageReadAloud(nextPage, { onStart: () => renderFloatingTTSCapsule(), onEnd: () => renderFloatingTTSCapsule(), onStop: () => renderFloatingTTSCapsule() }), 300);
+    } else {
+      isReadingActive = false;
+      renderFloatingTTSCapsule();
+    }
+  } else if (targetIdx < 0) {
+    const prevPage = activeTTSPageNum - 1;
+    if (prevPage >= 1) {
+      if (window.scrollToPage) window.scrollToPage(prevPage);
+      ttsScheduleAdvance(() => runPageReadAloud(prevPage, { startSentence: 'last', onStart: () => renderFloatingTTSCapsule(), onEnd: () => renderFloatingTTSCapsule(), onStop: () => renderFloatingTTSCapsule() }), 300);
+    } else if (window.playTTSSentenceAt) {
+      window.playTTSSentenceAt(0, 0);
+    }
+  }
+}
+
+export async function runPageReadAloud(pageNum, callbacks = {}) {
+  const pgNum = pageNum || window.State.currentPage || 1;
+  const wasSamePage = activeTTSPageNum === pgNum && activeTTSSentences && activeTTSSentences.length > 0;
+  const prevSentenceIdx = activeTTSSentenceIdx || 0;
+  const prevWordIdx = activeTTSWordIdx || 0;
+
+  const { text, sentences, wordsMap } = await preparePageTTSData(pgNum);
+
+  if (!sentences || !sentences.length) {
+    if (text && text.trim()) {
+      runTTS(text, callbacks);
+      return;
+    }
+    window.toast('No text found on this page to read');
+    if (callbacks.onEnd) callbacks.onEnd();
+    return;
+  }
+
+  clearTTSHighlights();
+  showFloatingTTSCapsule();
+
+  if (window.State && window.State.readAloudOledVisualizer && typeof window.openOledBlackoutVisualizer === 'function') {
+    window.openOledBlackoutVisualizer();
+  }
+
+  // where to begin: an explicit sentence/word, the paused position on this page, or the top of the page
+  let startS = 0, startW = 0;
+  if (callbacks.startSentence === 'last') startS = sentences.length - 1;
+  else if (typeof callbacks.startSentence === 'number') { startS = callbacks.startSentence; startW = callbacks.startWord || 0; }
+  else if (callbacks.resume && wasSamePage) { startS = prevSentenceIdx; startW = prevWordIdx; }
+  startS = Math.max(0, Math.min(startS, sentences.length - 1));
+
+  currentUtteranceId++;
+  activeTTSSentences = sentences;
+  activeTTSPageNum = pgNum;
+  activeTTSSentenceIdx = startS;
+  activeTTSWordIdx = startW;
+  isReadingActive = true;
+  isTTSCancelledByUser = false;
+
+  const playSentenceAt = (sIdx, startWIdx = 0) => {
+    if (!isReadingActive || isTTSCancelledByUser) return;
+
+    currentUtteranceId++;
+    const thisUtteranceId = currentUtteranceId;
+
+    if (ttsTimer) {
+      clearTimeout(ttsTimer);
+      clearInterval(ttsTimer);
+      ttsTimer = null;
+    }
+
+    stopAllTTSAudio();
+
+    if (sIdx >= sentences.length) {
+      isReadingActive = false;
+      clearTTSHighlights();
+      renderFloatingTTSCapsule();
+
+      const settings = getTTSSettings();
+      if (settings.autoAdvance && pgNum < (window.State.numPages || 1)) {
+        const nextPage = pgNum + 1;
+        window.toast(`Turning to Page ${nextPage}…`);
+        if (window.scrollToPage) window.scrollToPage(nextPage);
+        ttsScheduleAdvance(() => runPageReadAloud(nextPage, callbacks), 300);
+      } else {
+        window.toast('Finished reading page');
+        if (callbacks.onEnd) callbacks.onEnd();
+      }
+      return;
+    }
+
+    if (sIdx < 0) sIdx = 0;
+    activeTTSSentenceIdx = sIdx;
+    activeTTSWordIdx = startWIdx;
+
+    const sentence = sentences[sIdx];
+    clearTTSHighlights();
+    lastBoundaryTs = Date.now();
+
+    if (!refreshSentenceEls(sentence)) { /* element refs stay as they are; setActiveWord retries on every word */ }
+    sentence.parentSpans.forEach(span => span.classList.add('tts-sentence-active'));
+    ensureSentenceInReaderView(sentence);
+
+    setActiveWord(sentence, Math.min(startWIdx, sentence.words.length - 1));
+
+    // text to speak: the sentence (from the tapped word onward when started mid-sentence)
+    const startCharOffset = (sentence.words && sentence.words[startWIdx]) ? sentence.words[startWIdx].startChar : 0;
+    const spokenText = startCharOffset > 0 ? sentence.text.substring(startCharOffset) : sentence.text;
+
+    const settings = getTTSSettings();
+    const engine = settings.engine || 'microsoft';
+    const rate = settings.rate || 1.0;
+
+    // A. Microsoft Neural Voice: real word events, mapped by text
+    if (engine === 'microsoft') {
+      renderFloatingTTSCapsule();
+      if (callbacks.onStart) callbacks.onStart();
+
+      const mapBoundary = makeBoundaryMapper(sentence, spokenText, startCharOffset, startWIdx);
+      let gotBoundary = false;
+
+      speakWithMicrosoftNeural(spokenText, settings.microsoftVoiceId || 'hi-IN-SwaraNeural', {
+        rate,
+        pitch: settings.pitch || 1.0,
+        onAudio: (audio, hasBoundaries) => {
+          if (thisUtteranceId !== currentUtteranceId) return;
+          if (!hasBoundaries) startAudioSyncedHighlight(audio, sentence, startWIdx, rate, thisUtteranceId);
+        },
+        onStart: () => {
+          if (thisUtteranceId !== currentUtteranceId || !isReadingActive) return;
+          renderFloatingTTSCapsule();
+          // warm the next sentence so there is no pause between sentences
+          const nxt = sentences[sIdx + 1];
+          if (nxt) prefetchMicrosoftNeural(nxt.text, settings.microsoftVoiceId, { rate, pitch: settings.pitch || 1.0 });
+        },
+        onWordBoundary: (wb) => {
+          if (thisUtteranceId !== currentUtteranceId || !isReadingActive || isTTSCancelledByUser) return;
+          gotBoundary = true;
+          setActiveWord(sentence, mapBoundary(wb));
+        },
+        onEnd: () => {
+          if (thisUtteranceId !== currentUtteranceId) return;
+          if (ttsTimer) clearTimeout(ttsTimer);
+          if (!isReadingActive || isTTSCancelledByUser) return;
+          playSentenceAt(sIdx + 1, 0);
+        },
+        onError: () => {
+          if (thisUtteranceId !== currentUtteranceId) return;
+          if (ttsTimer) clearTimeout(ttsTimer);
+          window.toast('Microsoft voice unavailable, falling back to system voice…');
+          speakSentenceWithSystemUtterance(spokenText, sentence, startWIdx, startCharOffset, sIdx, thisUtteranceId, callbacks, playSentenceAt);
+        }
+      }).catch(err => {
+        if (err && err.cancelled) return;
+        if (thisUtteranceId !== currentUtteranceId) return;
+        if (ttsTimer) clearTimeout(ttsTimer);
+        if (!isReadingActive || isTTSCancelledByUser) return;
+        speakSentenceWithSystemUtterance(spokenText, sentence, startWIdx, startCharOffset, sIdx, thisUtteranceId, callbacks, playSentenceAt);
+      });
+      return;
+    }
+
+    // B. ElevenLabs: follows the real audio position
+    const useEleven = isElevenLabsActive();
+    if (useEleven) {
+      renderFloatingTTSCapsule();
+      if (callbacks.onStart) callbacks.onStart();
+
+      speakWithElevenLabs(spokenText, settings.elevenVoiceId, {
+        onAudio: (audio) => {
+          if (thisUtteranceId !== currentUtteranceId) return;
+          startAudioSyncedHighlight(audio, sentence, startWIdx, rate, thisUtteranceId);
+        },
+        onStart: () => {
+          if (thisUtteranceId !== currentUtteranceId || !isReadingActive) return;
+          renderFloatingTTSCapsule();
+        },
+        onEnd: () => {
+          if (thisUtteranceId !== currentUtteranceId) return;
+          if (ttsTimer) clearTimeout(ttsTimer);
+          if (!isReadingActive || isTTSCancelledByUser) return;
+          playSentenceAt(sIdx + 1, 0);
+        },
+        onError: () => {
+          if (thisUtteranceId !== currentUtteranceId) return;
+          if (ttsTimer) clearTimeout(ttsTimer);
+          window.toast('Switching sentence to system voice…');
+          speakSentenceWithSystemUtterance(spokenText, sentence, startWIdx, startCharOffset, sIdx, thisUtteranceId, callbacks, playSentenceAt);
+        }
+      }).catch(err => {
+        if (err && err.cancelled) return;
+        if (thisUtteranceId !== currentUtteranceId) return;
+        if (ttsTimer) clearTimeout(ttsTimer);
+        if (!isReadingActive || isTTSCancelledByUser) return;
+        speakSentenceWithSystemUtterance(spokenText, sentence, startWIdx, startCharOffset, sIdx, thisUtteranceId, callbacks, playSentenceAt);
+      });
+      return;
+    }
+
+    // C. Browser SpeechSynthesis
+    speakSentenceWithSystemUtterance(spokenText, sentence, startWIdx, startCharOffset, sIdx, thisUtteranceId, callbacks, playSentenceAt);
+  };
+
+  window.playTTSSentenceAt = playSentenceAt;
+  playSentenceAt(startS, startW);
+}
+
+let warnedNoHindiVoice = false;
+
+function speakSentenceWithSystemUtterance(spokenText, sentence, startWIdx, startCharOffset, sIdx, thisUtteranceId, callbacks, playSentenceAt) {
+  const utter = new SpeechSynthesisUtterance(spokenText);
+  currentTTSUtterance = utter;
+
+  const settings = getTTSSettings();
+  const lang = sentence.lang || ttsLangOf(spokenText);
+  const voice = pickSystemVoice(lang, settings.preset);
+  if (voice) utter.voice = voice;
+  utter.lang = voice && voice.lang ? voice.lang : (lang === 'hi' ? 'hi-IN' : 'en-US');
+  if (lang === 'hi' && !(voice && /^hi/i.test(voice.lang)) && !warnedNoHindiVoice) {
+    warnedNoHindiVoice = true;
+    window.toast('Is device par Hindi system voice nahi mili. Settings me Microsoft Neural (Swara) voice chuniye.');
+  }
+
+  utter.pitch = settings.pitch || 1.0;
+  utter.rate = settings.rate || 1.0;
+
+  let hasNativeBoundary = false;
+  let timedInfo = null;
+
+  utter.onstart = () => {
+    if (thisUtteranceId !== currentUtteranceId || !isReadingActive) return;
+    renderFloatingTTSCapsule();
+    if (callbacks.onStart) callbacks.onStart();
+    lastBoundaryTs = Date.now();
+    // Until the engine sends a real word event (phones often never do), time the highlight from syllable counts.
+    timedInfo = startTimedHighlight(sentence, startWIdx, utter.rate, thisUtteranceId, () => hasNativeBoundary);
+  };
+
+  utter.onboundary = (e) => {
+    if (thisUtteranceId !== currentUtteranceId || !isReadingActive || isTTSCancelledByUser) return;
+    if (e.name && e.name !== 'word') return;
+    hasNativeBoundary = true;
+    if (ttsTimer) { clearTimeout(ttsTimer); ttsTimer = null; }
+    lastBoundaryTs = Date.now();
+    const charIdx = (e.charIndex || 0) + startCharOffset;
+    const ws = sentence.words;
+    let idx = 0;
+    for (let i = ws.length - 1; i >= 0; i--) { if (charIdx >= ws[i].startChar) { idx = i; break; } }
+    setActiveWord(sentence, idx);
+  };
+
+  utter.onend = () => {
+    if (thisUtteranceId !== currentUtteranceId) return;
+    if (ttsTimer) clearTimeout(ttsTimer);
+    if (!isReadingActive || isTTSCancelledByUser) return;
+    if (timedInfo && !hasNativeBoundary) ttsLearnSpeed(sentence.lang, timedInfo.rawTotal, performance.now() - timedInfo.t0);
+    playSentenceAt(sIdx + 1, 0);
+  };
+
+  utter.onerror = (e) => {
+    if (thisUtteranceId !== currentUtteranceId) return;
+    if (ttsTimer) clearTimeout(ttsTimer);
+    if (!isReadingActive || isTTSCancelledByUser) return;
+    if (e && (e.error === 'interrupted' || e.error === 'canceled')) return;
+    playSentenceAt(sIdx + 1, 0);
+  };
+
+  setTimeout(() => {
+    if (thisUtteranceId !== currentUtteranceId || !isReadingActive || isTTSCancelledByUser) return;
+    window.speechSynthesis.speak(utter);
+  }, 40);
+}
+
+/** System voice for a language: Hindi needs a hi-* voice (an English voice mispronounces or skips Devanagari). */
+function pickSystemVoice(lang, preset) {
+  const voices = getSystemVoices();
+  if (lang === 'hi') {
+    const hv = voices.filter(v => v.lang && /^hi([-_]|$)/i.test(v.lang));
+    return hv.find(v => v.localService) || hv[0] || null;
+  }
+  return findBestVoiceForPreset(preset, voices);
+}
+
+export async function getCurrentPageText(pageNum) {
+  if (!window.State || !window.State.currentDoc) return '';
+  const pgNum = pageNum || window.State.currentPage || 1;
+  try {
+    const page = await window.State.currentDoc.getPage(pgNum);
+    const content = await page.getTextContent();
+    const str = fixLegacyItems(content.items.map(item => item.str)).replace(/\s+/g, ' ').trim();
+    return str;
+  } catch(e) {
+    return '';
+  }
+}
+
+let selectedVoiceCategory = 'hindi';
+let currentPlayingVoiceId = null;
+
+export function openVoiceSettingsModal() {
+  const settings = getTTSSettings();
+  const currentEngine = settings.engine || 'microsoft';
+  const msVoices = MICROSOFT_NEURAL_VOICES;
+  const currentMsVoiceId = settings.microsoftVoiceId || 'hi-IN-SwaraNeural';
+  const elevenVoices = getAllElevenLabsVoices();
+  const currentElevenVoiceId = settings.elevenVoiceId || 'nPczCjzI2devNBz1zQrb';
+  const voices = getSystemVoices();
+
+  const presets = [
+    { id: 'male_deep', label: '👨 Deep Male Voice', sub: 'Pitch 0.70x · Resonant & Deep' },
+    { id: 'female_soft', label: '👩 Female Natural', sub: 'Pitch 1.15x · Soft & Clear' },
+    { id: 'fast', label: '⚡ Fast Narrator', sub: 'Speed 1.35x · Quick Study' },
+    { id: 'calm', label: '🧘 Calm Reader', sub: 'Speed 0.80x · Slow & Steady' },
+    { id: 'custom', label: '🎛️ Custom System Voice', sub: 'Manual Browser Voice & Pitch' }
+  ];
+
+  // Helper to filter MS voices by active category
+  let activeMsList = msVoices;
+  if (selectedVoiceCategory === 'hindi') {
+    activeMsList = msVoices.filter(v => (v.category && v.category.includes('Hindi')) || v.id.startsWith('hi-') || v.id.startsWith('en-IN'));
+  } else if (selectedVoiceCategory === 'us') {
+    activeMsList = msVoices.filter(v => v.id.startsWith('en-US'));
+  } else if (selectedVoiceCategory === 'uk') {
+    activeMsList = msVoices.filter(v => v.id.startsWith('en-GB') || v.id.startsWith('en-AU'));
+  } else if (selectedVoiceCategory === 'regional') {
+    activeMsList = msVoices.filter(v => v.category === 'Regional Indian' || (!v.id.startsWith('hi-') && !v.id.startsWith('en-')));
+  }
+
+  // Active voice display name
+  const activeVoiceName = currentEngine === 'microsoft'
+    ? (msVoices.find(v => v.id === currentMsVoiceId)?.name || 'Swara (Hindi)')
+    : currentEngine === 'elevenlabs'
+    ? (elevenVoices.find(v => v.id === currentElevenVoiceId)?.name || 'Brian')
+    : 'System Voice';
+
+  window.Sheet.open(`
+    <div style="display:flex; align-items:center; justify-content:space-between; margin:4px 0 12px;">
+      <div class="font-display" style="font-size:17px; font-weight:800; display:flex; align-items:center; gap:8px;">
+        ${window.icon('volume','icon icon-sm')} Voice &amp; Speech Settings
+      </div>
+      <button class="sheet-close-btn btn btn-ghost" style="width:32px; height:32px; border-radius:50%; font-size:16px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Close Menu">✕</button>
+    </div>
+
+    <!-- ACTIVE VOICE SUMMARY BADGE -->
+    <div style="background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:10px 14px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:34px; height:34px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:18px;">
+          ${currentEngine === 'microsoft' ? '⚡' : currentEngine === 'elevenlabs' ? '✨' : '🎙️'}
+        </div>
+        <div>
+          <div style="font-size:11px; color:var(--text-dim); font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Selected Voice</div>
+          <div style="font-size:13.5px; font-weight:800; color:var(--text);">${activeVoiceName}</div>
+        </div>
+      </div>
+      <span style="font-size:11px; font-weight:700; color:var(--accent); background:var(--accent-soft); padding:3px 10px; border-radius:12px;">
+        ${settings.rate.toFixed(2)}x Speed
+      </span>
+    </div>
+
+    <!-- ENGINE SELECTOR TABS -->
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:14px; background:var(--surface-2); padding:4px; border-radius:14px; border:1px solid var(--border);">
+      <button id="engine-tab-microsoft" class="btn" style="padding:9px 6px; font-size:12px; font-weight:800; border-radius:10px; border:none; cursor:pointer; background:${currentEngine === 'microsoft' ? 'var(--accent)' : 'transparent'}; color:${currentEngine === 'microsoft' ? '#fff' : 'var(--text-dim)'}; transition:all 0.2s ease;">
+        ⚡ Microsoft Neural
+      </button>
+      <button id="engine-tab-eleven" class="btn" style="padding:9px 6px; font-size:12px; font-weight:800; border-radius:10px; border:none; cursor:pointer; background:${currentEngine === 'elevenlabs' ? 'var(--accent)' : 'transparent'}; color:${currentEngine === 'elevenlabs' ? '#fff' : 'var(--text-dim)'}; transition:all 0.2s ease;">
+        ✨ ElevenLabs
+      </button>
+      <button id="engine-tab-system" class="btn" style="padding:9px 6px; font-size:12px; font-weight:800; border-radius:10px; border:none; cursor:pointer; background:${currentEngine === 'system' ? 'var(--accent)' : 'transparent'}; color:${currentEngine === 'system' ? '#fff' : 'var(--text-dim)'}; transition:all 0.2s ease;">
+        🎙️ Device Voice
+      </button>
+    </div>
+
+    <!-- MICROSOFT NEURAL PANEL -->
+    <div id="microsoft-engine-panel" style="display:${currentEngine === 'microsoft' ? 'block' : 'none'}; margin-bottom:16px;">
+      <!-- Category Filter Chips -->
+      <div style="display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:10px; scrollbar-width:none;">
+        <button class="ms-cat-chip btn" data-cat="hindi" style="padding:6px 12px; font-size:11.5px; font-weight:700; border-radius:20px; white-space:nowrap; border:1px solid ${selectedVoiceCategory === 'hindi' ? 'var(--accent)' : 'var(--border)'}; background:${selectedVoiceCategory === 'hindi' ? 'var(--accent-soft)' : 'var(--surface-2)'}; color:${selectedVoiceCategory === 'hindi' ? 'var(--accent)' : 'var(--text)'};">
+          🇮🇳 Hindi &amp; Indian
+        </button>
+        <button class="ms-cat-chip btn" data-cat="us" style="padding:6px 12px; font-size:11.5px; font-weight:700; border-radius:20px; white-space:nowrap; border:1px solid ${selectedVoiceCategory === 'us' ? 'var(--accent)' : 'var(--border)'}; background:${selectedVoiceCategory === 'us' ? 'var(--accent-soft)' : 'var(--surface-2)'}; color:${selectedVoiceCategory === 'us' ? 'var(--accent)' : 'var(--text)'};">
+          🇺🇸 US English
+        </button>
+        <button class="ms-cat-chip btn" data-cat="uk" style="padding:6px 12px; font-size:11.5px; font-weight:700; border-radius:20px; white-space:nowrap; border:1px solid ${selectedVoiceCategory === 'uk' ? 'var(--accent)' : 'var(--border)'}; background:${selectedVoiceCategory === 'uk' ? 'var(--accent-soft)' : 'var(--surface-2)'}; color:${selectedVoiceCategory === 'uk' ? 'var(--accent)' : 'var(--text)'};">
+          🇬🇧 UK English
+        </button>
+        <button class="ms-cat-chip btn" data-cat="regional" style="padding:6px 12px; font-size:11.5px; font-weight:700; border-radius:20px; white-space:nowrap; border:1px solid ${selectedVoiceCategory === 'regional' ? 'var(--accent)' : 'var(--border)'}; background:${selectedVoiceCategory === 'regional' ? 'var(--accent-soft)' : 'var(--surface-2)'}; color:${selectedVoiceCategory === 'regional' ? 'var(--accent)' : 'var(--text)'};">
+          🏛️ Regional Languages
+        </button>
+      </div>
+
+      <!-- Voice Cards Scrollable List -->
+      <div style="display:flex; flex-direction:column; gap:8px; max-height:270px; overflow-y:auto; padding-right:2px; margin-bottom:12px;">
+        ${activeMsList.map(v => {
+          const isSelected = currentMsVoiceId === v.id;
+          const isPlaying = currentPlayingVoiceId === v.id;
+          return `
+            <div class="ms-voice-card" data-voice-id="${v.id}" style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:${isSelected ? 'var(--accent-soft)' : 'var(--surface-2)'}; border:1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}; border-radius:12px; cursor:pointer; transition:all 0.15s ease;">
+              <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                <div style="width:32px; height:32px; border-radius:50%; background:${isSelected ? 'var(--accent)' : 'var(--bg-elev)'}; color:${isSelected ? '#fff' : 'var(--text)'}; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0;">
+                  ${v.gender === 'female' ? '👩' : '👨'}
+                </div>
+                <div style="min-width:0; flex:1;">
+                  <div style="font-size:13px; font-weight:700; color:${isSelected ? 'var(--accent)' : 'var(--text)'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${v.name.replace(/^[^\w\s]+/, '').trim()}
+                  </div>
+                  <div style="font-size:11px; color:var(--text-dim);">
+                    ${v.lang} · ${v.category}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Preview Button -->
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                <button class="btn ms-preview-btn" data-voice-id="${v.id}" title="Preview Voice" style="padding:5px 10px; font-size:11.5px; font-weight:700; height:30px; border-radius:15px; border:1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}; background:${isPlaying ? 'var(--accent)' : 'var(--surface)'}; color:${isPlaying ? '#fff' : isSelected ? 'var(--accent)' : 'var(--text)'}; display:flex; align-items:center; gap:4px;">
+                  ${isPlaying ? '🔊 Playing' : '▶ Preview'}
+                </button>
+                <div style="width:18px; height:18px; border-radius:50%; border:2px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}; display:flex; align-items:center; justify-content:center; background:${isSelected ? 'var(--accent)' : 'transparent'};">
+                  ${isSelected ? '<div style="width:6px; height:6px; border-radius:50%; background:#fff;"></div>' : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- ELEVENLABS PANEL -->
+    <div id="eleven-engine-panel" style="display:${currentEngine === 'elevenlabs' ? 'block' : 'none'}; margin-bottom:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px; max-height:270px; overflow-y:auto; padding-right:2px; margin-bottom:12px;">
+        ${elevenVoices.map(v => {
+          const isSelected = currentElevenVoiceId === v.id;
+          const isPlaying = currentPlayingVoiceId === v.id;
+          return `
+            <div class="eleven-voice-card" data-voice-id="${v.id}" style="display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:${isSelected ? 'var(--accent-soft)' : 'var(--surface-2)'}; border:1.5px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}; border-radius:12px; cursor:pointer; transition:all 0.15s ease;">
+              <div style="display:flex; align-items:center; gap:10px; flex:1; min-width:0;">
+                <div style="width:32px; height:32px; border-radius:50%; background:${isSelected ? 'var(--accent)' : 'var(--bg-elev)'}; color:${isSelected ? '#fff' : 'var(--text)'}; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0;">
+                  ${v.gender === 'female' ? '👩' : '👨'}
+                </div>
+                <div style="min-width:0; flex:1;">
+                  <div style="font-size:13px; font-weight:700; color:${isSelected ? 'var(--accent)' : 'var(--text)'}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${v.name.replace(/^[^\w\s]+/, '').trim()}
+                  </div>
+                  <div style="font-size:11px; color:var(--text-dim);">
+                    ${v.category} · ${v.accent || 'English'}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Preview Button -->
+              <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                <button class="btn eleven-preview-btn" data-voice-id="${v.id}" title="Preview Voice" style="padding:5px 10px; font-size:11.5px; font-weight:700; height:30px; border-radius:15px; border:1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}; background:${isPlaying ? 'var(--accent)' : 'var(--surface)'}; color:${isPlaying ? '#fff' : isSelected ? 'var(--accent)' : 'var(--text)'}; display:flex; align-items:center; gap:4px;">
+                  ${isPlaying ? '🔊 Playing' : '▶ Preview'}
+                </button>
+                <div style="width:18px; height:18px; border-radius:50%; border:2px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}; display:flex; align-items:center; justify-content:center; background:${isSelected ? 'var(--accent)' : 'transparent'};">
+                  ${isSelected ? '<div style="width:6px; height:6px; border-radius:50%; background:#fff;"></div>' : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+
+    <!-- SYSTEM VOICES PANEL -->
+    <div id="system-engine-panel" style="display:${currentEngine === 'system' ? 'block' : 'none'}; margin-bottom:16px;">
+      <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+        ${presets.map(p => `
+          <button class="btn voice-preset-btn" data-preset="${p.id}" style="width:100%; padding:10px 14px; background:${settings.preset === p.id && currentEngine === 'system' ? 'var(--accent-soft)' : 'var(--surface-2)'}; border:1.5px solid ${settings.preset === p.id && currentEngine === 'system' ? 'var(--accent)' : 'var(--border)'}; border-radius:12px; display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
+            <div style="text-align:left;">
+              <div style="font-size:13px; font-weight:700; color:${settings.preset === p.id && currentEngine === 'system' ? 'var(--accent)' : 'var(--text)'};">${p.label}</div>
+              <div style="font-size:11px; color:var(--text-dim); margin-top:2px;">${p.sub}</div>
+            </div>
+            <div style="width:18px; height:18px; border-radius:50%; border:2px solid ${settings.preset === p.id && currentEngine === 'system' ? 'var(--accent)' : 'var(--border)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:${settings.preset === p.id && currentEngine === 'system' ? 'var(--accent)' : 'transparent'};">
+              ${settings.preset === p.id && currentEngine === 'system' ? '<div style="width:6px; height:6px; border-radius:50%; background:#fff;"></div>' : ''}
+            </div>
+          </button>
+        `).join('')}
+      </div>
+    </div>
+
+    <!-- Universal Reading Speed Slider & Pitch -->
+    <div style="background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <span style="font-size:12.5px; font-weight:700; color:var(--text);">Reading Speed</span>
+        <span id="rate-val" style="color:var(--accent); font-weight:800; font-size:13px;">${settings.rate.toFixed(2)}x</span>
+      </div>
+      
+      <!-- Quick Speed Chips -->
+      <div style="display:flex; gap:6px; margin-bottom:10px;">
+        ${[0.8, 1.0, 1.25, 1.5, 2.0].map(spd => `
+          <button class="btn modal-quick-speed-chip" data-speed="${spd}" style="flex:1; padding:5px 0; font-size:11.5px; font-weight:700; border-radius:8px; border:1px solid ${Math.abs(settings.rate - spd) < 0.05 ? 'var(--accent)' : 'var(--border)'}; background:${Math.abs(settings.rate - spd) < 0.05 ? 'var(--accent)' : 'var(--bg)'}; color:${Math.abs(settings.rate - spd) < 0.05 ? '#fff' : 'var(--text)'}; cursor:pointer;">
+            ${spd}x
+          </button>
+        `).join('')}
+      </div>
+
+      <input type="range" id="rate-slider" min="0.5" max="2.0" step="0.05" value="${settings.rate}" style="width:100%; accent-color:var(--accent);" />
+    </div>
+
+    <div style="display:flex; gap:8px;">
+      <button class="btn btn-primary" id="save-voice-btn" style="width:100%; padding:12px; font-weight:800; font-size:14px; border-radius:12px; background:var(--accent); color:#fff; box-shadow:0 4px 14px var(--accent-soft);">
+        ✓ Apply Voice &amp; Save
+      </button>
+    </div>
+  `);
+
+  // Engine Tab Switchers
+  const msTab = document.getElementById('engine-tab-microsoft');
+  const elevenTab = document.getElementById('engine-tab-eleven');
+  const systemTab = document.getElementById('engine-tab-system');
+
+  if (msTab && elevenTab && systemTab) {
+    msTab.onclick = () => {
+      saveTTSSettings({ engine: 'microsoft', useElevenLabs: false });
+      if (isReadingActive) continuePlaybackWithCurrentSettings();
+      openVoiceSettingsModal();
+    };
+    elevenTab.onclick = () => {
+      saveTTSSettings({ engine: 'elevenlabs', useElevenLabs: true });
+      if (isReadingActive) continuePlaybackWithCurrentSettings();
+      openVoiceSettingsModal();
+    };
+    systemTab.onclick = () => {
+      saveTTSSettings({ engine: 'system', useElevenLabs: false });
+      if (isReadingActive) continuePlaybackWithCurrentSettings();
+      openVoiceSettingsModal();
+    };
+  }
+
+  // Category Filter Chips
+  document.querySelectorAll('.ms-cat-chip').forEach(btn => {
+    btn.onclick = () => {
+      selectedVoiceCategory = btn.dataset.cat;
+      openVoiceSettingsModal();
+    };
+  });
+
+  // MS Voice Card Select & Preview
+  document.querySelectorAll('.ms-voice-card').forEach(card => {
+    card.onclick = (e) => {
+      if (e.target.closest('.ms-preview-btn')) return; // handled by preview button
+      const voiceId = card.dataset.voiceId;
+      saveTTSSettings({ engine: 'microsoft', microsoftVoiceId: voiceId, useElevenLabs: false });
+      if (isReadingActive) {
+        continuePlaybackWithCurrentSettings();
+      } else {
+        renderFloatingTTSCapsule();
+      }
+      const found = msVoices.find(v => v.id === voiceId);
+      window.toast(`Selected voice: ${found ? found.name.replace(/^[^\w\s]+/, '').trim() : voiceId}`);
+      openVoiceSettingsModal();
+    };
+  });
+
+  document.querySelectorAll('.ms-preview-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const voiceId = btn.dataset.voiceId;
+
+      if (currentPlayingVoiceId === voiceId) {
+        stopAllTTSAudio();
+        currentPlayingVoiceId = null;
+        openVoiceSettingsModal();
+        return;
+      }
+
+      stopAllTTSAudio();
+      currentPlayingVoiceId = voiceId;
+      openVoiceSettingsModal();
+
+      try {
+        await previewMicrosoftVoice(
+          voiceId,
+          () => {},
+          () => {
+            currentPlayingVoiceId = null;
+            openVoiceSettingsModal();
+          }
+        );
+      } catch (err) {
+        console.error('Preview error:', err);
+        currentPlayingVoiceId = null;
+        openVoiceSettingsModal();
+        window.toast('Preview unavailable, please check network');
+      }
+    };
+  });
+
+  // ElevenLabs Voice Card Select & Preview
+  document.querySelectorAll('.eleven-voice-card').forEach(card => {
+    card.onclick = (e) => {
+      if (e.target.closest('.eleven-preview-btn')) return;
+      const voiceId = card.dataset.voiceId;
+      saveTTSSettings({ engine: 'elevenlabs', elevenVoiceId: voiceId, useElevenLabs: true });
+      if (isReadingActive) {
+        continuePlaybackWithCurrentSettings();
+      } else {
+        renderFloatingTTSCapsule();
+      }
+      const found = elevenVoices.find(v => v.id === voiceId);
+      window.toast(`Selected voice: ${found ? found.name.replace(/^[^\w\s]+/, '').trim() : voiceId}`);
+      openVoiceSettingsModal();
+    };
+  });
+
+  document.querySelectorAll('.eleven-preview-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      const voiceId = btn.dataset.voiceId;
+
+      if (currentPlayingVoiceId === voiceId) {
+        stopAllTTSAudio();
+        currentPlayingVoiceId = null;
+        openVoiceSettingsModal();
+        return;
+      }
+
+      stopAllTTSAudio();
+      currentPlayingVoiceId = voiceId;
+      openVoiceSettingsModal();
+
+      try {
+        await previewElevenVoice(
+          voiceId,
+          () => {},
+          () => {
+            currentPlayingVoiceId = null;
+            openVoiceSettingsModal();
+          }
+        );
+      } catch (err) {
+        currentPlayingVoiceId = null;
+        openVoiceSettingsModal();
+        window.toast('Preview unavailable');
+      }
+    };
+  });
+
+  // Preset buttons
+  document.querySelectorAll('.voice-preset-btn').forEach(btn => {
+    btn.onclick = () => {
+      const p = btn.dataset.preset;
+      applyPresetSettings(p);
+      if (isReadingActive) continuePlaybackWithCurrentSettings();
+      openVoiceSettingsModal();
+    };
+  });
+
+  // Quick Speed Chips
+  document.querySelectorAll('.modal-quick-speed-chip').forEach(btn => {
+    btn.onclick = () => {
+      const spd = parseFloat(btn.dataset.speed);
+      saveTTSSettings({ rate: spd });
+      if (isReadingActive) continuePlaybackWithCurrentSettings();
+      openVoiceSettingsModal();
+    };
+  });
+
+  // Rate Slider
+  const rateSlider = document.getElementById('rate-slider');
+  const rateVal = document.getElementById('rate-val');
+  if (rateSlider && rateVal) {
+    rateSlider.oninput = () => {
+      const v = parseFloat(rateSlider.value);
+      saveTTSSettings({ rate: v });
+      rateVal.textContent = `${v.toFixed(2)}x`;
+      if (isReadingActive) continuePlaybackWithCurrentSettings();
+    };
+  }
+
+  // Save button
+  const saveBtn = document.getElementById('save-voice-btn');
+  if (saveBtn) {
+    saveBtn.onclick = () => {
+      stopAllTTSAudio();
+      currentPlayingVoiceId = null;
+      window.Sheet.close();
+      renderFloatingTTSCapsule();
+      window.toast('Voice settings applied!');
+    };
+  }
+}
+
+export function syncTTSControllerState() {
+  const isSpeaking = isReadingActive && (Boolean(activeMicrosoftAudio) || Boolean(activeElevenAudio) || Boolean(window.speechSynthesis && window.speechSynthesis.speaking));
+  
+  // Update in-sheet play button if the sheet is open
+  const sheetPlayBtn = document.getElementById('tts-sheet-play-pause');
+  if (sheetPlayBtn) {
+    sheetPlayBtn.innerHTML = isSpeaking ? '⏸️ Pause Reading' : '▶️ Start Reading';
+    if (isSpeaking) {
+      sheetPlayBtn.style.background = 'var(--surface-3, #334155)';
+      sheetPlayBtn.style.color = '#fff';
+    } else {
+      sheetPlayBtn.style.background = 'var(--accent)';
+      sheetPlayBtn.style.color = '#fff';
+    }
+  }
+
+  // Update floating capsule bar if present
+  renderFloatingTTSCapsule();
+}
+
+export function openHandsFreeReadAloud() {
+  const pageNum = window.State ? (window.State.currentPage || 1) : 1;
+  const numPages = window.State ? (window.State.numPages || 1) : 1;
+
+  const settings = getTTSSettings();
+  const voiceInfo = getActiveVoiceDisplayName();
+  const isSpeaking = isReadingActive && (Boolean(activeMicrosoftAudio) || Boolean(activeElevenAudio) || Boolean(window.speechSynthesis && window.speechSynthesis.speaking));
+
+  window.Sheet.open(`
+    <div style="display:flex; align-items:center; justify-content:space-between; margin:2px 0 12px;">
+      <div class="font-display" style="font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px;">
+        ${window.icon('volume','icon icon-sm')} Read Aloud Controller
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="font-mono" style="font-size:12px; font-weight:700; color:var(--accent); background:var(--accent-soft); padding:3px 10px; border-radius:12px;">
+          Page ${pageNum} of ${numPages}
+        </span>
+        <button class="sheet-close-btn btn btn-ghost" style="width:32px; height:32px; border-radius:50%; font-size:16px; display:flex; align-items:center; justify-content:center; cursor:pointer;" title="Close Menu">✕</button>
+      </div>
+    </div>
+
+    <!-- Active Voice Summary & Quick Settings -->
+    <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface-2); border:1px solid var(--border); border-radius:14px; padding:12px 14px; margin-bottom:14px;">
+      <div style="display:flex; align-items:center; gap:10px; font-size:13px; font-weight:700; color:var(--text); overflow:hidden;">
+        <div style="width:34px; height:34px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0;">
+          ${voiceInfo.type === 'microsoft' ? '⚡' : voiceInfo.type === 'elevenlabs' ? '✨' : '🎙️'}
+        </div>
+        <div style="min-width:0;">
+          <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:800; font-size:13.5px;">
+            ${voiceInfo.fullName}
+          </div>
+          <div style="font-size:11px; color:var(--accent); font-weight:700;">
+            ${voiceInfo.badge} · ${settings.rate.toFixed(2)}x Speed
+          </div>
+        </div>
+      </div>
+      <button class="btn btn-ghost" id="open-voice-modal-btn" style="padding:6px 12px; font-size:12px; font-weight:700; height:32px; border-radius:8px; border:1px solid var(--accent); color:var(--accent); background:var(--accent-soft); flex-shrink:0; cursor:pointer;">
+        ⚙️ Change
+      </button>
+    </div>
+
+    <!-- Main Player Action Controls -->
+    <div style="display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:16px;">
+      <button class="btn btn-ghost" id="tts-sheet-prev-btn" title="Previous Sentence" style="width:46px; height:46px; border-radius:50%; font-size:18px; border:1px solid var(--border); cursor:pointer;">
+        ⏮️
+      </button>
+
+      <button class="btn btn-primary" id="tts-sheet-play-pause" style="padding:0 28px; height:50px; border-radius:25px; font-size:15px; font-weight:800; gap:8px; background:${isSpeaking ? 'var(--surface-3, #334155)' : 'var(--accent)'}; color:#fff; box-shadow:0 4px 14px var(--accent-soft); cursor:pointer; transition:all 0.2s ease;">
+        ${isSpeaking ? '⏸️ Pause Reading' : '▶️ Start Reading'}
+      </button>
+
+      <button class="btn btn-ghost" id="tts-sheet-next-btn" title="Next Sentence" style="width:46px; height:46px; border-radius:50%; font-size:18px; border:1px solid var(--border); cursor:pointer;">
+        ⏭️
+      </button>
+    </div>
+
+    <!-- Speed Quick Selector & Auto Advance -->
+    <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:6px;">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="font-size:12px; font-weight:600; color:var(--text-dim);">Speed:</span>
+        ${[0.8, 1.0, 1.25, 1.5, 2.0].map(s => `
+          <button class="chip tts-sheet-speed-btn" data-speed="${s}" style="padding:4px 9px; font-size:11.5px; border-radius:8px; border:1px solid ${Math.abs(settings.rate - s) < 0.05 ? 'var(--accent)' : 'var(--border)'}; background:${Math.abs(settings.rate - s) < 0.05 ? 'var(--accent)' : 'var(--bg-elev)'}; color:${Math.abs(settings.rate - s) < 0.05 ? '#fff' : 'var(--text)'}; font-weight:700; cursor:pointer;">
+            ${s}x
+          </button>
+        `).join('')}
+      </div>
+
+      <label style="display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--text); cursor:pointer;">
+        <input type="checkbox" id="sheet-auto-advance-chk" ${settings.autoAdvance ? 'checked' : ''} style="accent-color:var(--accent);" />
+        Auto-next Page
+      </label>
+    </div>
+  `);
+
+  // Wire events without recursive sheet reopenings
+  const openVoiceBtn = document.getElementById('open-voice-modal-btn');
+  if (openVoiceBtn) {
+    openVoiceBtn.onclick = () => {
+      openVoiceSettingsModal();
+    };
+  }
+
+  const sheetPlayPauseBtn = document.getElementById('tts-sheet-play-pause');
+  if (sheetPlayPauseBtn) {
+    sheetPlayPauseBtn.onclick = () => {
+      if (isReadingActive) {
+        pauseTTS();
+        syncTTSControllerState();
+        window.toast('Read Aloud paused ⏸️');
+      } else {
+        // Automatically close sheet so the user can immediately see the PDF page and word highlights
+        window.Sheet.close();
+        runPageReadAloud(pageNum, {
+          onStart: () => syncTTSControllerState(),
+          onEnd: () => syncTTSControllerState(),
+          onStop: () => syncTTSControllerState()
+        });
+        syncTTSControllerState();
+        window.toast('Reading page aloud 🔊');
+      }
+    };
+  }
+
+  const prevBtn = document.getElementById('tts-sheet-prev-btn');
+  if (prevBtn) {
+    prevBtn.onclick = () => {
+      skipTTSSentence(-1);
+    };
+  }
+
+  const nextBtn = document.getElementById('tts-sheet-next-btn');
+  if (nextBtn) {
+    nextBtn.onclick = () => {
+      skipTTSSentence(1);
+    };
+  }
+
+  document.querySelectorAll('.tts-sheet-speed-btn').forEach(btn => {
+    btn.onclick = () => {
+      const spd = parseFloat(btn.dataset.speed);
+      saveTTSSettings({ rate: spd });
+      if (isReadingActive) {
+        continuePlaybackWithCurrentSettings();
+      }
+      // Update UI active chip in place
+      document.querySelectorAll('.tts-sheet-speed-btn').forEach(b => {
+        const match = Math.abs(parseFloat(b.dataset.speed) - spd) < 0.05;
+        b.style.background = match ? 'var(--accent)' : 'var(--bg-elev)';
+        b.style.color = match ? '#fff' : 'var(--text)';
+        b.style.borderColor = match ? 'var(--accent)' : 'var(--border)';
+      });
+      syncTTSControllerState();
+    };
+  });
+
+  const autoAdvChk = document.getElementById('sheet-auto-advance-chk');
+  if (autoAdvChk) {
+    autoAdvChk.onchange = () => {
+      saveTTSSettings({ autoAdvance: autoAdvChk.checked });
+    };
+  }
+}
+
+export function toggleReadAloud() {
+  openHandsFreeReadAloud();
+}
+

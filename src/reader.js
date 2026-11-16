@@ -2712,11 +2712,12 @@ export function setupReaderInteractions(scrollEl){
         const t0 = e.touches[0];
         touchStartX = t0.clientX; touchStartY = t0.clientY;
       }
+      const markupDrawingActive = () => Boolean(window.isMarkupModeActive && window.isMarkupModeActive() && (!window.markupDebug || window.markupDebug.state().activeTool !== 'none'));
       const textLayerEl = e.target.closest && e.target.closest('.textLayer');
-      if(e.touches.length===1 && textLayerEl && !window.State.disableTextSelection){
+      if(e.touches.length===1 && textLayerEl && !window.State.disableTextSelection && !markupDrawingActive()){
         const t = e.touches[0];
         longPressTimer = setTimeout(()=>{
-          if(window.State.disableTextSelection) return;
+          if(window.State.disableTextSelection || markupDrawingActive()) return;
           const pageWrap = textLayerEl.closest('.page-wrap');
           if(!pageWrap) return;
           const pageNum = Number(pageWrap.dataset.page);
@@ -2885,7 +2886,8 @@ export function setupReaderInteractions(scrollEl){
   scrollEl.addEventListener('click', (e) => {
     if (Date.now() - lastTouchEndTime < 600) return;
     if (Math.hypot(e.clientX - mouseDownX, e.clientY - mouseDownY) > 8) return;
-    if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, .sheet, .menu, #sel-toolbar, #sel-mini, #auto-scroll-controller')) return;
+    if (e.target && e.target.closest && e.target.closest('button, input, select, textarea, .sheet, .menu, #sel-toolbar, #sel-mini, #auto-scroll-controller, #markup-toolbar, #mk-fly, #mk-textdlg, #mk-tip, .fabric-canvas-container')) return;
+    if (window.isMarkupModeActive && window.isMarkupModeActive() && (!window.markupDebug || window.markupDebug.state().activeTool !== 'none')) return;
     const sel = window.getSelection();
     if (sel && sel.toString().trim().length > 0) return;
     if (e.detail === 2) {
@@ -2939,6 +2941,8 @@ export function setupReaderInteractions(scrollEl){
     const wasSelecting = !!selGesture, wasPinching = window.zoomGestureActive;
     if(e.touches.length===0) finalizeSelectionGesture();
     if(e.touches.length<2) finishZoomGesture();
+    if (window.isMarkupModeActive && window.isMarkupModeActive() && (!window.markupDebug || window.markupDebug.state().activeTool !== 'none')) return;
+    if (e.target && e.target.closest && e.target.closest('#markup-toolbar, #mk-fly, #mk-textdlg, #mk-tip')) return;
 
     if(window.State.readingMode==='single' && window.State.zoom<=1.02 && !wasSelecting && !wasPinching && e.touches.length===0 && e.changedTouches.length===1){
       const t = e.changedTouches[0];
@@ -3699,6 +3703,9 @@ export function updatePageIndicator(){
 
   if (window.renderFloatingTTSCapsule && document.getElementById('tts-floating-widget')) {
     window.renderFloatingTTSCapsule();
+  }
+  if (window.isMarkupModeActive && window.isMarkupModeActive() && typeof window.renderMarkupToolbar === 'function') {
+    window.renderMarkupToolbar();
   }
 }
 

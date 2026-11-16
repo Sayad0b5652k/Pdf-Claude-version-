@@ -86,30 +86,22 @@ export async function renderSettings(){
     <!-- 4. Pro Design Theme -->
     <div class="section-title" style="margin-bottom:10px;">Pro Design Theme (Design Architecture)</div>
     <div class="card" style="padding:14px; margin-bottom:22px;">
-      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:6px;">
+      <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:8px;">
         <button data-set-pro-theme="classic" class="btn" style="flex-direction:column; padding:10px 4px; height:74px; gap:3px; font-size:10.5px; font-weight:700; border-radius:10px;
           background:${((window.State.proTheme||'classic')==='classic')?'var(--accent-soft)':'var(--surface-2)'};
           color:${((window.State.proTheme||'classic')==='classic')?'var(--accent)':'var(--text)'};
           border:1.5px solid ${((window.State.proTheme||'classic')==='classic')?'var(--accent)':'var(--border)'};">
-          <span style="font-size:17px;">🏛️</span>
+          <span style="font-size:18px;">🏛️</span>
           <span>Classic</span>
-          <span style="font-size:9px; opacity:0.75; font-weight:500;">Original Look</span>
+          <span style="font-size:10px; opacity:0.75; font-weight:500;">Original Look</span>
         </button>
         <button data-set-pro-theme="editorial" class="btn" style="flex-direction:column; padding:10px 4px; height:74px; gap:3px; font-size:10.5px; font-weight:700; border-radius:10px;
           background:${window.State.proTheme==='editorial'?'var(--accent-soft)':'var(--surface-2)'};
           color:${window.State.proTheme==='editorial'?'var(--accent)':'var(--text)'};
           border:1.5px solid ${window.State.proTheme==='editorial'?'var(--accent)':'var(--border)'};">
-          <span style="font-size:17px;">📖</span>
+          <span style="font-size:18px;">📖</span>
           <span>Editorial</span>
-          <span style="font-size:9px; opacity:0.75; font-weight:500;">Swiss Minimal</span>
-        </button>
-        <button data-set-pro-theme="notebook" class="btn" style="flex-direction:column; padding:10px 4px; height:74px; gap:3px; font-size:10.5px; font-weight:700; border-radius:10px;
-          background:${window.State.proTheme==='notebook'?'var(--accent-soft)':'var(--surface-2)'};
-          color:${window.State.proTheme==='notebook'?'var(--accent)':'var(--text)'};
-          border:1.5px solid ${window.State.proTheme==='notebook'?'var(--accent)':'var(--border)'};">
-          <span style="font-size:17px;">📓</span>
-          <span>Notebook</span>
-          <span style="font-size:9px; opacity:0.75; font-weight:500;">Doodle Study</span>
+          <span style="font-size:10px; opacity:0.75; font-weight:500;">Swiss Minimal</span>
         </button>
       </div>
       <div style="font-size:11.5px; color:var(--text-faint); margin-top:10px; line-height:1.4;">
@@ -559,7 +551,7 @@ export async function renderSettings(){
       if (window.DB && window.DB.setting) {
         await window.DB.setting('proTheme', chosen);
       }
-      const label = chosen === 'editorial' ? '📖 Editorial Luxe' : chosen === 'notebook' ? '📓 Notebook' : '🏛️ Classic';
+      const label = chosen === 'editorial' ? '📖 Editorial Luxe' : '🏛️ Classic';
       window.toast(`Pro Theme set: ${label}`);
       updateProThemeButtonsDOM(chosen);
     };
@@ -906,10 +898,10 @@ export async function renderReviewView(preserveScroll = true){
         <button class="btn" id="practice-revised" style="width:auto; height:auto; padding:6px 12px; background:var(--surface-2); color:var(--accent); font-size:11.5px; font-weight:700;">${window.icon('sparkle','icon icon-sm')} Practice all</button>
       </div>
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">Available anytime — practicing these won\u2019t change their schedule.</div>
-      ${revised.map(c=>`<div class="card revise-one" data-id="${c.id}" style="padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
-        <div style="font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%;">${window.escapeHtml(c.front)}</div>
-        <div style="display:flex; align-items:center; gap:8px;"><span class="font-mono" style="font-size:10.5px; color:var(--text-faint);">${c.due? 'due '+new Date(c.due).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}</span>
-        <button class="btn del-card" data-id="${c.id}" aria-label="Delete card" style="width:28px; height:28px; background:transparent; color:var(--text-faint);">${window.icon('trash','icon icon-sm')}</button></div>
+      ${revised.map(c=>`<div class="card revise-one" data-id="${c.id}" style="padding:10px 10px 10px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:8px; cursor:pointer;">
+        <div style="font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; min-width:0;">${window.escapeHtml(c.front)}</div>
+        <div class="font-mono" style="font-size:10.5px; color:var(--text-faint); flex-shrink:0;">${c.due? 'due '+new Date(c.due).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}</div>
+        <button class="icon-btn del-card" data-id="${c.id}" title="Delete card" style="width:28px; height:28px; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
       </div>`).join('')}
     `:''}
     </div>
@@ -930,9 +922,18 @@ export async function renderReviewView(preserveScroll = true){
     };
   });
   document.querySelectorAll('.revise-one').forEach(el=>{
-    el.onclick = ()=>{
+    el.onclick = (e)=>{
+      if(e.target.closest('.del-card')) return;
       const card = revised.find(c=>c.id===el.dataset.id);
       if(card) openReviewSession([card], true);
+    };
+  });
+  document.querySelectorAll('.del-card').forEach(btn=>{
+    btn.onclick = async (e)=>{
+      e.stopPropagation();
+      await window.DB.del('flashcards', btn.dataset.id);
+      window.toast('Card deleted');
+      renderReviewView();
     };
   });
 
@@ -967,8 +968,12 @@ export function openReviewSession(queue, practiceMode){
   }
   function cardHtml(card, showBack, idx, total){
     return `
-      <div style="font-size:11.5px; color:var(--text-faint); text-align:center; margin-bottom:10px;">
-        ${practiceMode? 'Practice · ':''}Card ${idx+1} of ${total}
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <span style="width:28px;"></span>
+        <div style="font-size:11.5px; color:var(--text-faint);">
+          ${practiceMode? 'Practice · ':''}Card ${idx+1} of ${total}
+        </div>
+        <button class="icon-btn" id="review-del-card" title="Delete this card" style="width:28px; height:28px; color:var(--text-faint);">${window.icon('trash','icon icon-sm')}</button>
       </div>
       <div id="flip-card" style="min-height:160px; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:22px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:16px; line-height:1.5; margin-bottom:16px; cursor:pointer;">
         ${window.escapeHtml(showBack? card.back : card.front)}
@@ -984,16 +989,22 @@ export function openReviewSession(queue, practiceMode){
       <div style="text-align:center; margin-top:12px;"><button class="btn" id="review-del-card" style="width:auto; height:auto; padding:5px 12px; background:transparent; color:var(--text-faint); font-size:11.5px;">${window.icon('trash','icon icon-sm')} Delete this card</button></div>
     `;
   }
-  function bindDelete(card){
-    const d = document.getElementById('review-del-card');
-    if(d) d.onclick = async ()=>{ await window.DB.del('flashcards', card.id); window.toast('Card deleted'); i++; draw(); };
+  function bindDeleteBtn(card){
+    const delBtn = document.getElementById('review-del-card');
+    if(delBtn) delBtn.onclick = async ()=>{
+      await window.DB.del('flashcards', card.id);
+      queue.splice(i, 1);
+      window.toast('Card deleted');
+      draw();
+    };
   }
   function bindCardEvents(card){
-    bindDelete(card);
+    bindDeleteBtn(card);
     const flipEl = document.getElementById('flip-card');
     if(flipEl) flipEl.onclick = ()=>{
       window.Sheet.body.innerHTML = cardHtml(card, true, i, queue.length);
-      bindGradeButtons(card); bindDelete(card);
+      bindDeleteBtn(card);
+      bindGradeButtons(card);
     };
   }
   function bindGradeButtons(card){

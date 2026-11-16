@@ -1,15 +1,5 @@
 // S.A.Y.A.D. Service Worker for Offline Study & Native WebAPK Minting
-//
-// Strategy
-//  - Navigations (HTML): network first, but fall back to the cached shell after NAV_TIMEOUT_MS so a
-//    weak/hanging connection never leaves the app on a blank screen; offline always uses the cache.
-//  - /assets/* (content-hashed by Vite): cache first, they never change under the same URL. Only the
-//    newest MAX_HASHED_ASSETS entries are kept so old deploys do not pile up in storage.
-//  - Everything else on this origin (icons, pdf.js, vendor libs): stale-while-revalidate.
-//  - Google Fonts (css + font files): stale-while-revalidate, so typography also works offline.
-const CACHE_NAME = 'sayad-v36-fast-start';
-const NAV_TIMEOUT_MS = 3500;
-const MAX_HASHED_ASSETS = 24;
+const CACHE_NAME = 'sayad-v43-sharp-zoom-ocr';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
@@ -19,17 +9,30 @@ const PRECACHE_URLS = [
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',
-  '/pdfjs/pdf.min.js',
-  '/pdfjs/pdf.worker.min.js',
-  '/pdfjs/pdf_viewer.css',
-  '/vendor/katex/katex.min.js',
-  '/vendor/katex/katex.min.css',
-  '/vendor/katex/contrib/auto-render.min.js',
   '/screenshots/screenshot-mobile-1.png',
   '/screenshots/screenshot-mobile-2.png',
   '/screenshots/screenshot-desktop-1.png',
   '/icons/theme-classic-512.png',
-  '/icons/theme-editorial-512.png'
+  '/icons/theme-editorial-512.png',
+  '/pdfjs/pdf.min.js',
+  '/pdfjs/pdf.worker.min.js',
+  '/pdfjs/pdf_viewer.css',
+  '/pdfjs/standard_fonts/LiberationSans-Regular.ttf',
+  '/pdfjs/standard_fonts/LiberationSans-Bold.ttf',
+  '/pdfjs/standard_fonts/LiberationSans-Italic.ttf',
+  '/pdfjs/standard_fonts/LiberationSans-BoldItalic.ttf',
+  '/pdfjs/standard_fonts/FoxitSerif.pfb',
+  '/pdfjs/standard_fonts/FoxitSerifBold.pfb',
+  '/pdfjs/standard_fonts/FoxitSerifItalic.pfb',
+  '/pdfjs/standard_fonts/FoxitSerifBoldItalic.pfb',
+  '/pdfjs/standard_fonts/FoxitFixed.pfb',
+  '/pdfjs/standard_fonts/FoxitSymbol.pfb',
+  '/pdfjs/standard_fonts/FoxitDingbats.pfb',
+  '/vendor/katex/katex.min.css',
+  '/vendor/katex/katex.min.js',
+  '/vendor/katex/contrib/auto-render.min.js',
+  '/vendor/mermaid.min.js',
+  '/vendor/pdf-lib.min.js'
 ];
 
 self.addEventListener('message', (event) => {
@@ -41,12 +44,32 @@ self.addEventListener('message', (event) => {
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return Promise.allSettled(
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // 1. Precache static shell, local PDF.js engine, and CDN libraries
+      await Promise.allSettled(
         PRECACHE_URLS.map((url) =>
           cache.add(url).catch((err) => console.log('[SW] Precache bypass for:', url, err))
         )
       );
+
+      // 2. Discover and precache hashed Vite production bundles (/assets/*.js, /assets/*.css) from index.html
+      try {
+        const htmlRes = await fetch('/index.html', { cache: 'no-cache' });
+        if (htmlRes && htmlRes.ok) {
+          const htmlText = await htmlRes.clone().text();
+          await cache.put('/', htmlRes.clone());
+          await cache.put('/index.html', htmlRes);
+          const matches = [...htmlText.matchAll(/(?:src|href)=["'](\/assets\/[^"']+)["']/g)];
+          const bundleUrls = [...new Set(matches.map((m) => m[1]))];
+          await Promise.allSettled(
+            bundleUrls.map((bundleUrl) =>
+              cache.add(bundleUrl).catch((err) => console.log('[SW] Bundle precache bypass:', bundleUrl, err))
+            )
+          );
+        }
+      } catch (e) {
+        console.log('[SW] Dynamic asset discovery skipped:', e);
+      }
     })
   );
 });
@@ -65,123 +88,123 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Keeps only the newest MAX_HASHED_ASSETS hashed bundles (cache.keys() is in insertion order).
-async function trimHashedAssets(cache) {
-  const keys = await cache.keys();
-  const hashed = keys.filter((req) => new URL(req.url).pathname.startsWith('/assets/'));
-  const excess = hashed.length - MAX_HASHED_ASSETS;
-  for (let i = 0; i < excess; i++) {
-    await cache.delete(hashed[i]);
+function isCacheableResponse(response, reqUrl = '') {
+  if (!response) return false;
+  if (response.status === 200 && (response.type === 'basic' || response.type === 'cors')) {
+    const ct = (response.headers.get('content-type') || '').toLowerCase();
+    if (/\.(?:m?js|css)$/i.test(reqUrl) && ct.includes('text/html')) {
+      return false;
+    }
+    return true;
   }
-}
-
-function putInCache(request, response) {
-  return caches.open(CACHE_NAME).then((cache) => cache.put(request, response));
-}
-
-async function offlineShell(request) {
-  return (
-    (await caches.match(request, { ignoreSearch: true })) ||
-    (await caches.match('/')) ||
-    (await caches.match('/index.html')) ||
-    Response.error()
-  );
-}
-
-function handleNavigation(event) {
-  return (async () => {
-    const request = event.request;
-    const network = fetch(request).then((response) => {
-      if (response && response.status === 200) {
-        putInCache(request, response.clone()).catch(() => {});
-      }
-      return response;
-    });
-
-    let timer;
-    const timeout = new Promise((resolve) => {
-      timer = setTimeout(() => resolve(null), NAV_TIMEOUT_MS);
-    });
-
-    try {
-      const winner = await Promise.race([network, timeout]);
-      clearTimeout(timer);
-      if (winner) return winner;
-      // Network is too slow: show the cached shell now (the fetch keeps going and refreshes the cache).
-      const cached = await caches.match(request, { ignoreSearch: true }) || await caches.match('/');
-      if (cached) {
-        network.catch(() => {});
-        return cached;
-      }
-      return await network;
-    } catch (err) {
-      clearTimeout(timer);
-      return offlineShell(request);
-    }
-  })();
-}
-
-function handleHashedAsset(event) {
-  return (async () => {
-    const cached = await caches.match(event.request);
-    if (cached) return cached;
-    const response = await fetch(event.request);
-    if (response && response.status === 200 && response.type === 'basic') {
-      const cache = await caches.open(CACHE_NAME);
-      await cache.put(event.request, response.clone());
-      trimHashedAssets(cache).catch(() => {});
-    }
-    return response;
-  })();
-}
-
-function handleStaleWhileRevalidate(event, allowOpaque) {
-  return caches.match(event.request).then((cachedResponse) => {
-    const fetchPromise = fetch(event.request).then((networkResponse) => {
-      const cacheable = networkResponse && (
-        (networkResponse.status === 200 && networkResponse.type === 'basic') ||
-        (allowOpaque && (networkResponse.ok || networkResponse.type === 'opaque'))
-      );
-      if (cacheable) {
-        putInCache(event.request, networkResponse.clone()).catch(() => {});
-      }
-      return networkResponse;
-    }).catch(() => null);
-
-    if (cachedResponse) {
-      // Keep the worker alive until the background refresh finishes.
-      event.waitUntil(fetchPromise);
-      return cachedResponse;
-    }
-    return fetchPromise.then((res) => res || Response.error());
-  });
+  if (response.type === 'opaque') {
+    return true;
+  }
+  return false;
 }
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
 
-  // Ignore chrome extension, dev server hot reload & API requests
-  if (url.protocol.startsWith('chrome-extension') || url.pathname.includes('@vite') || url.pathname.startsWith('/api/')) {
+  if (!url.protocol.startsWith('http')) return;
+
+  // Ignore dev server hot reload, unbundled dev source scripts, /.well-known/ & API requests
+  // IMPORTANT: Production compiled bundles in /assets/*.js and /assets/*.css MUST be cached for offline PWA launch
+  if (
+    url.pathname.includes('@vite') ||
+    url.pathname.includes('@react-refresh') ||
+    url.pathname.startsWith('/@fs/') ||
+    url.pathname.startsWith('/@id/') ||
+    url.pathname.startsWith('/.well-known/') ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/src/') ||
+    url.pathname.startsWith('/node_modules/')
+  ) {
     return;
   }
 
-  // Large media is streamed with Range requests; the Cache API cannot answer those correctly.
-  if (event.request.headers.has('range')) return;
+  // Network-First for Navigation / HTML Entry (Ensures new published code loads immediately when online, with full offline fallback)
+  const isNav =
+    event.request.mode === 'navigate' ||
+    event.request.headers.get('accept')?.includes('text/html') ||
+    url.pathname === '/' ||
+    url.pathname === '/index.html';
 
-  const isFontHost = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
-  if (url.origin !== self.location.origin && !isFontHost) return;
-
-  const isNav = event.request.mode === 'navigate' || event.request.headers.get('accept')?.includes('text/html') || url.pathname === '/' || url.pathname === '/index.html';
-  if (isNav && url.origin === self.location.origin) {
-    event.respondWith(handleNavigation(event));
+  if (isNav) {
+    // A weak or hanging connection must never leave a blank screen: after 3.5s fall back to the cached shell.
+    const fromCache = async () => (await caches.match(event.request)) || (await caches.match('/')) || (await caches.match('/index.html'));
+    const timeoutToCache = new Promise((resolve) => setTimeout(async () => resolve(await fromCache()), 3500));
+    event.respondWith(
+      Promise.race([
+        fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const cloneForReq = networkResponse.clone();
+            const cloneForRoot = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, cloneForReq);
+              cache.put('/', cloneForRoot);
+            });
+          }
+          return networkResponse;
+        }), timeoutToCache.then((r) => r || new Promise(() => {}))])
+        .catch(async () => {
+          return (
+            (await caches.match(event.request)) ||
+            (await caches.match(event.request, { ignoreSearch: true })) ||
+            (await caches.match('/')) ||
+            (await caches.match('/index.html'))
+          );
+        })
+    );
     return;
   }
 
-  if (url.origin === self.location.origin && url.pathname.startsWith('/assets/')) {
-    event.respondWith(handleHashedAsset(event));
-    return;
-  }
+  // Cache-First with background Stale-While-Revalidate for compiled /assets/* bundles, /pdfjs/*, icons, fonts & CDN scripts
+  event.respondWith(
+    (async () => {
+      const cachedResponse =
+        (await caches.match(event.request)) ||
+        (await caches.match(event.request, { ignoreSearch: true }));
 
-  event.respondWith(handleStaleWhileRevalidate(event, isFontHost));
+      const fetchPromise = fetch(event.request)
+        .then((networkResponse) => {
+          if (isCacheableResponse(networkResponse, url.pathname)) {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
+            return networkResponse;
+          }
+          if (/\.(?:m?js|css)$/i.test(url.pathname)) {
+            return null;
+          }
+          return networkResponse;
+        })
+        .catch(() => null);
+
+      if (cachedResponse && isCacheableResponse(cachedResponse, url.pathname)) {
+        return cachedResponse;
+      }
+
+      const networkResult = await fetchPromise;
+      if (networkResult) {
+        return networkResult;
+      }
+
+      // Safe offline fallback so non-critical external scripts/styles never crash or hang page parsing
+      if (/\.m?js$/i.test(url.pathname)) {
+        return new Response('/* offline fallback */', {
+          status: 200,
+          headers: { 'Content-Type': 'application/javascript; charset=utf-8' }
+        });
+      }
+      if (/\.css$/i.test(url.pathname)) {
+        return new Response('/* offline fallback */', {
+          status: 200,
+          headers: { 'Content-Type': 'text/css; charset=utf-8' }
+        });
+      }
+      return new Response('', { status: 503, statusText: 'Offline' });
+    })()
+  );
 });
