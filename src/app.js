@@ -34,6 +34,9 @@ import './selection.js';
   });
 }
 
+// Ask the browser to keep our data even when the phone is low on space (otherwise books/notes can be evicted).
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().then((ok) => console.log('Persistent storage:', ok)); } catch (_) {}
+
 // The drawing engine (Fabric.js, ~300KB) is not needed to open the app: load it when the browser is idle,
 // and let the few entry points wait for it if someone is faster than that.
 {

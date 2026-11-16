@@ -790,15 +790,20 @@ export async function renderSettings(){
     };
   });
 
+  // Backup = everything you made (not the PDFs themselves and not rebuildable caches).
+  const BACKUP_STORES = ['annotations','bookmarks','notes','flashcards','papers','progress','settings','summaries','chathistory'];
   document.getElementById('btn-export').onclick = async ()=>{
-    const annots = await window.DB.all('annotations');
-    const bms = await window.DB.all('bookmarks');
-    const notes = await window.DB.all('notes');
-    const blob = new Blob([JSON.stringify({annots,bms,notes,files:window.State.files.map(f=>({id:f.id,name:f.name,folder:f.folder,subject:f.subject}))},null,2)], {type:'application/json'});
+    const out = { app: 'strata', version: 2, exportedAt: new Date().toISOString(), stores: {},
+      files: window.State.files.map(f=>({id:f.id,name:f.name,folder:f.folder,subject:f.subject})) };
+    for (const st of BACKUP_STORES) { try { out.stores[st] = await window.DB.all(st); } catch(e) { out.stores[st] = []; } }
+    // keep the old keys so older builds can still read this file
+    out.annots = out.stores.annotations; out.bms = out.stores.bookmarks; out.notes = out.stores.notes;
+    const blob = new Blob([JSON.stringify(out)], {type:'application/json'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = 'strata-backup.json'; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-    window.toast('Backup exported');
+    const n = Object.values(out.stores).reduce((t, r) => t + r.length, 0);
+    window.toast('Backup exported (' + n + ' items)');
   };
   document.getElementById('btn-import-backup').onclick = ()=>{
     const inp = document.createElement('input'); inp.type='file'; inp.accept='application/json';
@@ -807,10 +812,10 @@ export async function renderSettings(){
       const text = await inp.files[0].text();
       try{
         const data = JSON.parse(text);
-        for(const a of data.annots||[]) await window.DB.put('annotations', a);
-        for(const b of data.bms||[]) await window.DB.put('bookmarks', b);
-        for(const n of data.notes||[]) await window.DB.put('notes', n);
-        window.toast('Restore complete');
+        const stores = data.stores || { annotations: data.annots, bookmarks: data.bms, notes: data.notes };
+        let n = 0;
+        for (const st of BACKUP_STORES) for (const rec of (stores[st] || [])) { await window.DB.put(st, rec); n++; }
+        window.toast('Restore complete (' + n + ' items). Books ki PDF files dobara add karni padengi agar wo is phone me nahi hain.');
       }catch(e){ window.toast('Invalid backup file'); }
     };
     inp.click();
