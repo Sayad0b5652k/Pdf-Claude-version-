@@ -903,7 +903,8 @@ export async function renderReviewView(preserveScroll = true){
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">Available anytime — practicing these won\u2019t change their schedule.</div>
       ${revised.map(c=>`<div class="card revise-one" data-id="${c.id}" style="padding:12px 14px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;">
         <div style="font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:65%;">${window.escapeHtml(c.front)}</div>
-        <div class="font-mono" style="font-size:10.5px; color:var(--text-faint);">${c.due? 'due '+new Date(c.due).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}</div>
+        <div style="display:flex; align-items:center; gap:8px;"><span class="font-mono" style="font-size:10.5px; color:var(--text-faint);">${c.due? 'due '+new Date(c.due).toLocaleDateString(undefined,{month:'short',day:'numeric'}) : ''}</span>
+        <button class="btn del-card" data-id="${c.id}" aria-label="Delete card" style="width:28px; height:28px; background:transparent; color:var(--text-faint);">${window.icon('trash','icon icon-sm')}</button></div>
       </div>`).join('')}
     `:''}
     </div>
@@ -915,6 +916,14 @@ export async function renderReviewView(preserveScroll = true){
   if(startBtn) startBtn.onclick = ()=>openReviewSession(due);
   const practiceBtn = document.getElementById('practice-revised');
   if(practiceBtn) practiceBtn.onclick = ()=>openReviewSession(revised.slice(), true);
+  document.querySelectorAll('.del-card').forEach(btn=>{
+    btn.onclick = async (e)=>{
+      e.stopPropagation();
+      await window.DB.del('flashcards', btn.dataset.id);
+      window.toast('Card deleted');
+      renderReviewView();
+    };
+  });
   document.querySelectorAll('.revise-one').forEach(el=>{
     el.onclick = ()=>{
       const card = revised.find(c=>c.id===el.dataset.id);
@@ -967,13 +976,19 @@ export function openReviewSession(queue, practiceMode){
           <button class="btn grade-btn" data-grade="4" style="flex-direction:column; height:56px; background:var(--surface-2); color:var(--accent); font-size:11.5px; gap:2px;">Easy</button>
         </div>
       `: `<div style="text-align:center; font-size:12.5px; color:var(--text-faint);">Tap the card to reveal the answer</div>`}
+      <div style="text-align:center; margin-top:12px;"><button class="btn" id="review-del-card" style="width:auto; height:auto; padding:5px 12px; background:transparent; color:var(--text-faint); font-size:11.5px;">${window.icon('trash','icon icon-sm')} Delete this card</button></div>
     `;
   }
+  function bindDelete(card){
+    const d = document.getElementById('review-del-card');
+    if(d) d.onclick = async ()=>{ await window.DB.del('flashcards', card.id); window.toast('Card deleted'); i++; draw(); };
+  }
   function bindCardEvents(card){
+    bindDelete(card);
     const flipEl = document.getElementById('flip-card');
     if(flipEl) flipEl.onclick = ()=>{
       window.Sheet.body.innerHTML = cardHtml(card, true, i, queue.length);
-      bindGradeButtons(card);
+      bindGradeButtons(card); bindDelete(card);
     };
   }
   function bindGradeButtons(card){

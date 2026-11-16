@@ -954,6 +954,9 @@ export function openBookMenu(fileId){
     for(const b of bms) await window.DB.del('bookmarks', b.id);
     const ns = await window.DB.byIndex('notes','fileId',fileId);
     for(const n of ns) await window.DB.del('notes', n.id);
+    for(const store of ['flashcards','ocrcache']){
+      try{ for(const r of await window.DB.byIndex(store,'fileId',fileId)) await window.DB.del(store, r.id); }catch(e){}
+    }
     await window.DB.del('progress', fileId);
     window.State.files = window.State.files.filter(x=>x.id!==fileId);
     window.Sheet.close();
