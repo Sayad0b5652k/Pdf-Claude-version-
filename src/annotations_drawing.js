@@ -22,6 +22,7 @@ let activeTool = 'pen';
 let activeColor = '#ef4444'; // Red default
 let activeStrokeWidth = 2; // 2: Thin, 6: Medium, 12: Thick
 let activeFill = 'none'; // 'none' | 'rgba' | 'solid'
+let inkHidden = false;            // reading mode: drawings hidden (never deleted)
 let laserFadeMs = 4000;          // how long a laser trail stays
 let activeStamp = 'imp';
 let textSticky = false;          // text with a yellow sticky-note background
@@ -29,18 +30,18 @@ let snapShapes = true;           // hold still at the end of a stroke -> straigh
 let drawingBusy = false;         // a stroke is in progress (the card fades, the draw region must not move)
 
 const TOOL_DEFS = [
-  { id: 'select',    g: '🖐️', t: 'Select / Move / Resize' },
-  { id: 'pen',       g: '✏️', t: 'Pen' },
-  { id: 'marker',    g: '🖍️', t: 'Highlighter marker' },
-  { id: 'glow',      g: '✨', t: 'Neon glow pen' },
-  { id: 'laser',     g: '🔴', t: 'Laser pointer (fades away)' },
-  { id: 'text',      g: '<span class="mk-aa">Aa</span>', t: 'Text' },
-  { id: 'stamp',     g: '⭐', t: 'Stamps' },
-  { id: 'rectangle', g: '⬛', t: 'Rectangle' },
-  { id: 'ellipse',   g: '⭕', t: 'Circle' },
-  { id: 'arrow',     g: '➔', t: 'Arrow' },
-  { id: 'line',      g: '➖', t: 'Line' },
-  { id: 'eraser',    g: '🧹', t: 'Eraser' }
+  { id: 'select',    g: '🖐️', t: 'Select — khiskao / bada-chhota karo' },
+  { id: 'pen',       g: '✏️', t: 'Pen — seedha likhna' },
+  { id: 'marker',    g: '🖍️', t: 'Marker — text ko highlight karo' },
+  { id: 'glow',      g: '✨', t: 'Glow pen — chamakta likhna' },
+  { id: 'laser',     g: '🔴', t: 'Laser — dikhao, apne aap gayab (save nahi)' },
+  { id: 'text',      g: '<span class="mk-aa">Aa</span>', t: 'Text — tap karke likho' },
+  { id: 'stamp',     g: '⭐', t: 'Stamp — IMP, ★, ? lagao' },
+  { id: 'rectangle', g: '⬛', t: 'Box' },
+  { id: 'ellipse',   g: '⭕', t: 'Gola / ellipse' },
+  { id: 'arrow',     g: '➔', t: 'Teer (arrow)' },
+  { id: 'line',      g: '➖', t: 'Seedhi line' },
+  { id: 'eraser',    g: '🧹', t: 'Rubber — object par tap karke hatao' }
 ];
 const STAMPS = {
   imp:    { label: 'IMP',    color: '#d92b2b' },
@@ -82,6 +83,32 @@ export function isMarkupModeActive() {
   return isMarkupActive;
 }
 
+export function setInkHidden(v) {
+  inkHidden = !!v;
+  document.body.classList.toggle('ink-hidden', inkHidden);
+  const e = document.getElementById('mtool-eye'); if (e) { e.classList.toggle('on', inkHidden); e.title = inkHidden ? 'Drawings dikhao' : 'Drawings chhupao'; }
+  window.toast(inkHidden ? 'Drawings chhup gaye (delete nahi hue)' : 'Drawings wapas dikh rahe hain');
+}
+export function toggleInkHidden() { setInkHidden(!inkHidden); }
+window.toggleInkHidden = toggleInkHidden;
+window.isInkHidden = () => inkHidden;
+
+function showFirstUseTip() {
+  let seen = false;
+  try { seen = !!localStorage.getItem('sayad_markup_tip'); } catch (_) {}
+  if (seen) { window.toast('Annotation tools chalu'); return; }
+  const tb = document.getElementById('markup-toolbar');
+  const tip = document.createElement('div');
+  tip.id = 'mk-tip';
+  tip.innerHTML = '<span>✍️ 1 ungli = likho · ✌️ 2 ungli = scroll/zoom · ⋮⋮ se card khiskao · 👁 se drawings chhupao</span><button type="button">Samajh gaya</button>';
+  document.body.appendChild(tip);
+  const r = tb ? tb.getBoundingClientRect() : null;
+  tip.style.top = Math.min(window.innerHeight - 90, (r ? r.bottom : 60) + 10) + 'px';
+  const bye = () => { try { localStorage.setItem('sayad_markup_tip', '1'); } catch (_) {} tip.remove(); };
+  tip.querySelector('button').onclick = bye;
+  setTimeout(bye, 9000);
+}
+
 export function toggleMarkupToolbar() {
   isMarkupActive = !isMarkupActive;
   renderMarkupToolbar();
@@ -96,7 +123,7 @@ export function toggleMarkupToolbar() {
   updateAllPageOverlayPointerEvents();
 
   if (isMarkupActive) {
-    window.toast('Annotation tools enabled');
+    showFirstUseTip();
   } else {
     deselectAllCanvases();
     closeFocusBand();
@@ -129,7 +156,7 @@ function drawingHasObjects(json) {
 
 function getToolLabel(t) {
   const d = TOOL_DEFS.find(x => x.id === t);
-  return d ? d.t.replace(/ \(.*\)$/, '') : 'Scroll / Zoom Mode';
+  return d ? d.t.split(' — ')[0] : 'Scroll / Zoom';
 }
 
 function hexToRgb(hex) {
@@ -220,6 +247,7 @@ export function renderMarkupToolbar() {
   const clearBtn = `<button class="markup-tool-btn" id="mtool-clear-page" title="Clear Page ${curPg}" aria-label="Clear page">🗑️</button>`;
   const closeBtn = `<button class="markup-tool-btn" id="mtool-close" title="Close Toolbar" aria-label="Close" style="color:var(--danger);">✖️</button>`;
   const orientBtn = `<button class="mk-hbtn" id="mtool-orient" title="${vert ? 'Make horizontal' : 'Make vertical'}" aria-label="Orientation">${vert ? '⇄' : '⇅'}</button>`;
+  const eyeBtn = `<button class="mk-hbtn${inkHidden ? ' on' : ''}" id="mtool-eye" title="${inkHidden ? 'Drawings dikhao' : 'Drawings chhupao'}" aria-label="Hide or show drawings">👁</button>`;
   const modeBtn = `<button class="mk-hbtn" id="mtool-mode" title="${mini ? 'Expand' : 'Compact'}" aria-label="Expand or compact">${mini ? '⌃' : '⌄'}</button>`;
   const badge = `<span class="markup-status-badge ${activeTool === 'none' ? 'badge-pan' : 'badge-active'}">${activeTool === 'none' ? '🖐️ Pan / Scroll Mode' : `${def ? def.g.replace(/<[^>]+>/g, '') : ''} ${getToolLabel(activeTool)} Active`}</span>`;
 
@@ -229,6 +257,7 @@ export function renderMarkupToolbar() {
       <div class="mk-strip">${toolBtns}</div>
       <button class="mk-colordot" id="mtool-colorpop" title="Colours" aria-label="Colours" style="background:${activeColor}"></button>
       ${undoBtn}
+      ${eyeBtn}
       ${modeBtn}
       ${closeBtn}`;
   } else if (mini) {
@@ -243,7 +272,7 @@ export function renderMarkupToolbar() {
   } else if (vert) {
     toolbarEl.innerHTML = `
       <div class="markup-drag-handle mk-grip" title="Drag to move"><span class="drag-dots">⋮⋮</span><span class="drag-title">${curPg}</span></div>
-      <div class="mk-vhead">${orientBtn}${modeBtn}</div>
+      <div class="mk-vhead">${eyeBtn}${orientBtn}${modeBtn}</div>
       <div class="mk-tools mk-vscroll">${toolBtns}</div>
       <div class="mk-vsep"></div>
       <button class="mk-colordot" id="mtool-colorpop" title="Colours" aria-label="Colours" style="background:${activeColor}"></button>
@@ -258,7 +287,7 @@ export function renderMarkupToolbar() {
           <span class="drag-title">Pg ${curPg}</span>
         </div>
         ${badge}
-        <div class="mk-hr">${orientBtn}${modeBtn}</div>
+        <div class="mk-hr">${eyeBtn}${orientBtn}${modeBtn}</div>
       </div>
       <div class="mk-tools">${toolBtns}</div>
       ${activeTool === 'stamp' ? `<div class="mk-stamps">${stampChipsHtml()}</div>` : ''}
@@ -276,6 +305,7 @@ export function renderMarkupToolbar() {
 }
 
 function afterToolChange() {
+  if (inkHidden && activeTool !== 'none') setInkHidden(false);   // picking a tool = you want to see the page's drawings
   closeTextEditing();
   updateAllPageOverlayPointerEvents();
   renderMarkupToolbar();
@@ -346,6 +376,7 @@ function bindToolbar(toolbarEl, curPg) {
   const redo = $('mtool-redo'); if (redo) redo.onclick = () => performRedo(curPg);
   const clr = $('mtool-clear-page'); if (clr) clr.onclick = () => clearPageDrawings(curPg);
   const cls = $('mtool-close'); if (cls) cls.onclick = () => toggleMarkupToolbar();
+  const eye = $('mtool-eye'); if (eye) eye.onclick = () => toggleInkHidden();
 
   // Layout controls
   const mode = $('mtool-mode');
@@ -478,6 +509,32 @@ document.addEventListener('pointerdown', (e) => {
   if (e.target.closest && (e.target.closest('#mk-fly') || e.target.closest('#markup-toolbar'))) return;
   if (flyKind === 'color') closeFlyout();
 }, true);
+
+/* Two fingers = scroll / zoom (the reader's own pinch handles zoom), one finger = draw.
+   A stroke that turns into a two-finger gesture is thrown away instead of leaving a stray line. */
+const touchIds = new Set();
+let multiTouch = false, multiTouchUsed = false, panLast = null;
+document.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'touch') return;
+  touchIds.add(e.pointerId);
+  if (touchIds.size >= 2) { multiTouch = true; multiTouchUsed = true; }
+}, true);
+const touchGone = (e) => {
+  if (e.pointerType !== 'touch') return;
+  touchIds.delete(e.pointerId);
+  if (touchIds.size < 2) { multiTouch = false; panLast = null; }
+  if (touchIds.size === 0) setTimeout(() => { multiTouchUsed = false; }, 60);
+};
+document.addEventListener('pointerup', touchGone, true);
+document.addEventListener('pointercancel', touchGone, true);
+document.addEventListener('touchmove', (e) => {
+  if (!isMarkupActive || e.touches.length !== 2) return;
+  if (!(e.target.closest && e.target.closest('.fabric-canvas-container'))) return;
+  const sc = document.getElementById('reader-scroll'); if (!sc) return;
+  const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2, cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+  if (panLast) { sc.scrollLeft -= cx - panLast.x; sc.scrollTop -= cy - panLast.y; }
+  panLast = { x: cx, y: cy };
+}, { capture: true, passive: true });
 
 /* Finger / pen on the page: fade the card out of the way until the stroke ends. */
 const BUSY_TOOLS = ['pen', 'marker', 'glow', 'laser', 'rectangle', 'ellipse', 'arrow', 'line'];
@@ -1079,6 +1136,7 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
   fCanvas.on('path:created', (e) => {
     let path = e.path;
     if (!path) return;
+    if (multiTouchUsed) { fCanvas.remove(path); fCanvas.requestRenderAll(); return; }
     const kind = activeTool;
     if (snapShapes && (kind === 'pen' || kind === 'glow') && strokePts.length >= 8 && (performance.now() - lastMoveT) >= 420) {
       const snapped = snapStrokeToShape(strokePts, path);
@@ -1117,7 +1175,7 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
     openTextDialog(t.text, (str) => { t.set({ text: str }); t.setCoords(); fCanvas.requestRenderAll(); savePageCanvasState(pageNum); });
   });
   fCanvas.on('mouse:down', (options) => {
-    if (!isMarkupActive) return;
+    if (!isMarkupActive || multiTouch) return;
 
     const pointer = getFabricPointer(fCanvas, options);
     startX = pointer.x;
@@ -1265,6 +1323,7 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
   });
 
   fCanvas.on('mouse:up', () => {
+    if (multiTouchUsed && isDrawingShape && activeShapeObj) { fCanvas.remove(activeShapeObj); isDrawingShape = false; activeShapeObj = null; fCanvas.requestRenderAll(); return; }
     if (isDrawingShape && activeShapeObj) {
       isDrawingShape = false;
       activeShapeObj.set({

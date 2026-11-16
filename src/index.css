@@ -7677,3 +7677,20 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 #mk-textdlg button { border: 0; border-radius: 10px; padding: 9px 16px; font-weight: 700; font-size: 14px; cursor: pointer; }
 #mk-textdlg .mk-td-x { background: var(--surface-2); color: var(--text); }
 #mk-textdlg .mk-td-ok { background: var(--accent); color: #fff; flex: 1; }
+
+/* hide/show drawings, hint bubble */
+body.ink-hidden .fabric-canvas-container { visibility: hidden !important; pointer-events: none !important; }
+#mtool-eye.on, .mk-hbtn.on { background: var(--accent-soft); border-color: var(--accent); }
+#mk-tip { position: fixed; z-index: 45; left: 50%; transform: translateX(-50%); max-width: min(92vw, 380px); background: var(--text); color: var(--bg); border-radius: 12px; padding: 9px 13px; font-size: 12.5px; line-height: 1.45; box-shadow: 0 8px 24px rgba(0,0,0,.3); display: flex; gap: 10px; align-items: center; }
+#mk-tip button { border: 0; background: rgba(255,255,255,.18); color: inherit; border-radius: 8px; padding: 4px 9px; font-weight: 700; cursor: pointer; flex: none; }
+
+/* polish pass */
+#markup-toolbar.mk-v .mk-vhead { display: grid; grid-template-columns: repeat(2, 24px); gap: 4px; justify-content: center; }
+#markup-toolbar.mk-v.mk-mini .mk-vhead { display: none; }
+#markup-toolbar.mk-mini .mk-hbtn { width: 30px; height: 30px; border-radius: 9px; font-size: 14px; flex: none; }
+#markup-toolbar.mk-mini.mk-h { padding: 5px 8px 5px 4px; gap: 5px; border-radius: 18px; }
+#markup-toolbar.mk-mini.mk-h > .mk-colordot { margin: 0 2px; }
+.markup-tool-btn { transition: background .12s, transform .1s, box-shadow .12s; }
+.markup-tool-btn:active { transform: scale(.9); }
+.markup-tool-btn.active { box-shadow: 0 0 0 1px var(--accent) inset, 0 2px 8px rgba(0,0,0,.12); }
+#markup-toolbar.mk-full.mk-h .markup-status-badge { white-space: nowrap; }

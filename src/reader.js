@@ -704,6 +704,16 @@ export function openReaderSettings(){
           </div>
         </button>
 
+        <button class="btn" id="toggle-ink-btn" style="width:100%; padding:13px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:14px; display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="width:36px; height:36px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:16px;">👁</div>
+            <div style="text-align:left;">
+              <div style="font-size:13.5px; font-weight:600; color:var(--text);">${window.isInkHidden && window.isInkHidden() ? 'Drawings dikhao' : 'Drawings chhupao'}</div>
+              <div style="font-size:11px; color:var(--text-dim);">Padhte waqt saaf page — drawings delete nahi hote</div>
+            </div>
+          </div>
+        </button>
+
         <!-- Option 7: Advanced Settings -->
         <button class="btn" id="open-advanced-settings-btn" style="width:100%; padding:13px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:14px; display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
           <div style="display:flex; align-items:center; gap:12px;">
@@ -884,6 +894,9 @@ export function openReaderSettings(){
       openReadingThemesModal();
     };
   }
+
+  const inkBtn = document.getElementById('toggle-ink-btn');
+  if (inkBtn) inkBtn.onclick = () => { window.Sheet.close(); if (window.toggleInkHidden) window.toggleInkHidden(); };
 
   const markupBtn = document.getElementById('open-markup-toolbar-btn');
   if (markupBtn) {
