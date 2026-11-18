@@ -1216,11 +1216,11 @@ function formatNotePreviewHtml(n) {
     if (word || def) {
       return `
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; flex-wrap:wrap;">
-          <span style="font-size:15px; font-weight:800; color:var(--text);">${window.escapeHtml(word || 'Word')}</span>
+          <span style="font-size:15px; font-weight:800; color:var(--text); min-width:0; overflow-wrap:anywhere;">${window.escapeHtml(word || 'Word')}</span>
           ${pos ? `<span style="font-size:10px; font-weight:700; background:var(--surface-2); color:var(--text-dim); padding:2px 7px; border-radius:6px; text-transform:lowercase; border:1px solid var(--border-subtle);">${window.escapeHtml(pos)}</span>` : ''}
           ${hindi ? `<span style="font-size:12.5px; font-weight:700; color:var(--accent);">${window.escapeHtml(hindi)}</span>` : ''}
         </div>
-        <div style="font-size:13px; color:var(--text-dim); line-height:1.45; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">
+        <div class="nt-clamp nt-clamp-2" style="font-size:13px; color:var(--text-dim);">
           ${window.escapeHtml(def || content)}
         </div>
       `;
@@ -1244,89 +1244,172 @@ function formatNotePreviewHtml(n) {
 
   return `
     ${visualPills ? `<div style="display:flex; gap:6px; flex-wrap:wrap; margin-bottom:6px;">${visualPills}</div>` : ''}
-    <div style="font-size:13.5px; color:var(--text); line-height:1.5; overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;">
+    <div class="nt-clamp nt-clamp-3" style="font-size:13.5px; color:var(--text);">
       ${window.escapeHtml(cleanPreview)}
     </div>
   `;
+}
+
+const NOTE_SECTIONS = [
+  { key: 'notes',       emoji: '📝', title: 'My Notes',     hint: 'Notes you wrote while reading' },
+  { key: 'dictionary',  emoji: '📖', title: 'Dictionary',   hint: 'Words you looked up' },
+  { key: 'translation', emoji: '🌐', title: 'Translations', hint: 'Passages you translated' },
+  { key: 'ai',          emoji: '✨', title: 'AI Notes',     hint: 'Summaries, revision notes and quizzes' },
+];
+
+function noteFileName(note, file, ext = 'md') {
+  const info = getNoteCategoryInfo(note.kind);
+  const raw = [info.label, file?.name ? String(file.name).replace(/\.pdf$/i, '') : '', note.page ? `p${note.page}` : '']
+    .filter(Boolean).join(' ');
+  const safe = raw.replace(/[^\p{L}\p{N}\s_-]+/gu, ' ').replace(/\s+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60);
+  return `${safe || 'note'}.${ext}`;
+}
+
+function noteToMarkdown(note, file) {
+  const info = getNoteCategoryInfo(note.kind);
+  const lines = [`# ${info.label}`, ''];
+  const meta = [];
+  if (file?.name) meta.push(`Book: ${file.name}`);
+  if (note.page) meta.push(`Page: ${note.page}`);
+  if (note.createdAt) meta.push(`Saved: ${new Date(note.createdAt).toLocaleDateString()}`);
+  if (meta.length) lines.push(`_${meta.join(' · ')}_`, '');
+  if (note.sourceText) lines.push(...String(note.sourceText).trim().split('\n').map(l => `> ${l}`), '');
+  lines.push((note.content || note.text || '').trim(), '', '_Exported from S.A.Y.A.D._', '');
+  return lines.join('\n');
+}
+
+function downloadNote(note, file) {
+  const url = URL.createObjectURL(new Blob([noteToMarkdown(note, file)], { type: 'text/markdown;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = noteFileName(note, file);
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  window.toast('Note downloaded');
+}
+
+function openNoteEditor(note, file) {
+  const info = getNoteCategoryInfo(note.kind);
+  window.Sheet.open(`
+    <div style="display:flex; align-items:center; gap:8px; margin:6px 0 12px; min-width:0;">
+      <span style="flex:0 0 auto;">${info.emoji}</span>
+      <div class="font-display" style="font-size:17px; font-weight:700; min-width:0; overflow-wrap:anywhere;">Edit ${window.escapeHtml(info.label)}</div>
+    </div>
+    ${note.sourceText ? `<div style="font-size:12.5px; color:var(--text-dim); background:var(--surface-2); border-radius:8px; border:1px solid var(--border-subtle); padding:10px 12px; margin-bottom:12px; max-height:70px; overflow:auto; line-height:1.5; overflow-wrap:anywhere;">"${window.escapeHtml(String(note.sourceText).slice(0, 220))}${String(note.sourceText).length > 220 ? '…' : ''}"</div>` : ''}
+    <textarea id="note-edit-text" class="nt-edit-area" rows="8" placeholder="Write your note…">${window.escapeHtml(note.content || '')}</textarea>
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-ghost" style="flex:1; padding:12px;" id="note-edit-cancel">Cancel</button>
+      <button class="btn btn-primary" style="flex:1; padding:12px;" id="note-edit-save">Save changes</button>
+    </div>
+  `);
+  const area = document.getElementById('note-edit-text');
+  document.getElementById('note-edit-cancel').onclick = () => window.Sheet.close();
+  document.getElementById('note-edit-save').onclick = async () => {
+    const content = area.value.trim();
+    if (!content) { window.toast('Note cannot be empty — delete it instead'); return; }
+    if (content === (note.content || '').trim()) { window.Sheet.close(); return; }
+    await window.DB.put('notes', { ...note, content, updatedAt: Date.now() });
+    window.Sheet.close();
+    window.toast('Note updated');
+    renderNotesView();
+  };
+}
+
+function confirmDeleteNote(note, file) {
+  const info = getNoteCategoryInfo(note.kind);
+  const preview = window.stripMarkdown ? window.stripMarkdown(note.content || '') : (note.content || '');
+  window.Sheet.open(`
+    <div style="text-align:center; padding:8px 4px 4px;">
+      <div style="color:var(--danger); margin-bottom:12px; display:flex; justify-content:center;">${window.icon('trash', 'icon icon-lg')}</div>
+      <div class="font-display" style="font-size:16px; font-weight:600; margin-bottom:6px; overflow-wrap:anywhere;">Delete this ${window.escapeHtml(info.label.toLowerCase())}?</div>
+      <div style="font-size:13px; color:var(--text-dim); margin-bottom:18px; max-height:60px; overflow:hidden; overflow-wrap:anywhere;">"${window.escapeHtml(preview.slice(0, 90))}${preview.length > 90 ? '…' : ''}"</div>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost" style="flex:1; padding:12px;" id="note-del-cancel">Keep it</button>
+        <button class="btn" style="flex:1; padding:12px; background:var(--danger); color:#fff;" id="note-del-confirm">Delete</button>
+      </div>
+    </div>
+  `);
+  document.getElementById('note-del-cancel').onclick = () => window.Sheet.close();
+  document.getElementById('note-del-confirm').onclick = async () => {
+    await window.DB.del('notes', note.id);
+    window.Sheet.close();
+    window.toast('Note deleted');
+    renderNotesView();
+  };
+}
+
+function noteCardHtml(n, file) {
+  const info = getNoteCategoryInfo(n.kind);
+  const where = [file ? String(file.name || '').replace(/\.pdf$/i, '') : '', n.page ? `p.${n.page}` : ''].filter(Boolean).join(' · ');
+  return `<div class="nt-card" data-id="${window.escapeHtml(String(n.id))}">
+    <div class="nt-card-main">
+      <div class="nt-card-top">
+        <span class="nt-kind"><span>${info.emoji}</span><span style="overflow:hidden; text-overflow:ellipsis;">${window.escapeHtml(info.label)}</span></span>
+        <span class="nt-where">${window.escapeHtml(where)}</span>
+      </div>
+      <div class="nt-body">${formatNotePreviewHtml(n)}</div>
+    </div>
+    <div class="nt-actions">
+      <button class="nt-act" data-act="edit" aria-label="Edit note">${window.icon('edit', 'icon icon-xs')}<span>Edit</span></button>
+      <button class="nt-act" data-act="download" aria-label="Download note">${window.icon('download', 'icon icon-xs')}<span>Download</span></button>
+      <button class="nt-act danger" data-act="delete" aria-label="Delete note">${window.icon('trash', 'icon icon-xs')}<span>Delete</span></button>
+    </div>
+  </div>`;
 }
 
 export async function renderNotesView(preserveScroll = true){
   if (window.State.view !== 'notes') return;
   const scrollEl = getViewScrollEl();
   const prevScroll = preserveScroll && scrollEl ? scrollEl.scrollTop : 0;
-  const notes = (await window.DB.all('notes')).sort((a,b)=>b.createdAt-a.createdAt);
+  const notes = (await window.DB.all('notes')).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
   const fileMap = Object.fromEntries(window.State.files.map(f=>[f.id,f]));
 
-  const currentFilter = window.State.notesFilter || 'all';
+  const byGroup = Object.fromEntries(NOTE_SECTIONS.map(s => [s.key, []]));
+  for (const n of notes) byGroup[getNoteCategoryGroup(n.kind)].push(n);
 
-  const counts = {
-    all: notes.length,
-    notes: notes.filter(n => getNoteCategoryGroup(n.kind) === 'notes').length,
-    dictionary: notes.filter(n => getNoteCategoryGroup(n.kind) === 'dictionary').length,
-    translation: notes.filter(n => getNoteCategoryGroup(n.kind) === 'translation').length,
-    ai: notes.filter(n => getNoteCategoryGroup(n.kind) === 'ai').length,
-  };
+  let currentFilter = window.State.notesFilter || 'all';
+  if (currentFilter !== 'all' && !byGroup[currentFilter]?.length) currentFilter = 'all';
 
   const filterTabs = [
     { key: 'all', label: `All (${notes.length})` },
-    counts.notes ? { key: 'notes', label: `Notes (${counts.notes})` } : null,
-    counts.dictionary ? { key: 'dictionary', label: `Dictionary (${counts.dictionary})` } : null,
-    counts.translation ? { key: 'translation', label: `Translations (${counts.translation})` } : null,
-    counts.ai ? { key: 'ai', label: `AI Notes (${counts.ai})` } : null,
-  ].filter(Boolean);
+    ...NOTE_SECTIONS.filter(s => byGroup[s.key].length).map(s => ({ key: s.key, label: `${s.title} (${byGroup[s.key].length})` })),
+  ];
 
-  const filteredNotes = notes.filter(n => {
-    if (currentFilter === 'all') return true;
-    return getNoteCategoryGroup(n.kind) === currentFilter;
-  });
+  const visible = NOTE_SECTIONS.filter(s => byGroup[s.key].length && (currentFilter === 'all' || currentFilter === s.key));
+
+  const sectionsHtml = visible.length ? visible.map(s => `
+    <section class="nt-section" data-section="${s.key}">
+      <div class="nt-section-head">
+        <div class="nt-section-badge">${s.emoji}</div>
+        <div class="nt-section-text">
+          <div class="nt-section-title font-display">${s.title}</div>
+          <div class="nt-section-hint">${s.hint}</div>
+        </div>
+        <span class="nt-section-count font-mono">${byGroup[s.key].length}</span>
+      </div>
+      ${byGroup[s.key].map(n => noteCardHtml(n, fileMap[n.fileId])).join('')}
+    </section>`).join('')
+    : window.emptyState('note','No notes yet','Write notes or save AI tools, dictionary entries, and translations while reading.');
 
   document.getElementById('app').innerHTML = `
-  <div class="view fade-in" style="padding:0 0 100px;">
-    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; backdrop-filter:blur(10px); border-bottom:1px solid var(--border); margin-bottom:18px;">
-      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
-        <div style="display:flex; align-items:center; gap:12px;">
-          <div style="width:40px; height:40px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-            ${window.icon('note','icon icon-md')}
+  <div class="view fade-in">
+    <div class="nt-wrap">
+      <div class="nt-head">
+        <div class="nt-head-top">
+          <div class="nt-head-icon">${window.icon('note','icon icon-md')}</div>
+          <div class="nt-head-text">
+            <h1 class="nt-title font-display">Study Notes</h1>
+            <div class="nt-sub">${notes.length} ${notes.length===1?'note':'notes'} &amp; annotations</div>
           </div>
-          <div>
-            <div class="font-display" style="font-size:20px; font-weight:800; letter-spacing:.02em; line-height:1.1;">Study Notes</div>
-            <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); margin-top:3px; font-weight:600;">
-              <span>${notes.length} ${notes.length===1?'note':'notes'} &amp; annotations</span>
-            </div>
-          </div>
+          ${notes.length ? `<div class="nt-head-actions">
+            <span class="nt-count font-mono">${notes.length} Saved</span>
+            <button id="notes-export" class="btn btn-ghost nt-export">${window.icon('download','icon icon-xs')} Export all</button>
+          </div>` : ''}
         </div>
-        <div style="display:flex; align-items:center;"><div class="font-mono" style="padding:4px 10px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); font-size:11px; font-weight:700;">
-          ${notes.length} Saved
-        </div>
-        ${notes.length ? `<button id="notes-export" class="btn btn-ghost" style="padding:5px 10px; font-size:11.5px; border-radius:10px; gap:5px; margin-left:8px;">${window.icon('upload','icon icon-xs')} Export</button>` : ''}
-        </div>
+        ${notes.length > 0 ? `<div class="nt-filters no-scrollbar">
+          ${filterTabs.map(t => `<div class="chip note-filter ${currentFilter === t.key ? 'active' : ''}" data-filter="${t.key}">${window.escapeHtml(t.label)}</div>`).join('')}
+        </div>` : ''}
       </div>
-
-      ${notes.length > 0 ? `
-      <div style="display:flex; gap:8px; overflow-x:auto; padding-bottom:2px;" class="no-scrollbar">
-        ${filterTabs.map(t => `<div class="chip note-filter ${currentFilter === t.key ? 'active' : ''}" data-filter="${t.key}">${t.label}</div>`).join('')}
-      </div>
-      ` : ''}
-    </div>
-
-    <div style="padding:0 20px;">
-    ${filteredNotes.length ? filteredNotes.map(n => {
-      const f = fileMap[n.fileId];
-      const info = getNoteCategoryInfo(n.kind);
-      const previewHtml = formatNotePreviewHtml(n);
-      return `<div class="card note-jump" data-id="${n.id}" data-file="${n.fileId}" data-page="${n.page}" style="padding:15px 16px; margin-bottom:12px; cursor:pointer; border-radius:14px; background:var(--surface); border:1px solid var(--border);">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:8px;">
-          <span style="display:inline-flex; align-items:center; gap:5px; background:var(--surface-2); color:var(--accent); padding:3px 9px; border-radius:8px; font-size:11px; font-weight:700; white-space:nowrap; border:1px solid var(--border-subtle);">
-            <span>${info.emoji}</span>
-            <span>${window.escapeHtml(info.label)}</span>
-          </span>
-          <span style="font-size:11px; color:var(--text-dim); font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:right;">
-            ${f ? window.escapeHtml(f.name || '').slice(0, 24) : ''} · p.${n.page}
-          </span>
-        </div>
-        ${previewHtml}
-      </div>`;
-    }).join('') : window.emptyState('note','No notes in this category','Write notes or save AI tools, dictionary entries, and translations while reading.')}
+      ${sectionsHtml}
     </div>
   </div>
   ${window.bottomNavHtml('notes')}`;
@@ -1353,14 +1436,24 @@ export async function renderNotesView(preserveScroll = true){
   document.querySelectorAll('.note-filter').forEach(el => {
     el.onclick = () => {
       window.State.notesFilter = el.dataset.filter;
-      renderNotesView();
+      renderNotesView(false);
     };
   });
 
-  document.querySelectorAll('.note-jump').forEach(el=>{
-    if(!el.dataset.file) return;
-    const note = notes.find(n=>n.id===el.dataset.id);
-    el.onclick = ()=>{ if(note) openNoteDetail(note, fileMap[note.fileId]); };
+  const noteById = Object.fromEntries(notes.map(n => [String(n.id), n]));
+  document.querySelectorAll('.nt-card').forEach(card => {
+    const note = noteById[card.dataset.id];
+    if (!note) return;
+    const file = fileMap[note.fileId];
+    card.onclick = () => openNoteDetail(note, file);
+    card.querySelectorAll('.nt-act').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (btn.dataset.act === 'edit') openNoteEditor(note, file);
+        else if (btn.dataset.act === 'download') downloadNote(note, file);
+        else if (btn.dataset.act === 'delete') confirmDeleteNote(note, file);
+      };
+    });
   });
 
   if (prevScroll > 0) {
@@ -1378,18 +1471,20 @@ export async function renderNotesView(preserveScroll = true){
 export function openNoteDetail(note, file){
   const info = getNoteCategoryInfo(note.kind);
   window.Sheet.open(`
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px;">
-      <span style="display:inline-flex; align-items:center; gap:5px; background:var(--surface-2); color:var(--accent); padding:4px 10px; border-radius:8px; font-size:12px; font-weight:700; border:1px solid var(--border-subtle);">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:8px; min-width:0;">
+      <span style="display:inline-flex; align-items:center; gap:5px; flex:0 0 auto; max-width:55%; background:var(--surface-2); color:var(--accent); padding:4px 10px; border-radius:8px; font-size:12px; font-weight:700; border:1px solid var(--border-subtle); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
         <span>${info.emoji}</span>
-        <span>${window.escapeHtml(info.label)}</span>
+        <span style="overflow:hidden; text-overflow:ellipsis;">${window.escapeHtml(info.label)}</span>
       </span>
-      <span style="font-size:11px; color:var(--text-dim); font-weight:600;">${file ? window.escapeHtml(file.name || '').slice(0, 26) : ''} · p.${note.page}</span>
+      <span style="font-size:11px; color:var(--text-dim); font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${file ? window.escapeHtml(String(file.name || '').slice(0, 26)) : ''}${note.page ? ` · p.${note.page}` : ''}</span>
     </div>
-    ${note.sourceText ? `<div style="font-size:12.5px; color:var(--text-dim); background:var(--surface-2); border-radius:8px; border:1px solid var(--border-subtle); padding:10px 12px; margin-bottom:14px; max-height:80px; overflow-y:auto; line-height:1.5;">"${window.escapeHtml((note.sourceText || '').slice(0, 260))}${(note.sourceText || '').length > 260 ? '…' : ''}"</div>` : ''}
-    <div class="selectable-text note-body-rendered" style="font-size:14.5px; line-height:1.65; margin-bottom:20px; color:var(--text); word-break:break-word;">${window.renderMarkdown(note.content || '')}</div>
-    <div style="display:flex; gap:10px;">
-      <button class="btn btn-ghost" style="flex:1;" id="note-goto">${window.icon('bookmark','icon icon-sm')} Go to page</button>
-      <button class="btn btn-ghost" style="flex:1; color:var(--danger);" id="note-delete">${window.icon('trash','icon icon-sm')} Delete</button>
+    ${note.sourceText ? `<div style="font-size:12.5px; color:var(--text-dim); background:var(--surface-2); border-radius:8px; border:1px solid var(--border-subtle); padding:10px 12px; margin-bottom:14px; max-height:80px; overflow-y:auto; line-height:1.5; overflow-wrap:anywhere;">"${window.escapeHtml((note.sourceText || '').slice(0, 260))}${(note.sourceText || '').length > 260 ? '…' : ''}"</div>` : ''}
+    <div class="selectable-text note-body-rendered" style="font-size:14.5px; line-height:1.65; margin-bottom:20px; color:var(--text); word-break:break-word; overflow-wrap:anywhere;">${window.renderMarkdown(note.content || '')}</div>
+    <div class="nt-detail-actions">
+      <button class="btn btn-ghost" id="note-goto" ${file ? '' : 'disabled style="opacity:.5;"'}>${window.icon('bookmark','icon icon-sm')} Go to page</button>
+      <button class="btn btn-ghost" id="note-edit">${window.icon('edit','icon icon-sm')} Edit</button>
+      <button class="btn btn-ghost" id="note-download">${window.icon('download','icon icon-sm')} Download</button>
+      <button class="btn btn-ghost" style="color:var(--danger);" id="note-delete">${window.icon('trash','icon icon-sm')} Delete</button>
     </div>
   `);
 
@@ -1403,13 +1498,10 @@ export function openNoteDetail(note, file){
     }
   }
 
-  document.getElementById('note-goto').onclick = ()=>{ window.Sheet.close(); window.openReader(note.fileId, note.page); };
-  document.getElementById('note-delete').onclick = async ()=>{
-    await window.DB.del('notes', note.id);
-    window.Sheet.close();
-    window.toast('Note deleted');
-    renderNotesView();
-  };
+  document.getElementById('note-goto').onclick = ()=>{ if (!file) return; window.Sheet.close(); window.openReader(note.fileId, note.page); };
+  document.getElementById('note-edit').onclick = ()=> openNoteEditor(note, file);
+  document.getElementById('note-download').onclick = ()=> downloadNote(note, file);
+  document.getElementById('note-delete').onclick = ()=> confirmDeleteNote(note, file);
 }
 
 // Bind to window for global availability
