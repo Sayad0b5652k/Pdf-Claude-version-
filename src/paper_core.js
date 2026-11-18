@@ -696,7 +696,8 @@ export function assemblePaper(sections, results, opts = {}) {
       if (p.enabled === false || p.count <= 0) return;
       const list = (results[`${s.key}${pi}`] || []).slice();
       const wantMain = p.count;
-      const main = list.slice(0, wantMain);
+      // copy each question: the OR pairing below must never write onto the caller's result objects
+      const main = list.slice(0, wantMain).map((q) => { const c = { ...q }; delete c.alt; return c; });
       const extra = list.slice(wantMain);
       if (choiceOn && p.or && extra.length) {
         const n = Math.min(extra.length, p.or, main.length);
