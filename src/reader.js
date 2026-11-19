@@ -4439,11 +4439,14 @@ export async function openReaderMenu(){
       <button class="btn" data-fit="page" style="flex:1; padding:11px; background:${window.State.fitMode==='page'?'var(--accent-soft)':'var(--surface-2)'}; color:${window.State.fitMode==='page'?'var(--accent)':'var(--text)'}; border:1px solid ${window.State.fitMode==='page'?'var(--accent)':'var(--border)'};">${window.icon('grid','icon icon-sm')} Fit page</button>
     </div>
     <button class="btn btn-ghost" style="width:100%; padding:12px; margin-top:12px;" id="open-page-tools">${window.icon('grid','icon icon-sm')} Page tools — rotate, delete, extract, merge</button>
-    <button class="btn btn-primary" style="width:100%; padding:13px; margin-top:10px;" id="export-annotated">${window.icon('upload','icon icon-sm')} Export PDF with highlights</button>
+    <button class="btn btn-primary" style="width:100%; padding:13px; margin-top:10px;" id="export-annotated">${window.icon('upload','icon icon-sm')} Share / export with annotations</button>
   `);
   document.getElementById('book-tools-close-x').onclick = ()=>window.Sheet.close();
   document.getElementById('open-page-tools').onclick = ()=>window.openPageTools(fid);
-  document.getElementById('export-annotated').onclick = ()=>exportAnnotatedPdf(fid, annots);
+  document.getElementById('export-annotated').onclick = async ()=>{
+    try { const m = await import('./annot_export.js'); m.openShareAnnotatedSheet(fid); }
+    catch(e){ console.error(e); window.toast('Could not open export'); }
+  };
   const pctLabel = document.getElementById('zoom-pct-label');
   function applyZoom(newZoom){
     window.State.zoom = Math.min(MAX_READER_ZOOM, Math.max(0.5, newZoom));
