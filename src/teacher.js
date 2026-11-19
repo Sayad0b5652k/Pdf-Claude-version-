@@ -578,7 +578,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         </div>
 
         <!-- Teaching Personas -->
-        <div style="margin-bottom:16px;">
+        <div id="custom-persona-sec" style="margin-bottom:16px;">
           <label style="font-size:12px; font-weight:700; color:var(--text-dim); display:block; margin-bottom:8px; text-transform:uppercase; letter-spacing:0.04em;">Teaching Persona</label>
           <div style="display:grid; grid-template-columns:1fr; gap:8px;">
             ${TEACHER_MODES.map(m => `
@@ -1337,7 +1337,11 @@ Provide the complete academic answer now:`;
     if (t && m) t.textContent = m.short || m.label;
   }
   const modePill = document.getElementById('teacher-mode-pill');
-  if (modePill) modePill.onclick = () => openCustomizationSheet();
+  if (modePill) modePill.onclick = () => {
+    openCustomizationSheet();
+    // the pill is about the persona, so land the sheet on that section instead of the engine list
+    setTimeout(() => { const el = document.getElementById('custom-persona-sec'); if (el) el.scrollIntoView({ block: 'start' }); }, 60);
+  };
   const scopeSelect = document.getElementById('teacher-chapter-select');
   const scopeBadgePill = document.getElementById('teacher-scope-badge-pill');
   let cachedChapterList = [];
