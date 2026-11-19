@@ -1079,6 +1079,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         systemPersonaInstruction = 'Focus on memory hooks, creative acronyms, and quick recall tricks for easy retention.';
       } else if (activeTeacherMode === 'evaluator') {
         systemPersonaInstruction = `Evaluate according to standard exam marking rubrics (${examTargetMarks} Marks Target), highlighting scoring keywords.`;
+      } else if (activeTeacherMode === 'summary') {
+        systemPersonaInstruction = 'Rapid revision mode: answer as a tight cheat sheet. Short bullet points, key definitions, formulas, dates and keywords in bold. No long paragraphs, no filler. End with a one-line "remember this" takeaway.';
       } else {
         systemPersonaInstruction = 'You are an elite AI Super-Intelligence operating with the exact conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Direct, sharp, natural, and intellectually deep. NEVER greet or give canned introductory phrases. Jump immediately into the core substance.';
       }

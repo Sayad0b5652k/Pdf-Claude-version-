@@ -997,9 +997,18 @@ export function openBookMenu(fileId){
   };
 }
 
+// lower-cased title + message text per chat, so the search box can match what was actually said
+let chatSearchIndex = new Map();
+
 export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
   const validChats = (chatHistories || []).filter(c => c && Array.isArray(c.messages) && c.messages.length > 0)
     .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  chatSearchIndex = new Map(validChats.map(c => {
+    const f = (files || []).find(x => x.id === c.fileId);
+    const text = [c.title, f && f.name, ...(c.messages || []).map(m => (m && typeof m.text === 'string') ? m.text : '')].join(' ').toLowerCase();
+    return [String(c.fileId), text.slice(0, 40000)];
+  }));
 
   const formatRelativeTime = (ts) => {
     if (!ts) return '';
@@ -1049,11 +1058,17 @@ export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
           </button>
         </div>
       ` : `
+        ${validChats.length >= 3 ? `
+        <div class="sy-aisearch">
+          ${window.icon('search', 'icon icon-xs')}
+          <input id="ai-chat-search" type="search" placeholder="Search chats by book or what you asked…" autocomplete="off" aria-label="Search chats">
+        </div>` : ''}
+        <div id="ai-chat-nomatch" style="display:none; text-align:center; padding:18px 8px; font-size:13px; color:var(--text-dim);">No chats match your search.</div>
         <div style="display:flex; flex-direction:column; gap:8px;">
           ${validChats.map(chat => {
             const isGlobal = chat.fileId === 'global_chat' || chat.fileId === 'global_tutor';
             const matchedFile = files.find(f => f.id === chat.fileId);
-            const title = isGlobal ? 'General AI Study Chat' : (matchedFile ? matchedFile.name : 'PDF Study Session');
+            const title = (chat.title && String(chat.title).trim()) || (isGlobal ? 'General AI Study Chat' : (matchedFile ? matchedFile.name : 'PDF Study Session'));
             const messages = chat.messages || [];
             const lastMsg = messages[messages.length - 1];
             const msgCount = messages.length;
@@ -1084,6 +1099,9 @@ export function renderAIChatHistorySectionHtml(chatHistories = [], files = []){
 
                 <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
                   <span style="font-size:11px; color:var(--text-faint);">${timeStr}</span>
+                  <button class="btn btn-icon rename-chat-hist-btn" data-rename-chat-id="${chat.fileId}" title="Rename chat" aria-label="Rename chat" style="width:28px; height:28px; border-radius:50%; background:transparent; border:none; color:var(--text-faint); display:flex; align-items:center; justify-content:center;">
+                    ${window.icon('edit', 'icon icon-xs')}
+                  </button>
                   <button class="btn btn-icon delete-chat-hist-btn" data-delete-chat-id="${chat.fileId}" title="Delete chat history" style="width:28px; height:28px; border-radius:50%; background:transparent; border:none; color:var(--text-faint);">
                     ${window.icon('trash', 'icon icon-xs')}
                   </button>
@@ -1123,6 +1141,58 @@ export function bindAIChatHistoryEvents(){
       if (typeof window.openTeacherView === 'function') {
         window.openTeacherView('', 'professional', fileId);
       }
+    };
+  });
+
+  // search: hide rows whose title or messages don't contain every typed word
+  const searchEl = document.getElementById('ai-chat-search');
+  if (searchEl) {
+    searchEl.oninput = () => {
+      const words = searchEl.value.toLowerCase().split(/\s+/).filter(Boolean);
+      let shown = 0;
+      document.querySelectorAll('.ai-chat-history-item').forEach(item => {
+        const hay = chatSearchIndex.get(String(item.dataset.fileId)) || '';
+        const hit = words.every(w => hay.includes(w));
+        item.style.display = hit ? '' : 'none';
+        if (hit) shown++;
+      });
+      const none = document.getElementById('ai-chat-nomatch');
+      if (none) none.style.display = shown === 0 ? 'block' : 'none';
+    };
+  }
+
+  // rename: stored on the chat record as `title`; empty name goes back to the default
+  document.querySelectorAll('.rename-chat-hist-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const chatId = btn.dataset.renameChatId;
+      if (!chatId) return;
+      const rec = await window.DB.get('chathistory', chatId).catch(() => null);
+      if (!rec) { window.toast('Chat not found'); return; }
+      window.Sheet.open(`
+        <div class="font-display" style="font-size:17px; font-weight:700; margin:6px 0 12px;">Rename chat</div>
+        <input id="chat-rename-input" type="text" maxlength="60" value="${window.escapeHtml(rec.title || '')}" placeholder="Leave empty to use the book name" style="width:100%; box-sizing:border-box; padding:12px; font-size:15px; margin-bottom:14px;">
+        <div style="display:flex; gap:10px;">
+          <button class="btn btn-ghost" style="flex:1; padding:12px;" id="chat-rename-cancel">Cancel</button>
+          <button class="btn btn-primary" style="flex:1; padding:12px;" id="chat-rename-save">Save</button>
+        </div>
+      `);
+      const input = document.getElementById('chat-rename-input');
+      if (input) { input.focus(); input.select(); }
+      document.getElementById('chat-rename-cancel').onclick = () => window.Sheet.close();
+      const save = async () => {
+        const title = (input.value || '').trim().slice(0, 60);
+        const fresh = await window.DB.get('chathistory', chatId).catch(() => null);
+        if (!fresh) { window.Sheet.close(); return; }
+        const next = { ...fresh };
+        if (title) next.title = title; else delete next.title;
+        await window.DB.put('chathistory', next);
+        window.Sheet.close();
+        window.toast(title ? 'Chat renamed' : 'Name reset');
+        if (typeof window.renderDashboard === 'function') window.renderDashboard();
+      };
+      document.getElementById('chat-rename-save').onclick = save;
+      if (input) input.onkeydown = (ev) => { if (ev.key === 'Enter') save(); };
     };
   });
 

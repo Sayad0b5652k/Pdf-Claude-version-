@@ -8026,3 +8026,15 @@ body.ink-hidden .drawing-overlay {
 .cw-starter span { min-width: 0; overflow-wrap: anywhere; }
 .cw-starter .icon { color: var(--accent); flex: 0 0 auto; }
 .cw-starter:active { background: var(--accent-soft); }
+
+/* chat history list: search box */
+.sy-aisearch {
+  display: flex; align-items: center; gap: 9px; margin: 0 0 12px; padding: 0 12px;
+  height: 42px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border);
+  color: var(--text-dim); box-sizing: border-box;
+}
+.sy-aisearch:focus-within { border-color: var(--accent); color: var(--accent); }
+.sy-aisearch input {
+  flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; box-shadow: none;
+  color: var(--text); font: inherit; font-size: 14px; padding: 0;
+}

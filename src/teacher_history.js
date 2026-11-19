@@ -30,11 +30,14 @@ export async function loadTeacherChatHistory(fileId) {
 
 export async function saveTeacherChatHistory(fileId, messages) {
   try {
+    // keep a name the student gave this chat (set from the dashboard) across saves
+    const prev = await window.DB.get('chathistory', fileId).catch(() => null);
     await window.DB.put('chathistory', {
       id: fileId,
       fileId,
       messages: messages.slice(-50),
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
+      ...(prev && prev.title ? { title: prev.title } : {})
     });
   } catch(e) {
     console.warn('Could not save teacher chat history', e);
