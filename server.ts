@@ -2201,6 +2201,7 @@ Return ONLY a valid raw JSON object with this exact structure:
         persona,
         language,
         chatHistory,
+        conversationSummary,
         customKey,
         preferredEngine,
         stream,
@@ -2498,7 +2499,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
         const recentTurns = chatHistory.slice(-20).filter((m: any) => m && m.text && m.text !== '…');
         if (recentTurns.length > 0) {
           historyFormatted = `### RECENT CONVERSATION HISTORY (Active Multi-Turn Dialogue Context):
-${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}: ${m.text}`).join('\n\n')}
+${typeof conversationSummary === 'string' && conversationSummary ? conversationSummary.slice(0, 1000) + '\n\n' : ''}${recentTurns.map((m: any) => `${m.role === 'user' ? 'Student' : 'AI Assistant'}: ${m.text}`).join('\n\n')}
 `;
         }
       }

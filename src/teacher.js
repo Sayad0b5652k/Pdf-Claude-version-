@@ -3,7 +3,7 @@ import { callAI, callServerGemini, speakWithElevenLabs, stopElevenAudio } from '
 import { teacherState } from './teacher_state.js';
 import { deduplicateSpokenPhrase, transliterateDevanagariToHinglish } from './teacher_text.js';
 import { extractAllMarkers, findRelevantPages, getTeacherContext } from './teacher_context.js';
-import { loadTeacherChatHistory, saveTeacherChatHistory, clearTeacherChatHistory } from './teacher_history.js';
+import { loadTeacherChatHistory, saveTeacherChatHistory, clearTeacherChatHistory, buildCompactHistory, formatCompactHistory } from './teacher_history.js';
 import { stopVoiceRecognition, isVoiceActive } from './teacher_voice.js';
 
 /* ============================================================
@@ -1118,7 +1118,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         systemPersonaInstruction = 'You are an elite AI Super-Intelligence operating with the exact conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Direct, sharp, natural, and intellectually deep. NEVER greet or give canned introductory phrases. Jump immediately into the core substance.';
       }
 
-      const recentConvo = chatMessages.slice(-6, -1).map(m => `${m.role === 'user' ? 'Student' : 'AI Tutor'}: ${m.text}`).join('\n\n');
+      const compactHistory = buildCompactHistory(chatMessages);
+      const recentConvo = formatCompactHistory(compactHistory);
 
       const streamMode = typeof window.getStreamingMode === 'function' ? window.getStreamingMode() : (window.State?.streamingMode || 'sse');
       const aiMsgCard = chatLogEl.querySelector('#msg-card-' + (chatMessages.length - 1)) || chatLogEl.querySelector('.teacher-chat-msg:last-child');
@@ -1138,7 +1139,8 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         fullContext: ctx.chapterText || ctx.pageText || ctx.bookOverviewText,
         persona: systemPersonaInstruction,
         language: 'English/Hinglish (matching the student natural inquiry)',
-        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text + '' })),
+        chatHistory: compactHistory.chatHistory,
+        conversationSummary: compactHistory.conversationSummary,
         customKey: customKey || undefined,
         preferredEngine: activeAiEngine || 'auto',
         explanationStyle: activeExplanationStyle || 'comprehensive',
