@@ -16,11 +16,11 @@ import { stopVoiceRecognition, isVoiceActive } from './teacher_voice.js';
    ============================================================ */
 
 export const TEACHER_MODES = [
-  { id: 'professional', label: 'Academic & Rigorous', icon: 'teacher', desc: 'Standard textbook breakdown, deep conceptual clarity & exam rigor' },
-  { id: 'eli5', label: "Explain Like I'm 10 (ELI5)", icon: 'brain', desc: 'Everyday analogies, story-like examples, zero jargon' },
-  { id: 'mnemonics', label: 'Memory Tricks & Mnemonics', icon: 'zap', desc: 'Acronyms, visual memory hooks, chunking & formulas recall' },
-  { id: 'evaluator', label: 'Exam Answer Evaluator', icon: 'award', desc: 'Grade answers against 2, 3 or 5 mark rubrics with missing points' },
-  { id: 'summary', label: 'Rapid Revision & Key Facts', icon: 'sparkle', desc: 'High-yield key definitions, formulas cheat sheet & rapid recap' },
+  { id: 'professional', short: 'Academic', label: 'Academic & Rigorous', icon: 'teacher', desc: 'Standard textbook breakdown, deep conceptual clarity & exam rigor' },
+  { id: 'eli5', short: 'ELI5', label: "Explain Like I'm 10 (ELI5)", icon: 'brain', desc: 'Everyday analogies, story-like examples, zero jargon' },
+  { id: 'mnemonics', short: 'Memory tricks', label: 'Memory Tricks & Mnemonics', icon: 'zap', desc: 'Acronyms, visual memory hooks, chunking & formulas recall' },
+  { id: 'evaluator', short: 'Evaluator', label: 'Exam Answer Evaluator', icon: 'award', desc: 'Grade answers against 2, 3 or 5 mark rubrics with missing points' },
+  { id: 'summary', short: 'Quick revision', label: 'Rapid Revision & Key Facts', icon: 'sparkle', desc: 'High-yield key definitions, formulas cheat sheet & rapid recap' },
 ];
 
 export let activeTeacherMode = 'professional';
@@ -74,7 +74,7 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
 
   const getModeLabel = () => {
     const m = TEACHER_MODES.find(x => x.id === activeTeacherMode);
-    return m ? m.label.split('(')[0].trim() : 'Academic';
+    return m ? (m.short || m.label.split('(')[0].trim()) : 'Academic';
   };
 
   const getScopeDisplay = () => {
@@ -110,26 +110,20 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
       </button>
     </header>
 
-    <!-- Interactive Scope & Chapter Focus Bar -->
-    ${!isGlobal ? `
-    <div class="chat-scope-bar" id="teacher-scope-bar" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 14px; background:var(--bg-elev); border-bottom:1px solid var(--border); max-width:760px; margin:0 auto; width:100%; box-sizing:border-box;">
-      <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1;">
-        <span style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap; flex-shrink:0;">
-          Focus:
-        </span>
-        <div style="flex:1; min-width:0;">
-          <select id="teacher-chapter-select" data-custom-title="Select Chat Context Focus" style="width:100%;">
-            <option value="__loading__">Detecting chapter…</option>
-          </select>
-        </div>
+    <!-- Context row: what the chat is reading from + how the tutor answers -->
+    <div class="cw-context" id="teacher-scope-bar">
+      ${!isGlobal ? `
+      <div class="cw-context-select">
+        <select id="teacher-chapter-select" data-custom-title="Select Chat Context Focus" style="width:100%;">
+          <option value="__loading__">Detecting chapter…</option>
+        </select>
       </div>
-      <div style="display:flex; align-items:center; gap:4px; flex-shrink:0;">
-        <span id="teacher-scope-badge-pill" style="font-size:10.5px; font-weight:700; color:var(--accent); background:var(--accent-soft); padding:3px 7px; border-radius:4px; font-family:var(--font-mono, monospace); white-space:nowrap;">
-          AUTO
-        </span>
-      </div>
+      <span id="teacher-scope-badge-pill" class="cw-scope-badge">AUTO</span>
+      ` : '<div class="cw-context-select cw-context-label">Whole library</div>'}
+      <button class="cw-mode-pill" id="teacher-mode-pill" type="button" title="How the tutor answers">
+        <span class="cw-mode-dot"></span><span id="teacher-mode-pill-text">${window.escapeHtml(getModeLabel())}</span>${window.icon('chevDown','icon icon-xs')}
+      </button>
     </div>
-    ` : ''}
 
     <!-- Main Clean Chat Log Scroll Container -->
     <div id="teacher-chat-log" class="chat-scroll-container no-scrollbar">
@@ -250,52 +244,23 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
     if (!chatLogEl) return;
 
     if (chatMessages.length === 0) {
+      const starters = isGlobal
+        ? ['Explain a concept in simple words', 'Help me make a study plan', 'Give me a tricky practice question']
+        : [`Explain Page ${currentPage} in simple words`, 'Summarise this chapter in key points', `Likely exam questions from Page ${currentPage}`, 'Make a flowchart of this chapter'];
       chatLogEl.innerHTML = `
         <div class="chat-empty-hero">
           <div class="chat-empty-icon">${window.icon('book', 'icon icon-lg')}</div>
           <div class="chat-empty-title">${window.escapeHtml(docTitle)}</div>
-          <div class="chat-empty-sub">Ask questions, request summaries, or explore concepts from ${isGlobal ? 'your library' : `Page ${currentPage}`}.</div>
-
-          <!-- Super-Tutor Feature Guide Card -->
-          <div class="chat-humor-note-card">
-            <div class="chat-humor-badge">
-              <span>🚀</span>
-              <span>SUPER-TUTOR ACTIVE</span>
-              <span>✨</span>
-            </div>
-            <div class="chat-humor-body">
-              <div class="chat-humor-main">
-                Smart Chapter &amp; Module Guidance with Interactive Checkpoints!
-              </div>
-              <div class="chat-humor-sub">
-                Aap chahe kisi bhi page par ho, Book Chat automatically aapka <strong>Current Chapter ya Module</strong> detect karta hai. Try the new interactive masterclass or structured summary below!
-              </div>
-            </div>
-
-            <div class="chat-humor-chips">
-              <button type="button" class="chat-humor-chip good" data-fill="Teach me this chapter step-by-step with interactive checkpoints">
-                <span>🎓</span>
-                <span>"Teach me this chapter"</span>
-              </button>
-              <button type="button" class="chat-humor-chip good" data-fill="Summarise this chapter with core breakdown and key takeaways">
-                <span>📖</span>
-                <span>"Summarise this chapter"</span>
-              </button>
-              <button type="button" class="chat-humor-chip good" data-fill="Explain the core topic of Page ${currentPage} in simple terms with key takeaways">
-                <span>🎯</span>
-                <span>"Explain topic on Page ${currentPage}"</span>
-              </button>
-              <button type="button" class="chat-humor-chip good" data-fill="What are the high-yield exam questions from Page ${currentPage}?">
-                <span>💡</span>
-                <span>"Exam questions on Page ${currentPage}"</span>
-              </button>
-            </div>
+          <div class="chat-empty-sub">Ask anything. Answers come from ${isGlobal ? 'your library' : 'this book'}, with page links.</div>
+          <div class="cw-starters">
+            <div class="cw-starters-label">Try asking</div>
+            ${starters.map(q => `<button type="button" class="cw-starter" data-fill="${window.escapeHtml(q)}"><span>${window.escapeHtml(q)}</span>${window.icon('chevRight','icon icon-xs')}</button>`).join('')}
           </div>
         </div>
       `;
 
       // Attach click events on empty state chips to send immediately
-      chatLogEl.querySelectorAll('.chat-humor-chip.good').forEach(chip => {
+      chatLogEl.querySelectorAll('.cw-starter').forEach(chip => {
         chip.onclick = () => {
           const fill = chip.getAttribute('data-fill');
           if (fill) {
@@ -310,57 +275,44 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       return;
     }
 
+    const lastIdx = chatMessages.length - 1;
     let html = chatMessages.map((m, idx) => {
       const isUser = m.role === 'user';
-      
+      const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : '';
+      const realReply = !isUser && m.text !== '…' && !m.isError;
+
+      if (isUser) {
+        return `
+        <div class="teacher-chat-msg cw-row cw-row-user" id="msg-card-${idx}">
+          <button class="btn-teacher-action cw-ghost" data-action="delete-msg" data-idx="${idx}" title="Delete message" aria-label="Delete message">${window.icon('trash','icon icon-xs')}</button>
+          <div class="chat-msg-user-bubble">${window.escapeHtml(m.text || '')}</div>
+        </div>`;
+      }
+
       return `
-        <div class="teacher-chat-msg" style="display:flex; flex-direction:column; align-self:${isUser ? 'flex-end' : 'flex-start'}; max-width:${isUser ? '85%' : '100%'}; width:auto;" id="msg-card-${idx}">
-          <div style="display:flex; align-items:center; justify-content:${isUser ? 'flex-end' : 'flex-start'}; gap:6px; margin-bottom:3px; padding:0 4px;">
-            <span style="font-size:11px; font-weight:700; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em;">
-              ${isUser ? 'You' : 'AI Tutor'}
-            </span>
-            <span style="font-size:10px; color:var(--text-faint);">
-              ${m.timestamp ? new Date(m.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}) : ''}
-            </span>
-            ${isUser ? `
-              <button class="btn btn-icon btn-teacher-action" data-action="delete-msg" data-idx="${idx}" title="Delete message" style="width:20px; height:20px; border-radius:50%; background:transparent; border:none; color:var(--text-faint); margin-left:4px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;">
-                ${window.icon('trash','icon icon-xs')}
-              </button>
-            ` : ''}
-          </div>
-
-          <div class="${isUser ? 'chat-msg-user-bubble' : 'chat-msg-ai-bubble selectable-text'}">
-            ${isUser ? window.escapeHtml(m.text || '') : window.renderMarkdown(m.text || '')}
-          </div>
-          ${!isUser && m.quizCta ? `<div style="margin-top:8px;"><button class="btn btn-primary" data-action="open-quiz" style="padding:10px 16px;border-radius:14px;font-weight:800;">Quiz Generator kholo</button></div>` : ''}
-
-          <!-- Bottom Message Utility Bar for actual AI replies -->
-          ${!isUser && m.text !== '…' && !m.isError ? `
-            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px 6px; margin-top:6px; padding:2px 0;">
-              <button class="btn btn-teacher-action" data-action="copy" data-idx="${idx}" title="Copy" style="height:24px; padding:0 8px; font-size:11px; font-weight:600; border-radius:12px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); gap:4px;">
-                ${window.icon('copy','icon icon-xs')} <span>Copy</span>
-              </button>
-              <button class="btn btn-teacher-action" data-action="save-notes" data-idx="${idx}" title="Save as Note" style="height:24px; padding:0 8px; font-size:11px; font-weight:600; border-radius:12px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); gap:4px;">
-                ${window.icon('note','icon icon-xs')} <span>Save Note</span>
-              </button>
-              <button class="btn btn-teacher-action" data-action="make-flashcard" data-idx="${idx}" title="Create Flashcard" style="height:24px; padding:0 8px; font-size:11px; font-weight:600; border-radius:12px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); gap:4px;">
-                ${window.icon('cards','icon icon-xs')} <span>+ Flashcard</span>
-              </button>
-              <button class="btn btn-teacher-action" data-action="speak" data-idx="${idx}" title="Listen" style="height:24px; padding:0 8px; font-size:11px; font-weight:600; border-radius:12px; background:var(--surface-2); border:1px solid var(--border); color:var(--text-dim); gap:4px;">
-                ${window.icon('volume','icon icon-xs')} <span>Listen</span>
-              </button>
-              <button class="btn btn-teacher-action" data-action="delete-msg" data-idx="${idx}" title="Delete" style="height:24px; width:24px; padding:0; border-radius:50%; background:var(--surface-2); border:1px solid var(--border); color:var(--text-faint); display:flex; align-items:center; justify-content:center;">
-                ${window.icon('trash','icon icon-xs')}
-              </button>
+        <div class="teacher-chat-msg cw-row cw-row-ai" id="msg-card-${idx}">
+          <div class="cw-ai-meta"><span class="cw-ai-mark"></span>Tutor${time ? `<span class="cw-ai-time">${time}</span>` : ''}</div>
+          <div class="chat-msg-ai-bubble selectable-text">${window.renderMarkdown(m.text || '')}</div>
+          ${m.quizCta ? `<div style="margin-top:8px;"><button class="btn btn-primary" data-action="open-quiz" style="padding:10px 16px;border-radius:14px;font-weight:800;">Quiz Generator kholo</button></div>` : ''}
+          ${realReply ? `
+            <div class="cw-actions">
+              <button class="btn-teacher-action cw-act" data-action="copy" data-idx="${idx}" title="Copy">${window.icon('copy','icon icon-xs')}<span>Copy</span></button>
+              <button class="btn-teacher-action cw-act" data-action="save-notes" data-idx="${idx}" title="Save as Note">${window.icon('note','icon icon-xs')}<span>Save</span></button>
+              <button class="btn-teacher-action cw-act" data-action="make-flashcard" data-idx="${idx}" title="Create Flashcard">${window.icon('cards','icon icon-xs')}<span>Flashcard</span></button>
+              <button class="btn-teacher-action cw-act" data-action="speak" data-idx="${idx}" title="Listen">${window.icon('volume','icon icon-xs')}<span>Listen</span></button>
+              <button class="btn-teacher-action cw-act cw-act-icon" data-action="delete-msg" data-idx="${idx}" title="Delete" aria-label="Delete">${window.icon('trash','icon icon-xs')}</button>
             </div>
+            ${idx === lastIdx && !m.quizCta ? `
+            <div class="cw-follow-row">
+              <button class="cw-follow" data-fu="more">Explain more</button>
+              <button class="cw-follow" data-fu="simple">Simpler</button>
+              <button class="cw-follow" data-fu="exam">Exam question</button>
+            </div>` : ''}
           ` : ''}
-          ${!isUser && m.isError && idx === chatMessages.length - 1 && idx > 0 && chatMessages[idx-1]?.role === 'user' ? `
-            <div style="margin-top:6px;">
-              <button class="btn btn-teacher-action" data-action="retry" data-idx="${idx}" title="Retry" style="height:30px; padding:0 14px; font-size:12px; font-weight:700; border-radius:15px; background:var(--accent); color:#fff; border:0;">↻ Retry</button>
-            </div>
+          ${m.isError && idx === lastIdx && idx > 0 && chatMessages[idx-1]?.role === 'user' ? `
+            <div class="cw-actions"><button class="btn-teacher-action cw-follow" data-action="retry" data-idx="${idx}" title="Retry">↻ Retry</button></div>
           ` : ''}
-        </div>
-      `;
+        </div>`;
     }).join('');
 
     chatLogEl.innerHTML = html;
@@ -526,6 +478,17 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
           }
         }
       };
+    });
+
+    // Follow-up chips under the newest answer
+    const FOLLOW_UPS = {
+      more: 'Explain this in more detail, with one example from the book.',
+      simple: 'Explain that again in simpler words.',
+      example: 'Give me one more real-life example of this.',
+      exam: 'What exam question could come on this? Give a model answer.',
+    };
+    document.querySelectorAll('.cw-follow[data-fu]').forEach(b => {
+      b.onclick = (e) => { e.stopPropagation(); if (FOLLOW_UPS[b.dataset.fu]) sendUserMessage(FOLLOW_UPS[b.dataset.fu]); };
     });
 
     // Interactive Page Citation Chips click handler
@@ -711,6 +674,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
     document.querySelectorAll('.custom-mode-opt').forEach(btn => {
       btn.onclick = () => {
         activeTeacherMode = btn.dataset.mode;
+        paintModePill();
         const evalSec = document.getElementById('custom-evaluator-sec');
         if (evalSec) evalSec.style.display = activeTeacherMode === 'evaluator' ? 'block' : 'none';
         
@@ -1364,6 +1328,13 @@ Provide the complete academic answer now:`;
   }
 
   // --- Chapter Scope Selector & Auto-Sync Setup ---
+  function paintModePill() {
+    const t = document.getElementById('teacher-mode-pill-text');
+    const m = TEACHER_MODES.find(x => x.id === activeTeacherMode);
+    if (t && m) t.textContent = m.short || m.label;
+  }
+  const modePill = document.getElementById('teacher-mode-pill');
+  if (modePill) modePill.onclick = () => openCustomizationSheet();
   const scopeSelect = document.getElementById('teacher-chapter-select');
   const scopeBadgePill = document.getElementById('teacher-scope-badge-pill');
   let cachedChapterList = [];
