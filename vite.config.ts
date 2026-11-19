@@ -49,7 +49,7 @@ export default defineConfig(() => {
               id.includes('/src/paper_engine.js') ||
               id.includes('/src/paper_print.js') ||
               id.includes('/src/paper_ui.js') ||
-              id.includes('/src/teacher.js')
+              id.includes('/src/teacher')
             ) {
               return 'exam-tutor';
             }
