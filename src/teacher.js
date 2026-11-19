@@ -306,6 +306,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
             <div class="cw-follow-row">
               <button class="cw-follow" data-fu="more">Explain more</button>
               <button class="cw-follow" data-fu="simple">Simpler</button>
+              <button class="cw-follow" data-fu="example">Example</button>
               <button class="cw-follow" data-fu="exam">Exam question</button>
             </div>` : ''}
           ` : ''}

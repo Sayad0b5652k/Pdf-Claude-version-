@@ -7968,12 +7968,11 @@ body.ink-hidden .drawing-overlay {
   font-size: 14.5px; line-height: 1.68; overflow-wrap: anywhere;
 }
 .cw-row-ai:last-child .chat-msg-ai-bubble { border-left-color: var(--accent); }
-.chat-msg-ai-bubble h3, .chat-msg-ai-bubble h4, .chat-msg-ai-bubble h5, .chat-msg-ai-bubble h6 {
-  font-size: 15.5px !important; color: var(--text) !important; background: transparent !important;
-  border: 0 !important; border-radius: 0 !important; padding: 0 !important; margin: 16px 0 6px !important; letter-spacing: .005em;
+.chat-msg-ai-bubble h3 {
+  font-size: 15.5px !important; color: var(--text) !important; border-bottom: 0 !important;
+  padding-bottom: 0 !important; margin: 14px 0 6px !important; letter-spacing: .005em;
 }
-.chat-msg-ai-bubble h6 { font-size: 13.5px !important; color: var(--text-dim) !important; }
-.chat-msg-ai-bubble h3:first-child, .chat-msg-ai-bubble h4:first-child, .chat-msg-ai-bubble h5:first-child { margin-top: 0 !important; }
+.chat-msg-ai-bubble h3:first-child { margin-top: 0 !important; }
 .chat-msg-ai-bubble ul, .chat-msg-ai-bubble ol { list-style: revert !important; padding-left: 20px !important; margin: 4px 0 12px !important; }
 .chat-msg-ai-bubble li { margin-bottom: 5px !important; }
 .chat-msg-ai-bubble li::marker { color: var(--accent); font-weight: 700; }
@@ -7998,14 +7997,14 @@ body.ink-hidden .drawing-overlay {
 .cw-act-icon:hover { color: var(--danger); }
 
 /* follow-up chips under the newest answer */
-.cw-follow-row { display: flex; flex-wrap: nowrap; gap: 7px; margin: 10px 0 0 15px; overflow-x: auto; scrollbar-width: none; }
-.cw-follow-row::-webkit-scrollbar { display: none; }
+.cw-follow-row { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 0 15px; }
 .cw-follow {
   flex: 0 0 auto; display: inline-flex; align-items: center; height: 32px; padding: 0 13px; border-radius: 16px; cursor: pointer;
   background: transparent; color: var(--text); border: 1px solid var(--border);
   font: inherit; font-size: 12.5px; font-weight: 600; white-space: nowrap;
   transition: border-color .15s ease, color .15s ease, background .15s ease;
 }
+.cw-follow::before { content: '\21B3'; margin-right: 6px; color: var(--accent); font-weight: 700; }
 .cw-follow:active, .cw-follow:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
 /* empty state: plain list instead of a promo card */
