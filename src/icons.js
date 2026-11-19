@@ -33,6 +33,7 @@ export const ICONS = {
   list:'<rect x="3" y="5" width="4" height="4"/><rect x="3" y="10" width="4" height="4"/><rect x="3" y="15" width="4" height="4"/><path d="M10 7h11M10 12h11M10 17h11"/>',
   grid:'<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
   upload:'<path d="M12 3v11"/><path d="m7 8 5-5 5 5"/><path d="M4 21h16"/>',
+  download:'<path d="M12 3v11"/><path d="m7 10 5 5 5-5"/><path d="M4 21h16"/>',
   lock:'<rect x="5" y="11" width="14" height="10"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
   calendar:'<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M8 3v4M16 3v4M3 10h18"/>',
