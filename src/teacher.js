@@ -3,7 +3,7 @@ import { callAI, callServerGemini, speakWithElevenLabs, stopElevenAudio } from '
 import { teacherState } from './teacher_state.js';
 import { deduplicateSpokenPhrase, transliterateDevanagariToHinglish } from './teacher_text.js';
 import { extractAllMarkers, findRelevantPages, getTeacherContext } from './teacher_context.js';
-import { loadTeacherChatHistory, saveTeacherChatHistory, clearTeacherChatHistory, buildCompactHistory, formatCompactHistory } from './teacher_history.js';
+import { loadTeacherChatHistory, saveTeacherChatHistory, clearTeacherChatHistory } from './teacher_history.js';
 import { stopVoiceRecognition, isVoiceActive } from './teacher_voice.js';
 
 /* ============================================================
@@ -1085,8 +1085,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         systemPersonaInstruction = 'Academic mode: act like a sharp, rigorous teacher. NEVER greet; start with a 1-2 line direct answer, then break it down textbook-style: the core concept in plain words, how/why it works, one concrete example, and the exam-relevant points (key terms in bold, common mistakes). Keep it tight and skip sections that do not apply to a simple question. For a casual or one-line question, just answer naturally without the full structure.';
       }
 
-      const compactHistory = buildCompactHistory(chatMessages);
-      const recentConvo = formatCompactHistory(compactHistory);
+      const recentConvo = chatMessages.slice(-6, -1).map(m => `${m.role === 'user' ? 'Student' : 'AI Tutor'}: ${m.text}`).join('\n\n');
 
       const streamMode = typeof window.getStreamingMode === 'function' ? window.getStreamingMode() : (window.State?.streamingMode || 'sse');
       const aiMsgCard = chatLogEl.querySelector('#msg-card-' + (chatMessages.length - 1)) || chatLogEl.querySelector('.teacher-chat-msg:last-child');
@@ -1106,8 +1105,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         fullContext: ctx.chapterText || ctx.pageText || ctx.bookOverviewText,
         persona: systemPersonaInstruction,
         language: 'English/Hinglish (matching the student natural inquiry)',
-        chatHistory: compactHistory.chatHistory,
-        conversationSummary: compactHistory.conversationSummary,
+        chatHistory: chatMessages.slice(-20, -2).filter(m => m.text && m.text !== '…' && !m.isError).map(m => ({ role: m.role, text: m.text + '' })),
         customKey: customKey || undefined,
         preferredEngine: activeAiEngine || 'auto',
         explanationStyle: activeExplanationStyle || 'comprehensive',
