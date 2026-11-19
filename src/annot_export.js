@@ -238,6 +238,39 @@ export async function openShareAnnotatedSheet(fileId) {
   };
 }
 
+/**
+ * Puts the annotations from a shared PDF's attachment into this device's database, for the freshly added book.
+ * Original ids are kept when free (so a re-share still matches), new ids are made only on a clash.
+ */
+export async function restoreSayadPayload(fileId, payload) {
+  const authors = new Set();
+  let total = 0;
+  const freeId = async (store, id) => {
+    const hit = id ? await window.DB.get(store, id).catch(() => null) : null;
+    return hit ? window.uid() : (id || window.uid());
+  };
+  for (const a of payload.annotations || []) {
+    if (!a || !a.rects || !a.rects.length) continue;
+    await window.DB.put('annotations', { ...a, id: await freeId('annotations', a.id), fileId });
+    if (a.by) authors.add(a.by);
+    total++;
+  }
+  for (const d of payload.drawings || []) {
+    if (!d || !d.json) continue;
+    await window.DB.put('annotations', { id: `fabric_draw_f${fileId}_p${d.page}`, fileId, page: d.page, kind: 'drawing', json: d.json, updatedAt: d.updatedAt || Date.now(), by: d.by });
+    if (d.by) authors.add(d.by);
+    total++;
+  }
+  for (const n of payload.notes || []) {
+    if (!n || !n.content) continue;
+    await window.DB.put('notes', { ...n, id: await freeId('notes', n.id), fileId });
+    if (n.by) authors.add(n.by);
+    total++;
+  }
+  return { total, authors: [...authors] };
+}
+
+window.restoreSayadPayload = restoreSayadPayload;
 window.openShareAnnotatedSheet = openShareAnnotatedSheet;
 window.buildAnnotatedPdf = buildAnnotatedPdf;
 window.readSayadPayload = readSayadPayload;

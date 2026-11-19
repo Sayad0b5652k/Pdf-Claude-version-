@@ -4425,6 +4425,8 @@ export async function openReaderMenu(){
       <button class="btn btn-ghost" style="flex:1;" id="tab-highlights">Highlights (${annots.length})</button>
       <button class="btn btn-ghost" style="flex:1;" id="tab-notes">Notes (${notes.length})</button>
     </div>
+    ${(()=>{ const h = window.State.currentFile.sharedHistory; if(!h || !h.length) return '';
+      return `<div style="font-size:12px; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md); padding:8px 10px; margin-bottom:12px;"><b>Shared edits:</b> ${h.map(x=>`${window.escapeHtml(String(x.by||'?'))} ${window.escapeHtml(String(x.action||'edited'))} · ${new Date(x.at).toLocaleDateString()}`).join(' → ')}</div>`; })()}
     <div id="reader-menu-content"></div>
     <div style="display:flex; align-items:center; justify-content:space-between; margin-top:16px; padding:6px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-md);">
       <button class="btn btn-icon" id="zoom-step-out" style="width:36px; height:36px;">${window.icon('zoomOut','icon icon-sm')}</button>
@@ -4482,7 +4484,7 @@ export async function openReaderMenu(){
   function showHighlights(){
     content.innerHTML = annots.length? annots.map(a=>`<div class="menu-jump" data-page="${a.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
       <div style="flex:1; min-width:0;">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${a.color}; flex-shrink:0;"></span><span class="font-mono" style="font-size:11px; color:var(--text-faint);">Page ${a.page} · ${a.type==='underline'?'underline':'highlight'}</span></div>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${a.color}; flex-shrink:0;"></span><span class="font-mono" style="font-size:11px; color:var(--text-faint);">Page ${a.page} · ${a.type==='underline'?'underline':'highlight'}${a.by?' · '+window.escapeHtml(String(a.by)):''}</span></div>
         <div style="font-size:13.5px; color:var(--text-dim); overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${window.escapeHtml(a.text||'')}</div>
       </div>
       <button class="btn del-annot-btn" data-id="${a.id}" style="width:32px; height:32px; background:transparent; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
