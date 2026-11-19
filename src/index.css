@@ -8037,6 +8037,8 @@ body.ink-hidden .drawing-overlay {
 .sy-aisearch input {
   flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: transparent; box-shadow: none;
   color: var(--text); font: inherit; font-size: 14px; padding: 0;
+}
+
 /* ============================================================
    NOTES VIEW (makeover)
    Header lives fully inside its card, notes are split into clear
