@@ -4411,7 +4411,8 @@ export async function openBookmarkCategoryPicker(fid, page){
 export async function openReaderMenu(){
   const fid = window.State.currentFile.id;
   const bms = (await window.DB.byIndex('bookmarks','fileId',fid)).sort((a,b)=>a.page-b.page);
-  const annots = (await window.DB.byIndex('annotations','fileId',fid)).sort((a,b)=>a.page-b.page);
+  // freehand drawings live in the same store but are not highlights, keep them out of this list
+  const annots = (await window.DB.byIndex('annotations','fileId',fid)).filter(a=>a.rects && a.rects.length).sort((a,b)=>a.page-b.page);
   const notes = (await window.DB.byIndex('notes','fileId',fid)).sort((a,b)=>a.page-b.page);
   window.Sheet.open(`
     <div style="display:flex; align-items:center; justify-content:space-between; margin:4px 0 12px;">
@@ -4486,15 +4487,33 @@ export async function openReaderMenu(){
     </button>`).join('') : window.emptyState('bookmark','No bookmarks yet','Tap the bookmark icon while reading.');
     bindJumps();
   }
+  let myName = '';
+  try { myName = localStorage.getItem('sayad_author_name') || ''; } catch(e){}
+  // a highlight that came in a shared PDF from someone else and has not been reviewed yet
+  const isForeign = (a)=> !!(a.by && a.by!==myName && !a.reviewed);
   function showHighlights(){
-    content.innerHTML = annots.length? annots.map(a=>`<div class="menu-jump" data-page="${a.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
+    const pending = annots.filter(isForeign);
+    content.innerHTML = (pending.length? `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; margin-bottom:6px; background:var(--accent-soft); border-radius:var(--radius-md); font-size:12.5px;"><span><b>${pending.length}</b> to review from ${[...new Set(pending.map(x=>window.escapeHtml(String(x.by))))].join(', ')}</span><button class="btn" id="review-accept-all" style="padding:6px 10px; font-size:12px;">Keep all</button></div>`:'') + (annots.length? annots.map(a=>`<div class="menu-jump" data-page="${a.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
       <div style="flex:1; min-width:0;">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${a.color}; flex-shrink:0;"></span><span class="font-mono" style="font-size:11px; color:var(--text-faint);">Page ${a.page} · ${a.type==='underline'?'underline':'highlight'}${a.by?' · '+window.escapeHtml(String(a.by)):''}</span></div>
         <div style="font-size:13.5px; color:var(--text-dim); overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${window.escapeHtml(a.text||'')}</div>
       </div>
-      <button class="btn del-annot-btn" data-id="${a.id}" style="width:32px; height:32px; background:transparent; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
-    </div>`).join('') : window.emptyState('highlighter','No highlights yet','Select text while reading to highlight it.');
+      ${isForeign(a)?`<button class="btn review-keep-btn" data-id="${a.id}" title="Keep" style="width:32px; height:32px; background:var(--accent-soft); color:var(--accent); flex-shrink:0;">${window.icon('check','icon icon-sm')}</button>`:''}
+      <button class="btn del-annot-btn" data-id="${a.id}" title="${isForeign(a)?'Reject':'Delete'}" style="width:32px; height:32px; background:transparent; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
+    </div>`).join('') : window.emptyState('highlighter','No highlights yet','Select text while reading to highlight it.'));
     bindJumps();
+    content.querySelectorAll('.review-keep-btn').forEach(btn=>{
+      btn.onclick = async (e)=>{
+        e.stopPropagation();
+        const a = annots.find(x=>x.id===btn.dataset.id);
+        if(a){ a.reviewed = true; await window.DB.put('annotations', a); showHighlights(); }
+      };
+    });
+    const keepAll = document.getElementById('review-accept-all');
+    if(keepAll) keepAll.onclick = async ()=>{
+      for(const a of pending){ a.reviewed = true; await window.DB.put('annotations', a); }
+      showHighlights(); window.toast('Kept all');
+    };
     content.querySelectorAll('.del-annot-btn').forEach(btn=>{
       btn.onclick = (e)=>{
         e.stopPropagation();
