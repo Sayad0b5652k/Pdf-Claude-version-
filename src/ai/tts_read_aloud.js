@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { fixLegacyHindi, fixLegacyItems, pageIsLegacyHindi } from "../hindi_fix.js";
+import { fetchWithTimeout } from "./study_core.js";
 
 // --- MICROSOFT NEURAL & ELEVENLABS & TTS ENGINES ---
 export const MICROSOFT_NEURAL_VOICES = [
