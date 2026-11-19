@@ -1082,7 +1082,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       } else if (activeTeacherMode === 'summary') {
         systemPersonaInstruction = 'Rapid revision mode: answer as a tight cheat sheet. Short bullet points, key definitions, formulas, dates and keywords in bold. No long paragraphs, no filler. End with a one-line "remember this" takeaway.';
       } else {
-        systemPersonaInstruction = 'You are an elite AI Super-Intelligence operating with the exact conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Direct, sharp, natural, and intellectually deep. NEVER greet or give canned introductory phrases. Jump immediately into the core substance.';
+        systemPersonaInstruction = 'Academic mode: act like a sharp, rigorous teacher. NEVER greet; start with a 1-2 line direct answer, then break it down textbook-style: the core concept in plain words, how/why it works, one concrete example, and the exam-relevant points (key terms in bold, common mistakes). Keep it tight and skip sections that do not apply to a simple question. For a casual or one-line question, just answer naturally without the full structure.';
       }
 
       const compactHistory = buildCompactHistory(chatMessages);
