@@ -8301,3 +8301,125 @@ body.ink-hidden .drawing-overlay {
   .nt-head-actions { width: 100%; justify-content: space-between; }
   .nt-title { font-size: 18px; }
 }
+
+/* ============================================================
+   BOOK CHAT v2: header, focus switch, tiles, answer card, tools
+   ============================================================ */
+.chat-top-bar { gap: 10px; padding: 10px 14px; }
+.cw-back {
+  flex: 0 0 38px; width: 38px; height: 38px; border-radius: 12px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; padding: 0;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+}
+.cw-head-text { flex: 1 1 auto; min-width: 0; }
+.cw-head-title { font-size: 15px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-head-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cw-grounded { color: #10b981; font-weight: 700; }
+.cw-tune {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 13px 0 11px;
+  border-radius: 19px; cursor: pointer; font: inherit; font-size: 12.5px; font-weight: 700;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid transparent;
+}
+.cw-tune:active { border-color: var(--accent); }
+
+.cw-scope {
+  flex-shrink: 0; max-width: 760px; margin: 0 auto; width: 100%; box-sizing: border-box;
+  padding: 10px 14px 8px; background: var(--bg); display: flex; flex-direction: column; gap: 7px;
+}
+.cw-seg { display: flex; gap: 4px; padding: 4px; border-radius: 14px; background: var(--surface-2); border: 1px solid var(--border); }
+.cw-seg button {
+  flex: 1 1 0; min-width: 0; height: 34px; border: 0; border-radius: 10px; cursor: pointer; font: inherit;
+  font-size: 12.5px; font-weight: 700; color: var(--text-dim); background: transparent;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: background .15s ease, color .15s ease;
+}
+.cw-seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+.cw-reading {
+  display: flex; align-items: center; gap: 6px; min-width: 0; width: 100%; padding: 2px 2px; background: transparent; border: 0;
+  font: inherit; font-size: 12px; color: var(--text-dim); text-align: left; cursor: pointer;
+}
+.cw-reading b { color: var(--text); font-weight: 700; min-width: 0; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cw-reading .icon { flex: 0 0 auto; color: var(--accent); }
+.cw-reading-lbl { flex: 0 0 auto; }
+.cw-reading-static { cursor: default; }
+
+/* chapter picker sheet */
+.cw-ch-search { width: 100%; box-sizing: border-box; padding: 11px 12px; margin-bottom: 10px; font-size: 14px; }
+.cw-chlist { max-height: 56vh; overflow-y: auto; display: flex; flex-direction: column; gap: 7px; }
+.cw-chrow {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; text-align: left; cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; font: inherit; color: var(--text);
+}
+.cw-chrow.on { border-color: var(--accent); background: var(--accent-soft); }
+.cw-chn { flex: 0 0 26px; height: 26px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; background: var(--surface); color: var(--accent); }
+.cw-cht { flex: 1 1 auto; min-width: 0; font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
+.cw-chp { flex: 0 0 auto; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono, monospace); }
+
+/* empty state */
+.cw-hero { padding: 8px 2px 18px; }
+.cw-hero-title { font-size: 24px; font-weight: 800; line-height: 1.15; margin: 10px 0 4px; font-family: var(--font-display, inherit); }
+.cw-hero-sub { font-size: 13px; color: var(--text-dim); margin-bottom: 16px; }
+.cw-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.cw-tile {
+  display: flex; flex-direction: column; justify-content: space-between; gap: 14px; min-height: 104px; padding: 14px; text-align: left; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 16px; font: inherit; color: var(--text); min-width: 0;
+  transition: border-color .15s ease, transform .1s ease;
+}
+.cw-tile:active { border-color: var(--accent); transform: scale(.98); }
+.cw-tile-ic { font-size: 22px; line-height: 1; }
+.cw-tile b { display: block; font-size: 14px; }
+.cw-tile small { display: block; margin-top: 2px; font-size: 11px; color: var(--text-dim); overflow-wrap: anywhere; }
+.cw-hero .cw-starters { margin-top: 18px; max-width: none; }
+
+/* answer card */
+.cw-row-ai .cw-card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; min-width: 0;
+}
+.cw-row-ai:last-child .cw-card { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cw-card-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 36px; padding: 0 6px 0 14px;
+  background: var(--accent-soft);
+}
+.cw-card-head .cw-ai-meta { margin: 0; color: var(--accent); }
+.cw-card-head .cw-ai-time { color: var(--accent); opacity: .75; }
+.cw-card .chat-msg-ai-bubble { padding: 14px 14px 10px; border-left: 0 !important; }
+.cw-card .cw-actions {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin: 0; overflow: visible; border-top: 1px solid var(--border);
+}
+.cw-card .cw-actions .cw-act { height: 42px; border-radius: 0; justify-content: center; padding: 0 4px; min-width: 0; }
+.cw-card .cw-actions .cw-act + .cw-act { border-left: 1px solid var(--border); }
+.cw-card .cw-actions .cw-act span { overflow: hidden; text-overflow: ellipsis; }
+.cw-row-ai .cw-follow-row { margin: 10px 0 0 0; }
+.cw-actions-solo { margin: 8px 0 0 0; }
+
+/* quick bar + tools */
+.cw-chipbar { display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.cw-chipbar::-webkit-scrollbar { display: none; }
+.cw-tools-chip { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; white-space: nowrap; color: var(--accent) !important; border-color: var(--accent) !important; }
+.cw-toolgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.cw-toolbtn {
+  min-height: 52px; padding: 10px 12px; text-align: left; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; color: var(--text);
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 13px; overflow-wrap: anywhere;
+}
+.cw-toolbtn:active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* Notebook theme: same layout, ink borders */
+html[data-pro-theme="notebook"] .cw-tile,
+html[data-pro-theme="notebook"] .cw-row-ai .cw-card,
+html[data-pro-theme="notebook"] .cw-seg,
+html[data-pro-theme="notebook"] .cw-toolbtn { border: 2px solid var(--border); box-shadow: var(--nb-shadow-sm); }
+html[data-pro-theme="notebook"] .cw-tile:nth-child(4n+1) { background: color-mix(in srgb,#FF4F9A 12%,var(--surface)); }
+html[data-pro-theme="notebook"] .cw-tile:nth-child(4n+2) { background: color-mix(in srgb,#8B6CFF 14%,var(--surface)); }
+html[data-pro-theme="notebook"] .cw-tile:nth-child(4n+3) { background: color-mix(in srgb,#14B88A 14%,var(--surface)); }
+html[data-pro-theme="notebook"] .cw-tile:nth-child(4n+4) { background: color-mix(in srgb,#F5A300 16%,var(--surface)); }
+html[data-pro-theme="notebook"] .cw-hero-title { font-family: var(--nb-display); }
+/* Editorial theme: square, hairline */
+html[data-pro-theme="editorial"] .cw-tile,
+html[data-pro-theme="editorial"] .cw-row-ai .cw-card,
+html[data-pro-theme="editorial"] .cw-seg,
+html[data-pro-theme="editorial"] .cw-toolbtn,
+html[data-pro-theme="editorial"] .cw-back,
+html[data-pro-theme="editorial"] .cw-tune { border-radius: 4px; }
+html[data-pro-theme="editorial"] .cw-seg button { border-radius: 2px; }
+html[data-pro-theme="editorial"] .cw-hero-title { font-family: 'Playfair Display', Georgia, serif; }
+.cw-card .chat-msg-ai-bubble > :first-child { margin-top: 0 !important; }
+.cw-card .chat-msg-ai-bubble h1, .cw-card .chat-msg-ai-bubble h2 { margin-top: 0 !important; }

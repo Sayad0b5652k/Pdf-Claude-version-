@@ -87,42 +87,29 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
   document.getElementById('app').innerHTML = `
   <div class="chat-workspace">
     
-    <!-- Clean Minimalist Header: Back, Doc info, and Settings -->
+    <!-- Header: back, book + page, tutor settings -->
     <header class="chat-top-bar" id="teacher-header">
-      <div style="display:flex; align-items:center; gap:10px; min-width:0; flex:1;">
-        <button class="btn btn-icon" id="teacher-back-btn" title="Back to Reader" style="width:34px; height:34px; border-radius:50%; background:var(--surface-2); border:1px solid var(--border); flex-shrink:0; color:var(--text);">
-          ${window.icon('chevLeft','icon icon-sm')}
-        </button>
-
-        <div style="min-width:0;">
-          <div style="font-size:14px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${window.escapeHtml(docTitle)}">
-            ${window.escapeHtml(docTitle)}
-          </div>
-          <div style="font-size:11px; color:var(--text-dim); margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-            ${isGlobal ? 'Universal Library' : `Page ${currentPage} of ${totalPages}`} • <span style="color:#10b981; font-weight:600;">Grounded</span>
-          </div>
-        </div>
+      <button class="cw-back" id="teacher-back-btn" title="Back to Reader" aria-label="Back">${window.icon('chevLeft','icon icon-sm')}</button>
+      <div class="cw-head-text">
+        <div class="cw-head-title" title="${window.escapeHtml(docTitle)}">${window.escapeHtml(docTitle)}</div>
+        <div class="cw-head-sub">${isGlobal ? 'Universal Library' : `Page ${currentPage} of ${totalPages}`} · <span class="cw-grounded">Grounded</span></div>
       </div>
-
-      <!-- Single clean Settings button -->
-      <button class="btn btn-icon" id="teacher-custom-toggle" title="Settings & Personas" style="width:34px; height:34px; border-radius:50%; background:var(--surface-2); border:1px solid var(--border); color:var(--text); flex-shrink:0;">
-        ${window.icon('settings','icon icon-sm')}
-      </button>
+      <button class="cw-tune" id="teacher-custom-toggle" title="Tutor style, engine and persona" aria-label="Tutor settings">${window.icon('sliders','icon icon-sm')}<span>Tutor</span></button>
     </header>
 
-    <!-- Context row: what the chat is reading from + how the tutor answers -->
-    <div class="cw-context" id="teacher-scope-bar">
+    <!-- What the chat reads from: Page / Chapter / Book -->
+    <div class="cw-scope" id="teacher-scope-bar">
       ${!isGlobal ? `
-      <div class="cw-context-select">
-        <select id="teacher-chapter-select" data-custom-title="Select Chat Context Focus" style="width:100%;">
-          <option value="__loading__">Detecting chapter…</option>
-        </select>
+      <div class="cw-seg" id="cw-seg" role="tablist" aria-label="Chat focus">
+        <button type="button" data-scope="page">Page ${currentPage}</button>
+        <button type="button" data-scope="chapter">Chapter</button>
+        <button type="button" data-scope="book">Book</button>
       </div>
-      <span id="teacher-scope-badge-pill" class="cw-scope-badge">AUTO</span>
-      ` : '<div class="cw-context-select cw-context-label">Whole library</div>'}
-      <button class="cw-mode-pill" id="teacher-mode-pill" type="button" title="How the tutor answers">
-        <span class="cw-mode-dot"></span><span id="teacher-mode-pill-text">${window.escapeHtml(getModeLabel())}</span>${window.icon('chevDown','icon icon-xs')}
+      <button type="button" class="cw-reading" id="cw-reading">
+        <span class="cw-reading-lbl">Reading from</span><b id="cw-reading-text">…</b>${window.icon('chevDown','icon icon-xs')}
       </button>
+      <select id="teacher-chapter-select" data-native="true" hidden></select><span id="teacher-scope-badge-pill" hidden></span>
+      ` : '<div class="cw-reading cw-reading-static"><span class="cw-reading-lbl">Reading from</span><b>Whole library</b></div>'}
     </div>
 
     <!-- Main Clean Chat Log Scroll Container -->
@@ -134,37 +121,7 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
     <div style="flex-shrink:0; padding:6px 14px 12px; background:var(--bg); border-top:1px solid var(--border); max-width:760px; margin:0 auto; width:100%;">
       
       <!-- Quick Prompt Suggestion Chips -->
-      <div id="chat-quick-chips-bar" style="display:flex; align-items:center; gap:6px; overflow-x:auto; padding-bottom:6px; scrollbar-width:none; -webkit-overflow-scrolling:touch;">
-        ${!isGlobal ? `
-        <button class="chat-quick-chip" data-query="Teach me this chapter step-by-step with interactive checkpoints">
-          <span>🎓 Teach Me Chapter</span>
-        </button>
-        <button class="chat-quick-chip" data-query="Summarise this chapter with core breakdown and key takeaways">
-          <span>📖 Summarise Chapter</span>
-        </button>
-        ` : ''}
-        <button class="chat-quick-chip" data-query="Quiz me — 5 questions from this book, one at a time">
-          <span>🧠 Quiz me</span>
-        </button>
-        <button class="chat-quick-chip" data-query="⚡ Detail me samjhao — key concepts, causes, aur deep breakdown ke saath">
-          <span>⚡ Detail me samjhao</span>
-        </button>
-        <button class="chat-quick-chip" data-query="Draw a clear Mermaid flowchart diagram explaining this process step-by-step">
-          <span>📊 Flowchart</span>
-        </button>
-        <button class="chat-quick-chip" data-query="💡 Is concept ko simple real-world analogy se samjhao (zero jargon)">
-          <span>💡 Simple Analogy</span>
-        </button>
-        <button class="chat-quick-chip" data-query="🎯 Exam ke point of view se important questions, keywords aur scoring points batao">
-          <span>🎯 Exam Points</span>
-        </button>
-        <button class="chat-quick-chip" data-query="🗺️ Is topic ka authentic educational map dikhao">
-          <span>🗺️ Map dikhao</span>
-        </button>
-        <button class="chat-quick-chip" data-query="🖼️ Is concept ka labeled diagram ya authentic visual illustration dikhao">
-          <span>🖼️ Visual / Diagram</span>
-        </button>
-      </div>
+      <div id="chat-quick-chips-bar" class="cw-chipbar"></div>
 
       <!-- Minimalist Docked Input Capsule with Voice Mic -->
       <div class="chat-input-capsule" id="teacher-input-wrapper">
@@ -244,23 +201,34 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
     if (!chatLogEl) return;
 
     if (chatMessages.length === 0) {
-      const starters = isGlobal
-        ? ['Explain a concept in simple words', 'Help me make a study plan', 'Give me a tricky practice question']
-        : [`Explain Page ${currentPage} in simple words`, 'Summarise this chapter in key points', `Likely exam questions from Page ${currentPage}`, 'Make a flowchart of this chapter'];
+      const T = scopeTarget();
+      const tiles = isGlobal ? [
+        ['💡','Explain a concept','Simple words, examples','Explain a concept in simple words'],
+        ['🗓️','Study plan','Plan my revision','Help me make a study plan'],
+        ['🧠','Quiz me','5 questions, one by one','Quiz me — 5 questions from my books, one at a time'],
+        ['✍️','Practice question','Something tricky','Give me a tricky practice question']
+      ] : [
+        ['🎓','Teach me', `${T}, step by step`, `Teach me ${T} step-by-step with interactive checkpoints`],
+        ['📖','Summarise', `${T} in key points`, `Summarise ${T} with core breakdown and key takeaways`],
+        ['🧠','Quiz me','5 questions, one by one','Quiz me — 5 questions from this book, one at a time'],
+        ['🎯','Exam points','Likely questions','🎯 Exam ke point of view se important questions, keywords aur scoring points batao']
+      ];
+      const starters = isGlobal ? [] : [`Explain ${T} in simple words`, 'Make a flowchart of this chapter'];
       chatLogEl.innerHTML = `
-        <div class="chat-empty-hero">
-          <div class="chat-empty-icon">${window.icon('book', 'icon icon-lg')}</div>
-          <div class="chat-empty-title">${window.escapeHtml(docTitle)}</div>
-          <div class="chat-empty-sub">Ask anything. Answers come from ${isGlobal ? 'your library' : 'this book'}, with page links.</div>
-          <div class="cw-starters">
-            <div class="cw-starters-label">Try asking</div>
-            ${starters.map(q => `<button type="button" class="cw-starter" data-fill="${window.escapeHtml(q)}"><span>${window.escapeHtml(q)}</span>${window.icon('chevRight','icon icon-xs')}</button>`).join('')}
+        <div class="chat-empty-hero cw-hero">
+          <div class="cw-hero-title">Kya padhna hai aaj?</div>
+          <div class="cw-hero-sub">${isGlobal ? 'Jawab tumhari library se aayenge.' : 'Jawab isi book se aayenge, page links ke saath.'}</div>
+          <div class="cw-tiles">
+            ${tiles.map(t => `<button type="button" class="cw-tile" data-fill="${window.escapeHtml(t[3])}"><span class="cw-tile-ic">${t[0]}</span><span><b>${t[1]}</b><small>${window.escapeHtml(t[2])}</small></span></button>`).join('')}
           </div>
+          ${starters.length ? `<div class="cw-starters">
+            <div class="cw-starters-label">Or try</div>
+            ${starters.map(q => `<button type="button" class="cw-starter" data-fill="${window.escapeHtml(q)}"><span>${window.escapeHtml(q)}</span>${window.icon('chevRight','icon icon-xs')}</button>`).join('')}
+          </div>` : ''}
         </div>
       `;
-
       // Attach click events on empty state chips to send immediately
-      chatLogEl.querySelectorAll('.cw-starter').forEach(chip => {
+      chatLogEl.querySelectorAll('.cw-starter, .cw-tile').forEach(chip => {
         chip.onclick = () => {
           const fill = chip.getAttribute('data-fill');
           if (fill) {
@@ -291,27 +259,30 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
 
       return `
         <div class="teacher-chat-msg cw-row cw-row-ai" id="msg-card-${idx}">
-          <div class="cw-ai-meta"><span class="cw-ai-mark"></span>Tutor${time ? `<span class="cw-ai-time">${time}</span>` : ''}</div>
-          <div class="chat-msg-ai-bubble selectable-text">${window.renderMarkdown(m.text || '')}</div>
-          ${m.quizCta ? `<div style="margin-top:8px;"><button class="btn btn-primary" data-action="open-quiz" style="padding:10px 16px;border-radius:14px;font-weight:800;">Quiz Generator kholo</button></div>` : ''}
-          ${realReply ? `
+          <div class="cw-card">
+            <div class="cw-card-head">
+              <span class="cw-ai-meta"><span class="cw-ai-mark"></span>Tutor${time ? `<span class="cw-ai-time">${time}</span>` : ''}</span>
+              ${realReply ? `<button class="btn-teacher-action cw-act cw-act-icon" data-action="delete-msg" data-idx="${idx}" title="Delete" aria-label="Delete">${window.icon('trash','icon icon-xs')}</button>` : ''}
+            </div>
+            <div class="chat-msg-ai-bubble selectable-text">${window.renderMarkdown(m.text || '')}</div>
+            ${m.quizCta ? `<div style="padding:0 14px 12px;"><button class="btn btn-primary" data-action="open-quiz" style="padding:10px 16px;border-radius:14px;font-weight:800;">Quiz Generator kholo</button></div>` : ''}
+            ${realReply ? `
             <div class="cw-actions">
               <button class="btn-teacher-action cw-act" data-action="copy" data-idx="${idx}" title="Copy">${window.icon('copy','icon icon-xs')}<span>Copy</span></button>
               <button class="btn-teacher-action cw-act" data-action="save-notes" data-idx="${idx}" title="Save as Note">${window.icon('note','icon icon-xs')}<span>Save</span></button>
               <button class="btn-teacher-action cw-act" data-action="make-flashcard" data-idx="${idx}" title="Create Flashcard">${window.icon('cards','icon icon-xs')}<span>Flashcard</span></button>
               <button class="btn-teacher-action cw-act" data-action="speak" data-idx="${idx}" title="Listen">${window.icon('volume','icon icon-xs')}<span>Listen</span></button>
-              <button class="btn-teacher-action cw-act cw-act-icon" data-action="delete-msg" data-idx="${idx}" title="Delete" aria-label="Delete">${window.icon('trash','icon icon-xs')}</button>
-            </div>
-            ${idx === lastIdx && !m.quizCta ? `
-            <div class="cw-follow-row">
-              <button class="cw-follow" data-fu="more">Explain more</button>
-              <button class="cw-follow" data-fu="simple">Simpler</button>
-              <button class="cw-follow" data-fu="example">Example</button>
-              <button class="cw-follow" data-fu="exam">Exam question</button>
             </div>` : ''}
-          ` : ''}
+          </div>
+          ${realReply && idx === lastIdx && !m.quizCta ? `
+          <div class="cw-follow-row">
+            <button class="cw-follow" data-fu="more">Explain more</button>
+            <button class="cw-follow" data-fu="simple">Simpler</button>
+            <button class="cw-follow" data-fu="example">Example</button>
+            <button class="cw-follow" data-fu="exam">Exam question</button>
+          </div>` : ''}
           ${m.isError && idx === lastIdx && idx > 0 && chatMessages[idx-1]?.role === 'user' ? `
-            <div class="cw-actions"><button class="btn-teacher-action cw-follow" data-action="retry" data-idx="${idx}" title="Retry">↻ Retry</button></div>
+            <div class="cw-actions cw-actions-solo"><button class="btn-teacher-action cw-follow" data-action="retry" data-idx="${idx}" title="Retry">↻ Retry</button></div>
           ` : ''}
         </div>`;
     }).join('');
@@ -785,6 +756,44 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
     return s.slice(0, 26);
   };
 
+  // ---- scope label + quick tools (Teach / Quiz up front, everything else in a Tools sheet) ----
+  function scopeTarget() {
+    const c = teacherState.currentSessionChapter;
+    if (activeContextScope === 'chapter' && c) return c.chapterNumber ? `Chapter ${c.chapterNumber}` : (c.chapterTitle || 'this chapter');
+    if (activeContextScope === 'book') return 'this book';
+    return `Page ${currentPage}`;
+  }
+  let lastToolChips = [];
+  function sendQuick(q) { if (q && inputEl) { inputEl.value = q; sendUserMessage(); } }
+  function openToolsSheet() {
+    if (!lastToolChips.length) return;
+    window.Sheet.open(`
+      <div class="font-display" style="font-size:17px; font-weight:600; margin:6px 0 12px;">Tutor tools</div>
+      <div class="cw-toolgrid">
+        ${lastToolChips.map((c, i) => `<button type="button" class="cw-toolbtn" data-i="${i}">${c.label}</button>`).join('')}
+      </div>`);
+    document.querySelectorAll('.cw-toolbtn').forEach(b => {
+      b.onclick = () => { const c = lastToolChips[Number(b.dataset.i)]; window.Sheet.close(); if (c) sendQuick(c.query); };
+    });
+  }
+  function toolsChipHtml() {
+    return `<button class="chat-quick-chip cw-tools-chip" id="cw-tools-btn" type="button">${window.icon('sliders','icon icon-xs')}<span>Tools</span></button>`;
+  }
+  function bindToolsChip(bar) {
+    const tb = bar.querySelector('#cw-tools-btn');
+    if (tb) tb.onclick = openToolsSheet;
+  }
+  function paintQuickBar(chips) {
+    const bar = document.getElementById('chat-quick-chips-bar');
+    if (!bar) return;
+    lastToolChips = chips;
+    let primary = chips.filter(c => c.primary);
+    if (!primary.length) primary = chips.slice(0, 2);
+    bar.innerHTML = primary.map(c => `<button class="chat-quick-chip" data-query="${window.escapeHtml(c.query)}" style="white-space:nowrap; flex-shrink:0;"><span>${c.label}</span></button>`).join('') + toolsChipHtml();
+    bar.querySelectorAll('.chat-quick-chip[data-query]').forEach(chip => { chip.onclick = () => sendQuick(chip.dataset.query); });
+    bindToolsChip(bar);
+  }
+
   // Chips written by the model for this exact conversation.
   function renderFollowupChips(list, cards) {
     const bar = document.getElementById('chat-quick-chips-bar');
@@ -803,9 +812,11 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       window.toast && window.toast(`Added ${n} card${n > 1 ? 's' : ''} to Review.`);
       cc.remove();
     };
+    bar.insertAdjacentHTML('afterbegin', toolsChipHtml());
     bar.querySelectorAll('.chat-quick-chip[data-query]').forEach(chip => {
       chip.onclick = () => { const q = chip.dataset.query; if (q && inputEl) { inputEl.value = q; sendUserMessage(); } };
     });
+    bindToolsChip(bar);
   }
 
   function updateDynamicQuickChips(detectedTopic) {
@@ -848,21 +859,9 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       ];
     }
 
-    bar.innerHTML = chips.map(c => `
-      <button class="chat-quick-chip" data-query="${window.escapeHtml(c.query)}" style="white-space:nowrap; flex-shrink:0;">
-        <span>${c.label}</span>
-      </button>
-    `).join('');
-
-    bar.querySelectorAll('.chat-quick-chip').forEach(chip => {
-      chip.onclick = () => {
-        const q = chip.dataset.query;
-        if (q && inputEl) {
-          inputEl.value = q;
-          sendUserMessage();
-        }
-      };
-    });
+    chips.unshift({ label: '🧠 Quiz me', query: cleanTopic && cleanTopic.length >= 2 ? `Quiz me — 5 questions on ${cleanTopic}, one at a time` : 'Quiz me — 5 questions from this book, one at a time', primary: true });
+    if (chips[1] && !isGlobal) chips[1].primary = true;
+    paintQuickBar(chips);
   }
 
   // Quick Suggestion Chips Initial Click Binding
@@ -1066,9 +1065,6 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
         if (foundIdx !== -1) {
           scopeSelect.value = `ch_${foundIdx}`;
           if (scopeBadgePill) scopeBadgePill.textContent = `CH ${ctx.detectedChapterNumber || foundIdx + 1}`;
-          if (typeof window.enhanceSelect === 'function') {
-            window.enhanceSelect(scopeSelect);
-          }
         }
       }
       
@@ -1345,53 +1341,76 @@ Provide the complete academic answer now:`;
   let cachedChapterList = [];
 
   function updateQuickPromptChips() {
-    const chipsBar = document.getElementById('chat-quick-chips-bar');
-    if (!chipsBar || isGlobal) return;
+    if (isGlobal) return;
+    const T = scopeTarget();
+    paintQuickBar([
+      { label: `🎓 Teach me ${T}`, query: `Teach me ${T} step-by-step with interactive checkpoints`, primary: true },
+      { label: '🧠 Quiz me', query: 'Quiz me — 5 questions from this book, one at a time', primary: true },
+      { label: `📖 Summarise ${T}`, query: `Summarise ${T} with core breakdown and key takeaways` },
+      { label: '🎯 Exam Points', query: `Exam ke point of view se ${T} ke important questions, keywords aur scoring points batao` },
+      { label: '⚡ Detail me samjhao', query: '⚡ Detail me samjhao — key concepts, causes, aur deep breakdown ke saath' },
+      { label: '📊 Flowchart', query: 'Draw a clear Mermaid flowchart diagram explaining this process step-by-step' },
+      { label: '💡 Simple Analogy', query: '💡 Is concept ko simple real-world analogy se samjhao (zero jargon)' },
+      { label: '🖼️ Visual / Diagram', query: '🖼️ Is concept ka labeled diagram ya authentic visual illustration dikhao' },
+      { label: '🗺️ Map dikhao', query: '🗺️ Is topic ka authentic educational map dikhao' }
+    ]);
+  }
 
-    let targetTitle = 'Chapter';
-    if (activeContextScope === 'chapter' && teacherState.currentSessionChapter) {
-      targetTitle = teacherState.currentSessionChapter.chapterTitle || `Ch ${teacherState.currentSessionChapter.chapterNumber}`;
-      if (targetTitle.length > 20) targetTitle = targetTitle.slice(0, 18) + '…';
-    } else if (activeContextScope === 'page') {
-      targetTitle = `Page ${currentPage}`;
-    } else if (activeContextScope === 'book') {
-      targetTitle = 'Book';
+  // ---- Page / Chapter / Book switch + chapter picker ----
+  function paintScope() {
+    document.querySelectorAll('#cw-seg [data-scope]').forEach(b => b.classList.toggle('on', b.dataset.scope === activeContextScope));
+    const rt = document.getElementById('cw-reading-text');
+    if (rt) {
+      const c = teacherState.currentSessionChapter;
+      if (activeContextScope === 'chapter' && c) {
+        rt.textContent = `${c.chapterNumber ? 'Ch ' + c.chapterNumber + ' · ' : ''}${c.chapterTitle || 'Chapter'} · pp. ${c.startPage}–${c.endPage}`;
+      } else if (activeContextScope === 'book') {
+        rt.textContent = `Whole book · pp. 1–${totalPages}`;
+      } else {
+        rt.textContent = `Page ${currentPage}`;
+      }
     }
-
-    chipsBar.innerHTML = `
-      <button class="chat-quick-chip" data-query="Teach me ${window.escapeHtml(targetTitle)} step-by-step with interactive checkpoints">
-        <span>🎓 Teach Me ${window.escapeHtml(targetTitle)}</span>
-      </button>
-      <button class="chat-quick-chip" data-query="Summarise ${window.escapeHtml(targetTitle)} with core breakdown and key takeaways">
-        <span>📖 Summarise ${window.escapeHtml(targetTitle)}</span>
-      </button>
-      <button class="chat-quick-chip" data-query="⚡ Detail me samjhao — key concepts, causes, aur deep breakdown ke saath">
-        <span>⚡ Detail me samjhao</span>
-      </button>
-      <button class="chat-quick-chip" data-query="Exam ke point of view se ${window.escapeHtml(targetTitle)} ke important questions, keywords aur scoring points batao">
-        <span>🎯 Exam Points</span>
-      </button>
-      <button class="chat-quick-chip" data-query="Draw a clear Mermaid flowchart diagram explaining this process step-by-step">
-        <span>📊 Flowchart</span>
-      </button>
-      <button class="chat-quick-chip" data-query="💡 Is concept ko simple real-world analogy se samjhao (zero jargon)">
-        <span>💡 Simple Analogy</span>
-      </button>
-      <button class="chat-quick-chip" data-query="🖼️ Is concept ka labeled diagram ya authentic visual illustration dikhao">
-        <span>🖼️ Visual / Diagram</span>
-      </button>
-    `;
-
-    chipsBar.querySelectorAll('.chat-quick-chip').forEach(btn => {
-      btn.onclick = () => {
-        const q = btn.getAttribute('data-query');
-        if (inputEl && q) {
-          inputEl.value = q;
-          inputEl.focus();
-          sendUserMessage(q);
+    if (chatMessages.length === 0) renderMessages();   // tiles mention the current focus
+  }
+  function openChapterPicker() {
+    if (!cachedChapterList.length) { window.toast('Chapters detect nahi hue — Page ya Book focus use karo'); return; }
+    const cur = teacherState.currentSessionChapter;
+    window.Sheet.open(`
+      <div class="font-display" style="font-size:17px; font-weight:600; margin:6px 0 10px;">Chapter chuno</div>
+      ${cachedChapterList.length > 8 ? '<input id="cw-ch-search" class="cw-ch-search" placeholder="Search chapter…" autocomplete="off">' : ''}
+      <div class="cw-chlist" id="cw-chlist">
+        ${cachedChapterList.map((ch, i) => {
+          const on = activeContextScope === 'chapter' && cur && cur.startPage === ch.startPage && cur.endPage === ch.endPage;
+          return `<button type="button" class="cw-chrow${on ? ' on' : ''}" data-i="${i}"><span class="cw-chn">${i + 1}</span><span class="cw-cht">${window.escapeHtml(String(ch.label || ch.title || '').replace(/\s*\(pp\.[^)]*\)/i, ''))}</span><span class="cw-chp">pp. ${ch.startPage}–${ch.endPage}</span></button>`;
+        }).join('')}
+      </div>`);
+    const list = document.getElementById('cw-chlist');
+    list.querySelectorAll('.cw-chrow').forEach(r => {
+      r.onclick = () => { scopeSelect.value = 'ch_' + r.dataset.i; scopeSelect.onchange(); window.Sheet.close(); };
+    });
+    const q = document.getElementById('cw-ch-search');
+    if (q) q.oninput = () => {
+      const t = q.value.trim().toLowerCase();
+      list.querySelectorAll('.cw-chrow').forEach(r => { r.style.display = !t || r.textContent.toLowerCase().includes(t) ? '' : 'none'; });
+    };
+  }
+  function bindScopeUi() {
+    document.querySelectorAll('#cw-seg [data-scope]').forEach(b => {
+      b.onclick = () => {
+        const sc = b.dataset.scope;
+        if (sc === 'chapter') {
+          const cur = teacherState.currentSessionChapter;
+          const idx = cur ? cachedChapterList.findIndex(ch => ch.startPage === cur.startPage && ch.endPage === cur.endPage) : -1;
+          if (activeContextScope !== 'chapter' && idx >= 0) { scopeSelect.value = 'ch_' + idx; scopeSelect.onchange(); }
+          else openChapterPicker();
+          return;
         }
+        scopeSelect.value = sc === 'page' ? '__page__' : '__book__';
+        scopeSelect.onchange();
       };
     });
+    const rd = document.getElementById('cw-reading');
+    if (rd) rd.onclick = openChapterPicker;
   }
 
   async function setupChapterScope() {
@@ -1455,11 +1474,8 @@ Provide the complete academic answer now:`;
       }
     }
 
-    // Enhance with our bespoke custom dropdown
-    if (typeof window.enhanceSelect === 'function') {
-      window.enhanceSelect(scopeSelect);
-    }
-
+    bindScopeUi();
+    paintScope();
     updateQuickPromptChips();
 
     // Bind change listener
@@ -1497,11 +1513,14 @@ Provide the complete academic answer now:`;
           window.toast(`Chat focus: ${teacherState.currentSessionChapter.chapterTitle || 'Chapter'}`);
         }
       }
+      paintScope();
       updateQuickPromptChips();
     };
   }
 
   setupChapterScope();
+  if (!isGlobal) updateQuickPromptChips();
+  if (isGlobal) updateDynamicQuickChips('');
 
   // If there was a prefilled query, trigger it
   if (prefillQuery && prefillQuery.trim()) {

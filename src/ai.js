@@ -31,7 +31,6 @@ import {
 
 import {
   runTTS,
-  getCurrentPageText,
   skipTTSSentence,
   clearTTSHighlights,
   runPageReadAloud,
@@ -78,7 +77,6 @@ window.runInteractiveFlashcardsModal = runInteractiveFlashcardsModal;
 window.runTranslateToolModal = runTranslateToolModal;
 window.translatePassageAI = translatePassageAI;
 window.runTTS = runTTS;
-window.getCurrentPageText = getCurrentPageText;
 window.skipTTSSentence = skipTTSSentence;
 window.clearTTSHighlights = clearTTSHighlights;
 window.runPageReadAloud = runPageReadAloud;
