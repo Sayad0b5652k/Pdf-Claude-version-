@@ -122,6 +122,17 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
     console.warn('Thumbnail generation skipped:', thumbErr);
   }
 
+  // A PDF shared from S.A.Y.A.D. carries the sender's annotation data as an attachment
+  let sharedPayload = null;
+  try {
+    const att = doc.getAttachments ? await doc.getAttachments() : null;
+    const hit = att && Object.values(att).find((x) => x && x.filename === 'sayad-annotations.json');
+    if (hit && hit.content) {
+      const parsed = JSON.parse(new TextDecoder().decode(hit.content));
+      if (parsed && parsed.app === 'S.A.Y.A.D.') sharedPayload = parsed;
+    }
+  } catch (e) { console.warn('Shared annotation data unreadable, importing the PDF only:', e); }
+
   const rec = {
     id: window.uid(),
     name,
@@ -137,8 +148,15 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
     data: raw,
     ...extra
   };
+  if (sharedPayload && Array.isArray(sharedPayload.history)) rec.sharedHistory = sharedPayload.history;
   await window.DB.put('files', rec);
   window.State.files.unshift({...rec, data:undefined});
+  if (sharedPayload) {
+    try {
+      const m = await import('./annot_export.js');
+      rec.restoredInfo = await m.restoreSayadPayload(rec.id, sharedPayload);
+    } catch (e) { console.warn('Could not restore shared annotations:', e); }
+  }
   return rec;
 }
 
@@ -152,8 +170,12 @@ export async function importFiles(fileList){
         continue;
       }
       const buf = await file.arrayBuffer();
-      await addBookFromBuffer(file.name.replace(/\.pdf$/i,''), buf, file.size, {});
+      const rec = await addBookFromBuffer(file.name.replace(/\.pdf$/i,''), buf, file.size, {});
       added++;
+      if (rec.restoredInfo && rec.restoredInfo.total) {
+        const ri = rec.restoredInfo;
+        window.toast(`Restored ${ri.total} annotation${ri.total > 1 ? 's' : ''}${ri.authors.length ? ' by ' + ri.authors.join(', ') : ''}`);
+      }
     }catch(err){
       console.error(err);
       if (err && (err.name === 'PasswordException' || /password/i.test(err.message || ''))) {
