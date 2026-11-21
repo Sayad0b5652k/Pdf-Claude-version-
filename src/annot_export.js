@@ -65,7 +65,8 @@ export async function buildAnnotatedPdf(fileId, { author, includeNotes }) {
   await window.ensureLib('pdflib');
   const { PDFDocument, PDFName, PDFHexString, PDFString } = window.PDFLib;
   const full = await window.DB.get('files', fileId);
-  const pdfDoc = await PDFDocument.load(full.data.slice(0));
+  const rawBuf = await window.DB.normalizeBuffer(full.data);
+  const pdfDoc = await PDFDocument.load(rawBuf.slice(0));
   const prior = readSayadPayload(pdfDoc);
 
   const all = await window.DB.byIndex('annotations', 'fileId', fileId);
@@ -162,11 +163,14 @@ export async function buildAnnotatedPdf(fileId, { author, includeNotes }) {
 }
 
 function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 export async function openShareAnnotatedSheet(fileId) {

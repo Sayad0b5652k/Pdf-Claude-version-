@@ -7169,21 +7169,30 @@ html[data-pro-theme="editorial"] .dict-def {
 
 .pp-app .pp-link{color:var(--accent)}
 .pp-app .pp-pickhead .pp-link{color:var(--text)}
+/* =====================================================================
    NOTEBOOK THEME  (data-pro-theme="notebook")
    Doodle study-notebook: ruled paper, chunky ink borders, hard offset
    shadows, rounded Baloo headings and Caveat handwriting accents.
    ===================================================================== */
-html[data-pro-theme="notebook"]{--radius-lg:10px;--radius-md:8px;--radius-sm:6px;--nb-display:'Baloo 2','Plus Jakarta Sans',sans-serif;--nb-hand:'Caveat','Baloo 2',cursive;--nb-shadow:4px 4px 0 var(--border);--nb-shadow-sm:3px 3px 0 var(--border)}
+html[data-pro-theme="notebook"]{--radius-lg:10px;--radius-md:8px;--radius-sm:6px;--nb-body:'Baloo 2','Plus Jakarta Sans',sans-serif;--nb-display:'Baloo 2','Plus Jakarta Sans',sans-serif;--nb-hand:'Caveat','Baloo 2',cursive;--nb-shadow:4px 4px 0 var(--border);--nb-shadow-sm:3px 3px 0 var(--border)}
 html[data-pro-theme="notebook"][data-theme="light"]{--bg:#FFFDF6;--bg-elev:#FFFFFF;--surface:#FFFFFF;--surface-2:#F1F5FF;--surface-3:#E1E9FF;--border:#1C2455;--border-subtle:#C9D3F2;--text:#1C2455;--text-dim:#525D8C;--text-faint:#6B75A3;--accent:#DB2777;--accent-soft:rgba(219,39,119,.12);--accent-ink:#FFFFFF;--nb-rule:rgba(110,140,230,.28);--nb-hi:#FFE98A}
 html[data-pro-theme="notebook"][data-theme="dark"]{--bg:#12163A;--bg-elev:#171C47;--surface:#1B2152;--surface-2:#232A63;--surface-3:#2D3676;--border:#8FA2FF;--border-subtle:#33407F;--text:#F3F4FF;--text-dim:#AEB7E6;--text-faint:#919CD8;--accent:#FF7DB8;--accent-soft:rgba(255,125,184,.16);--accent-ink:#1A1030;--nb-rule:rgba(143,162,255,.16);--nb-hi:#FFE08A;--nb-shadow:4px 4px 0 rgba(143,162,255,.55);--nb-shadow-sm:3px 3px 0 rgba(143,162,255,.55)}
 html[data-pro-theme="notebook"][data-theme="sepia"]{--bg:#FBF1D8;--bg-elev:#FFF8E6;--surface:#FFFBEF;--surface-2:#F5E8C6;--surface-3:#EBDAB0;--border:#3A2A18;--border-subtle:#DCC999;--text:#3A2A18;--text-dim:#6E5638;--text-faint:#7A6544;--accent:#BE3B22;--accent-soft:rgba(190,59,34,.13);--accent-ink:#FFFFFF;--nb-rule:rgba(150,110,60,.2);--nb-hi:#FFD97A}
-html[data-pro-theme="notebook"] body,
+html[data-pro-theme="notebook"] body{font-family:var(--nb-body)!important;background-color:var(--bg);background-image:linear-gradient(to bottom,transparent 27px,var(--nb-rule) 28px);background-size:100% 28px}
 html[data-pro-theme="notebook"] .view{background-color:var(--bg);background-image:linear-gradient(to bottom,transparent 27px,var(--nb-rule) 28px);background-size:100% 28px}
-html[data-pro-theme="notebook"] h1,html[data-pro-theme="notebook"] h2,html[data-pro-theme="notebook"] h3,
+html[data-pro-theme="notebook"] .font-mono,html[data-pro-theme="notebook"] code,html[data-pro-theme="notebook"] pre,html[data-pro-theme="notebook"] .pp-psum,html[data-pro-theme="notebook"] .cw-chp,html[data-pro-theme="notebook"] .cw-ai-meta{font-family:var(--font-mono,'IBM Plex Mono',monospace)!important}
+html[data-pro-theme="notebook"] .textLayer,html[data-pro-theme="notebook"] .textLayer span{font-family:sans-serif}
+html[data-pro-theme="notebook"] h1,html[data-pro-theme="notebook"] h2,html[data-pro-theme="notebook"] h3,html[data-pro-theme="notebook"] h4,
 html[data-pro-theme="notebook"] .font-display,html[data-pro-theme="notebook"] .pp-topn,html[data-pro-theme="notebook"] .pp-hero-t,
-html[data-pro-theme="notebook"] .pp-entry-t b,html[data-pro-theme="notebook"] .pp-hn{font-family:var(--nb-display)!important;font-weight:800!important;letter-spacing:-.005em}
+html[data-pro-theme="notebook"] .pp-entry-t b,html[data-pro-theme="notebook"] .pp-hn,
+html[data-pro-theme="notebook"] .nt-title,html[data-pro-theme="notebook"] .nt-section-title,
+html[data-pro-theme="notebook"] .cw-head-title,html[data-pro-theme="notebook"] .cw-hero-title,html[data-pro-theme="notebook"] .cw-tile b,
+html[data-pro-theme="notebook"] .sp-back-h,html[data-pro-theme="notebook"] .sp-sheet-h,html[data-pro-theme="notebook"] .sp-subj-name,html[data-pro-theme="notebook"] .sp-big,
+html[data-pro-theme="notebook"] .opt-row > div > div:first-child{font-family:var(--nb-display)!important;font-weight:800!important;letter-spacing:-.005em}
 html[data-pro-theme="notebook"] .section-title,html[data-pro-theme="notebook"] .pp-sechead{font-family:var(--nb-hand)!important;font-size:24px!important;font-weight:700!important;letter-spacing:0!important;text-transform:none!important;color:var(--accent)!important;line-height:1.1}
-html[data-pro-theme="notebook"] .pp-sub,html[data-pro-theme="notebook"] .pp-kick,html[data-pro-theme="notebook"] .pp-hero-k,html[data-pro-theme="notebook"] .pp-hero-s,html[data-pro-theme="notebook"] .pp-tops,html[data-pro-theme="notebook"] .pp-ps{font-family:var(--nb-hand)!important;font-size:17px!important;letter-spacing:0!important;font-weight:600!important;font-style:normal}
+html[data-pro-theme="notebook"] .pp-sub,html[data-pro-theme="notebook"] .pp-kick,html[data-pro-theme="notebook"] .pp-hero-k,html[data-pro-theme="notebook"] .pp-hero-s,html[data-pro-theme="notebook"] .pp-tops,html[data-pro-theme="notebook"] .pp-ps,
+html[data-pro-theme="notebook"] .nt-sub,html[data-pro-theme="notebook"] .nt-section-hint,
+html[data-pro-theme="notebook"] .cw-hero-sub,html[data-pro-theme="notebook"] .sp-eyebrow{font-family:var(--nb-hand)!important;font-size:18px!important;letter-spacing:0!important;font-weight:600!important;font-style:normal}
 html[data-pro-theme="notebook"] .pp-kick,html[data-pro-theme="notebook"] .pp-hero-k{color:var(--accent);font-size:19px!important}
 html[data-pro-theme="notebook"] .card,html[data-pro-theme="notebook"] .pp-card,html[data-pro-theme="notebook"] .pp-entry,
 html[data-pro-theme="notebook"] .pp-hcard,html[data-pro-theme="notebook"] .pp-hero,html[data-pro-theme="notebook"] .sy-aihist,
@@ -7328,6 +7337,11 @@ html[data-pro-theme="notebook"] .toc-item{border:2px solid var(--border)!importa
 html[data-pro-theme="notebook"] .toc-item.toc-item-active{background:var(--nb-hi)!important;color:#1C2455}
 html[data-pro-theme="notebook"] .toc-item.toc-item-active *{color:#1C2455!important}
 html[data-pro-theme="notebook"] .toc-item.toc-item-active .toc-page-badge{background:#fff!important;border-color:#1C2455!important}
+html[data-pro-theme="notebook"] .streak-sticker{background:var(--nb-hi);color:#1C2455;border:2px solid var(--border);box-shadow:var(--nb-shadow-sm);transform:rotate(-2deg);font-family:var(--nb-display)}
+html[data-pro-theme="notebook"] .nt-pill,html[data-pro-theme="notebook"] .nt-count,html[data-pro-theme="notebook"] .cw-tune,html[data-pro-theme="notebook"] .cw-focus-chip,html[data-pro-theme="notebook"] .sp-link,html[data-pro-theme="notebook"] .sp-q{border:2px solid var(--border)!important;font-family:var(--nb-display);font-weight:700}
+html[data-pro-theme="notebook"] .nt-pill.on{background:var(--nb-hi);color:#1C2455;box-shadow:var(--nb-shadow-sm)}
+html[data-pro-theme="notebook"] .sp-row{border:2px solid var(--border)!important;border-radius:var(--radius-md)!important}
+html[data-pro-theme="notebook"] input,html[data-pro-theme="notebook"] textarea,html[data-pro-theme="notebook"] select,html[data-pro-theme="notebook"] button{font-family:inherit}
 
 
 .pp-revbtn{width:100%;margin:0 0 14px;padding:13px}
@@ -8547,3 +8561,25 @@ html.lite-motion .help-ans{animation:none}
 .help-ai-ans{border-color:var(--accent)}
 .help-flash{animation:helpflash 1.5s ease}
 @keyframes helpflash{0%,60%{box-shadow:0 0 0 3px var(--accent)}100%{box-shadow:0 0 0 0 transparent}}
+
+/* Notebook theme polish for Help & Guide, Advanced KeyVault, and Privacy Lock */
+html[data-pro-theme="notebook"] .help-box{border:2px solid var(--border);border-radius:var(--radius-md);box-shadow:var(--nb-shadow-sm)}
+html[data-pro-theme="notebook"] .help-box input{border:none!important;box-shadow:none!important;background:transparent!important}
+html[data-pro-theme="notebook"] .help-title,
+html[data-pro-theme="notebook"] .help-ans-t,
+html[data-pro-theme="notebook"] .lk-title,
+html[data-pro-theme="notebook"] .adv-seg-btn b{font-family:var(--nb-display)!important;font-weight:800!important}
+html[data-pro-theme="notebook"] .help-sub{font-family:var(--nb-hand)!important;font-size:17px!important}
+html[data-pro-theme="notebook"] .help-ans,
+html[data-pro-theme="notebook"] .kv-row,
+html[data-pro-theme="notebook"] .adv-seg-btn,
+html[data-pro-theme="notebook"] .adv-pills button,
+html[data-pro-theme="notebook"] .lk-pad button,
+html[data-pro-theme="notebook"] .help-chips button,
+html[data-pro-theme="notebook"] .help-more button,
+html[data-pro-theme="notebook"] .help-gobtn{border:2px solid var(--border);box-shadow:var(--nb-shadow-sm)}
+html[data-pro-theme="notebook"] .adv-seg-btn.on,
+html[data-pro-theme="notebook"] .adv-pills button.on{background:var(--nb-hi);color:#1C2455}
+html[data-pro-theme="notebook"] #sayad-lock{background-color:var(--bg);background-image:linear-gradient(to bottom,transparent 27px,var(--nb-rule) 28px);background-size:100% 28px}
+html[data-pro-theme="notebook"] .lk-badge{border:2px solid var(--border);box-shadow:var(--nb-shadow-sm);background:var(--nb-hi)}
+

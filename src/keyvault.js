@@ -7,17 +7,38 @@ const PROV = {
   groq:       { name: 'Groq', short: 'Groq', color: '#F55036', link: 'https://console.groq.com/keys', supported: true },
   openrouter: { name: 'OpenRouter', short: 'OpenRouter', color: '#7C5CFF', link: 'https://openrouter.ai/keys', supported: true },
   openai:     { name: 'OpenAI', short: 'OpenAI', color: '#10A37F', supported: false },
+  anthropic:  { name: 'Anthropic', short: 'Claude', color: '#D97757', supported: false },
   cerebras:   { name: 'Cerebras', short: 'Cerebras', color: '#FF7A1A', supported: false },
   unknown:    { name: 'Unknown', short: '?', color: '#888', supported: false },
 };
+function cleanKey(k) {
+  let s = String(k || '').replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+  s = s.replace(/^(?!AIza|AQ\.|gsk_|sk-|csk-)(?:export\s+)?[A-Za-z0-9_.-]{2,48}\s*[:=]\s*/i, '').trim();
+  s = s.replace(/^bearer\s+/i, '').trim();
+  s = s.replace(/^["'`<]+|["'`>,;]+$/g, '').trim();
+  return s.replace(/\s+/g, '');
+}
 function detect(k) {
-  k = String(k || '').trim();
-  if (/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)) return 'gemini';
-  if (/^gsk_[0-9A-Za-z]{20,}$/.test(k)) return 'groq';
-  if (/^sk-or-/.test(k)) return 'openrouter';
-  if (/^csk-/.test(k)) return 'cerebras';
-  if (/^sk-(proj-)?[0-9A-Za-z_\-]{20,}$/.test(k)) return 'openai';
+  k = cleanKey(k);
+  if (/^(?:AIza[0-9A-Za-z_\-]{16,}|AQ\.[0-9A-Za-z_\-.]{16,})$/.test(k)) return 'gemini';
+  if (/^gsk_[0-9A-Za-z_\-]{16,}$/.test(k)) return 'groq';
+  if (/^sk-or-[0-9A-Za-z_\-]{8,}/.test(k)) return 'openrouter';
+  if (/^sk-ant-[0-9A-Za-z_\-]{8,}/.test(k)) return 'anthropic';
+  if (/^csk-[0-9A-Za-z_\-]{8,}/.test(k)) return 'cerebras';
+  if (/^sk-(proj-|svcacct-)?[0-9A-Za-z_\-]{16,}$/.test(k)) return 'openai';
   return 'unknown';
+}
+function detectHint(k) {
+  const c = cleanKey(k);
+  const p = detect(c);
+  if (p !== 'unknown') return { provider: p, partial: false };
+  if (/^(?:AIza|AQ\.)/.test(c)) return { provider: 'gemini', partial: true };
+  if (/^gsk_/.test(c)) return { provider: 'groq', partial: true };
+  if (/^sk-or-/.test(c)) return { provider: 'openrouter', partial: true };
+  if (/^sk-ant-/.test(c)) return { provider: 'anthropic', partial: true };
+  if (/^csk-/.test(c)) return { provider: 'cerebras', partial: true };
+  if (/^sk-/.test(c)) return { provider: 'openai', partial: true };
+  return { provider: 'unknown', partial: false };
 }
 const today = () => new Date().toISOString().slice(0, 10);
 let keys = [];
@@ -53,17 +74,26 @@ function nextGemini() {
 function firstOf(p) { return keys.find(k => k.provider === p && k.state !== 'bad' && k.cooldownUntil < Date.now()) || keys.find(k => k.provider === p && k.state !== 'bad'); }
 
 const Vault = {
-  PROV, detect,
+  PROV, detect, detectHint, clean: cleanKey,
   list: () => keys.slice(),
   count: () => keys.length,
   async add(key, label) {
-    key = String(key || '').trim();
+    key = cleanKey(key);
     if (key.length < 12) throw new Error('Key bahut chhoti hai');
     if (keys.some(k => k.key === key)) throw new Error('Ye key pehle se added hai');
     const k = mk(key, label);
     keys.push(k); save();
-    const r = await Vault.check(k.id).catch(e => ({ error: e.message }));
-    if (r && r.valid === false) { keys = keys.filter(x => x.id !== k.id); save(); throw new Error(r.error || 'Key valid nahi hai'); }
+    let r = null;
+    try {
+      r = await Vault.check(k.id);
+    } catch (e) {
+      keys = keys.filter(x => x.id !== k.id); save();
+      throw new Error(e?.message || 'Key verify karne me network/server error aaya');
+    }
+    if (!r || r.valid === false) {
+      keys = keys.filter(x => x.id !== k.id); save();
+      throw new Error((r && r.error) || 'Key valid nahi hai');
+    }
     return keys.find(x => x.id === k.id);
   },
   restore(list) { if (Array.isArray(list)) { keys = list; save(); } },
@@ -72,7 +102,8 @@ const Vault = {
   async check(id) {
     const k = keys.find(x => x.id === id); if (!k) return null;
     const resp = await fetch('/api/keys/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k.key }) });
-    const d = await resp.json();
+    const d = await resp.json().catch(() => null);
+    if (!d) throw new Error(`Server error (HTTP ${resp.status})`);
     k.checkedAt = Date.now();
     if (d.provider && PROV[d.provider]) k.provider = d.provider;
     k.state = d.valid ? (d.exhausted ? 'limit' : 'ok') : 'bad';
@@ -108,10 +139,12 @@ try {
 
 // Count usage per key and learn from 429s; attach Groq/OpenRouter keys to our own /api calls.
 const _fetch = window.fetch.bind(window);
-window.fetch = function (input, init) {
+const wrappedFetch = function (input, init) {
   try {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (url.startsWith('/api/') && !url.startsWith('/api/keys/')) {
+    const isApi = url.startsWith('/api/') || (typeof location !== 'undefined' && url.startsWith(location.origin + '/api/'));
+    const isKeys = url.startsWith('/api/keys/') || (typeof location !== 'undefined' && url.startsWith(location.origin + '/api/keys/'));
+    if (isApi && !isKeys) {
       init = init || {};
       const aux = Vault.auxHeader();
       let used = null;
@@ -127,12 +160,22 @@ window.fetch = function (input, init) {
   } catch (e) {}
   return _fetch(input, init);
 };
+try {
+  Object.defineProperty(window, 'fetch', {
+    configurable: true,
+    enumerable: true,
+    writable: true,
+    value: wrappedFetch,
+  });
+} catch (e) {
+  try { window.fetch = wrappedFetch; } catch (_) {}
+}
 
 // ---- small UI helpers used by Settings → Advanced ----
 Vault.mask = (k) => k.key.slice(0, 4) + '••••' + k.key.slice(-4);
 Vault.statusOf = (k) => {
   const left = Vault.remaining(k);
-  if (k.state === 'bad') return { tone: 'bad', text: 'Key reject hui' };
+  if (k.state === 'bad') return { tone: 'bad', text: k.note ? `Reject hui: ${String(k.note).slice(0, 60)}` : 'Key reject hui' };
   if (k.state === 'unsupported') return { tone: 'dim', text: 'Pehchani, par abhi use nahi hoti' };
   if (k.state === 'limit' || k.cooldownUntil > Date.now()) return { tone: 'warn', text: 'Limit chhoo li, thodi der me wapas' };
   if (k.provider === 'gemini') return { tone: left != null && left < 0.15 ? 'warn' : 'ok', text: `Aaj ${Vault.usedToday(k)} calls (estimate)` };

@@ -574,25 +574,40 @@ export async function renderSettings(){
       .forEach(k => KV.check(k.id).then(paintKeys).catch(() => {}));
     const inp = document.getElementById('adv-key-input'), det = document.getElementById('adv-detect');
     const eye = document.getElementById('adv-key-eye'), add = document.getElementById('adv-key-add');
-    inp.oninput = () => {
-      const v = inp.value.trim(); keyMsg('');
+    const norm = (val) => (KV.clean ? KV.clean(val) : String(val || '').trim());
+    const updateDetect = () => {
+      const v = norm(inp.value); keyMsg('');
       if (!v) { det.textContent = 'Provider auto-detect hoga'; det.dataset.tone = ''; return; }
-      const p = KV.detect(v), P = KV.PROV[p];
-      det.textContent = p === 'unknown' ? 'Pehchan nahi paayi…' : `✓ ${P.name} key${P.supported ? '' : ' (abhi supported nahi)'}`;
-      det.style.setProperty('--pc', P.color); det.dataset.tone = p === 'unknown' ? 'dim' : 'ok';
+      const { provider: p, partial } = KV.detectHint ? KV.detectHint(v) : { provider: KV.detect(v), partial: false };
+      const P = KV.PROV[p] || KV.PROV.unknown;
+      if (p === 'unknown') {
+        det.textContent = 'Pehchan nahi paayi…';
+        det.style.setProperty('--pc', P.color); det.dataset.tone = 'dim';
+      } else if (partial) {
+        det.textContent = `${P.name} key lag rahi hai — poori key paste karo`;
+        det.style.setProperty('--pc', P.color); det.dataset.tone = 'ok';
+      } else {
+        det.textContent = `✓ ${P.name} key${P.supported ? '' : ' (abhi supported nahi)'}`;
+        det.style.setProperty('--pc', P.color); det.dataset.tone = 'ok';
+      }
     };
+    inp.oninput = updateDetect;
+    inp.onchange = updateDetect;
+    inp.onpaste = () => setTimeout(updateDetect, 0);
     eye.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; eye.textContent = inp.type === 'password' ? '👁️' : '🔒'; };
     add.onclick = async () => {
-      const v = inp.value.trim(); if (!v) return keyMsg('Pehle key paste karo', 'bad');
+      const v = norm(inp.value); if (!v) return keyMsg('Pehle key paste karo', 'bad');
       add.disabled = true; add.textContent = 'Checking…'; keyMsg('Key verify ho rahi hai…', 'dim');
-      try { const k = await KV.add(v); inp.value = ''; inp.oninput(); keyMsg(''); window.toast(`${KV.PROV[k.provider].name} key add ho gayi 🎉`); paintKeys(); }
+      try { const k = await KV.add(v); inp.value = ''; updateDetect(); keyMsg(''); window.toast(`${KV.PROV[k.provider].name} key add ho gayi 🎉`); paintKeys(); }
       catch (e) { keyMsg('❌ ' + e.message, 'bad'); }
       add.disabled = false; add.textContent = 'Add key';
     };
     inp.onkeydown = (e) => { if (e.key === 'Enter') add.click(); };
     document.getElementById('adv-key-testall').onclick = async (e) => {
+      const list = KV.list();
+      if (!list.length) { window.toast('Pehle koi API key add karo'); return; }
       const btn = e.currentTarget; btn.textContent = 'Checking…';
-      for (const k of KV.list()) { try { await KV.check(k.id); } catch (er) {} paintKeys(); }
+      for (const k of list) { try { await KV.check(k.id); } catch (er) {} paintKeys(); }
       btn.textContent = 'Sab check karo';
     };
     window._advKeysListener && window.removeEventListener('sayad-keys-changed', window._advKeysListener);

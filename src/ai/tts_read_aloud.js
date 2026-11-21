@@ -182,7 +182,6 @@ export async function speakWithMicrosoftNeural(text, voiceId, options = {}) {
 }
 
 export async function previewMicrosoftVoice(voiceId, onStart, onEnd) {
-  stopAllTTSAudio();
   const v = MICROSOFT_NEURAL_VOICES.find(x => x.id === voiceId) || MICROSOFT_NEURAL_VOICES[0];
   const samplePhrase = v.lang.startsWith('hi')
     ? `नमस्ते! मैं माइक्रोसॉफ्ट न्यूरल वॉइस हूँ। मैं आपकी पुस्तकें और नोट्स साफ़ आवाज़ में पढ़ सकता हूँ।`
@@ -1961,14 +1960,21 @@ export function openVoiceSettingsModal() {
           voiceId,
           () => {},
           () => {
-            currentPlayingVoiceId = null;
-            openVoiceSettingsModal();
+            if (currentPlayingVoiceId === voiceId) {
+              currentPlayingVoiceId = null;
+              openVoiceSettingsModal();
+            }
           }
         );
       } catch (err) {
+        if (err && (err.cancelled || err.message === 'TTS request superseded')) {
+          return;
+        }
         console.error('Preview error:', err);
-        currentPlayingVoiceId = null;
-        openVoiceSettingsModal();
+        if (currentPlayingVoiceId === voiceId) {
+          currentPlayingVoiceId = null;
+          openVoiceSettingsModal();
+        }
         window.toast('Preview unavailable, please check network');
       }
     };
@@ -2012,13 +2018,20 @@ export function openVoiceSettingsModal() {
           voiceId,
           () => {},
           () => {
-            currentPlayingVoiceId = null;
-            openVoiceSettingsModal();
+            if (currentPlayingVoiceId === voiceId) {
+              currentPlayingVoiceId = null;
+              openVoiceSettingsModal();
+            }
           }
         );
       } catch (err) {
-        currentPlayingVoiceId = null;
-        openVoiceSettingsModal();
+        if (err && (err.cancelled || err.message?.includes('superseded'))) {
+          return;
+        }
+        if (currentPlayingVoiceId === voiceId) {
+          currentPlayingVoiceId = null;
+          openVoiceSettingsModal();
+        }
         window.toast('Preview unavailable');
       }
     };

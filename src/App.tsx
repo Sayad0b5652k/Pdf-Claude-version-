@@ -379,7 +379,7 @@ export default function App() {
     } else if (typeof localStorage !== 'undefined') {
       raw = localStorage.getItem('sayad_pro_theme') || 'classic';
     }
-    return raw === 'editorial' ? 'editorial' : 'classic';
+    return (raw === 'editorial' || raw === 'notebook') ? raw : 'classic';
   });
 
   return (

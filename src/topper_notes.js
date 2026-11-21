@@ -46,7 +46,8 @@ export function buildTopperHtml({ title, annots, notes, date, fontCss = '', with
   }).join('');
 
   return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)} · Topper Notes</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">${fontCss}<style>${CSS}</style></head><body>
+<meta name="viewport" content="width=device-width,initial-scale=1">${fontCss}<style>${CSS}</style>
+<script>window.addEventListener('load',function(){setTimeout(function(){try{window.print();}catch(e){}},400);});</script></head><body>
 <header class="tn-head"><div><div class="tn-kicker">Topper Notes</div><h1 class="tn-title">${esc(title)}</h1></div>
 <div class="tn-meta">${marks.length} highlights · ${usedNotes.length} notes<br>${esc(date)}</div></header>
 ${body || '<p>Nothing to show yet.</p>'}
@@ -76,21 +77,36 @@ export async function openTopperNotes(fileId) {
     fontCss: collectFontCss(),
   }).replace('<head>', `<head><base href="${esc(location.origin + '/')}">`);
 
-  const frame = document.createElement('iframe');
-  frame.setAttribute('aria-hidden', 'true');
-  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none';
-  document.body.appendChild(frame);
-  const cleanup = () => setTimeout(() => { try { frame.remove(); } catch (e) {} }, 1500);
-  await new Promise((resolve) => { frame.onload = resolve; frame.srcdoc = html; });
-  const w = frame.contentWindow;
-  try { await Promise.race([w.document.fonts && w.document.fonts.ready, new Promise((r) => setTimeout(r, 2500))]); } catch (e) {}
+  // 1. Reliable direct HTML download (guaranteed delivery in sandboxed iframes; auto-prints on open)
+  const safeName = String(file.name || 'Topper_Notes').replace(/\.pdf$/i, '').replace(/[/\\?%*:|"<>]/g, '_').trim();
+  const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = `${safeName} - Topper Notes.html`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+
+  // 2. Also attempt in-app print via hidden iframe where allowed
   try {
-    w.onafterprint = cleanup; w.focus(); w.print(); setTimeout(cleanup, 120000);
-    window.toast('Choose "Save as PDF" to keep or share it');
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none';
+    document.body.appendChild(frame);
+    const cleanup = () => setTimeout(() => { try { frame.remove(); } catch (e) {} }, 1500);
+    await new Promise((resolve) => { frame.onload = resolve; frame.srcdoc = html; });
+    const w = frame.contentWindow;
+    if (w) {
+      try { await Promise.race([w.document.fonts && w.document.fonts.ready, new Promise((r) => setTimeout(r, 2500))]); } catch (e) {}
+      w.onafterprint = cleanup; w.focus(); w.print(); setTimeout(cleanup, 120000);
+    } else {
+      cleanup();
+    }
   } catch (e) {
-    cleanup();
-    window.open(URL.createObjectURL(new Blob([html], { type: 'text/html' })), '_blank');
+    // Direct file download above already delivered the printable sheet
   }
+  window.toast('Topper Notes downloaded! Open file to print or Save as PDF');
 }
 
 window.openTopperNotes = openTopperNotes;

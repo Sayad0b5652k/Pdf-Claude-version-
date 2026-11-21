@@ -18,12 +18,22 @@ const userKeyCtx = new AsyncLocalStorage<{ groq?: string; openrouter?: string }>
 const groqKey = (): string | undefined => userKeyCtx.getStore()?.groq || process.env.GROQ_API_KEY || undefined;
 const orKey = (): string | undefined => userKeyCtx.getStore()?.openrouter || process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI || undefined;
 
-function detectProvider(k: string): "gemini" | "groq" | "openrouter" | "openai" | "cerebras" | "unknown" {
-  if (/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)) return "gemini";
-  if (/^gsk_[0-9A-Za-z]{20,}$/.test(k)) return "groq";
-  if (/^sk-or-/.test(k)) return "openrouter";
-  if (/^csk-/.test(k)) return "cerebras";
-  if (/^sk-(proj-)?[0-9A-Za-z_\-]{20,}$/.test(k)) return "openai";
+function cleanKeyInput(raw: string): string {
+  let s = String(raw || "").replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
+  s = s.replace(/^(?!AIza|AQ\.|gsk_|sk-|csk-)(?:export\s+)?[A-Za-z0-9_.-]{2,48}\s*[:=]\s*/i, "").trim();
+  s = s.replace(/^bearer\s+/i, "").trim();
+  s = s.replace(/^["'`<]+|["'`>,;]+$/g, "").trim();
+  return s.replace(/\s+/g, "");
+}
+
+function detectProvider(k: string): "gemini" | "groq" | "openrouter" | "openai" | "anthropic" | "cerebras" | "unknown" {
+  k = cleanKeyInput(k);
+  if (/^(?:AIza[0-9A-Za-z_\-]{16,}|AQ\.[0-9A-Za-z_\-.]{16,})$/.test(k)) return "gemini";
+  if (/^gsk_[0-9A-Za-z_\-]{16,}$/.test(k)) return "groq";
+  if (/^sk-or-[0-9A-Za-z_\-]{8,}/.test(k)) return "openrouter";
+  if (/^sk-ant-[0-9A-Za-z_\-]{8,}/.test(k)) return "anthropic";
+  if (/^csk-[0-9A-Za-z_\-]{8,}/.test(k)) return "cerebras";
+  if (/^sk-(proj-|svcacct-)?[0-9A-Za-z_\-]{16,}$/.test(k)) return "openai";
   return "unknown";
 }
 
@@ -134,19 +144,22 @@ class GeminiKeyPool {
     console.log(`[GeminiKeyPool] Initialized: ${this.studyKeys.length} Study Key(s), ${this.chatKeys.length} Book Chat Key(s), ${this.backupKeys.length} Backup Key(s), ${this.allKeys.length} Total Unique Key(s).`);
   }
 
-  public getClient(key: string): GoogleGenAI {
-    if (!this.clientCache.has(key)) {
-      this.clientCache.set(key, new GoogleGenAI({
+  public getClient(key: string, direct = false, vertexai?: boolean): GoogleGenAI {
+    const isVertex = vertexai ?? key.startsWith("AQ.");
+    const cacheKey = `${direct ? "direct" : "pool"}:${isVertex ? "v" : "m"}:${key}`;
+    if (!this.clientCache.has(cacheKey)) {
+      this.clientCache.set(cacheKey, new GoogleGenAI({
         apiKey: key,
+        ...(isVertex ? { vertexai: true } : {}),
         httpOptions: {
-          ...(process.env.GEMINI_BASE_URL ? { baseUrl: process.env.GEMINI_BASE_URL } : {}),
+          ...(!direct && !isVertex && process.env.GEMINI_BASE_URL ? { baseUrl: process.env.GEMINI_BASE_URL } : {}),
           headers: {
             "User-Agent": "aistudio-build",
           },
         },
       }));
     }
-    return this.clientCache.get(key)!;
+    return this.clientCache.get(cacheKey)!;
   }
 
   public markCooldown(key: string, ms = 45000) {
@@ -281,12 +294,14 @@ async function executeWithGeminiPool(
     requested = "gemini-3.1-flash-lite";
   }
 
+  const isCustomByok = !!(options.customKey && typeof options.customKey === "string" && options.customKey.trim().length > 10);
   const candidateModels = [
     requested,
     "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     "gemini-flash-latest",
     "gemini-3.1-pro-preview",
+    ...(isCustomByok ? ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"] : []),
   ];
 
   const healthyModels: string[] = [];
@@ -294,7 +309,7 @@ async function executeWithGeminiPool(
 
   for (const m of candidateModels) {
     if (!m) continue;
-    if (m.includes("1.5") || m.includes("2.0") || m.includes("2.5")) continue;
+    if (!isCustomByok && (m.includes("1.5") || m.includes("2.0") || m.includes("2.5"))) continue;
     if (isModelOverloaded(m)) {
       overloadedModels.push(m);
     } else {
@@ -320,7 +335,7 @@ async function executeWithGeminiPool(
 
   // Iterate over healthy slots
   for (const slot of slots) {
-    const ai = keyPool.getClient(slot.key);
+    const ai = keyPool.getClient(slot.key, slot.tag === 'User Personal Custom Key');
     let anyModelSucceededOnSlot = false;
 
     for (const modelName of modelQueue) {
@@ -440,12 +455,14 @@ async function executeWithGeminiPoolStream(
     requested = "gemini-3.1-flash-lite";
   }
 
+  const isCustomByok = !!(options.customKey && typeof options.customKey === "string" && options.customKey.trim().length > 10);
   const candidateModels = [
     requested,
     "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     "gemini-flash-latest",
     "gemini-3.1-pro-preview",
+    ...(isCustomByok ? ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"] : []),
   ];
 
   const healthyModels: string[] = [];
@@ -453,7 +470,7 @@ async function executeWithGeminiPoolStream(
 
   for (const m of candidateModels) {
     if (!m) continue;
-    if (m.includes("1.5") || m.includes("2.0") || m.includes("2.5")) continue;
+    if (!isCustomByok && (m.includes("1.5") || m.includes("2.0") || m.includes("2.5"))) continue;
     if (isModelOverloaded(m)) {
       overloadedModels.push(m);
     } else {
@@ -472,7 +489,7 @@ async function executeWithGeminiPoolStream(
   }
 
   for (const slot of slots) {
-    const ai = keyPool.getClient(slot.key);
+    const ai = keyPool.getClient(slot.key, slot.tag === 'User Personal Custom Key');
     let anyModelSucceededOnSlot = false;
 
     for (const modelName of modelQueue) {
@@ -539,8 +556,10 @@ async function executeWithGroq(prompt: string, systemInstruction?: string, tempe
   const apiKey = groqKey();
   if (!apiKey) return null;
 
-  const models = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"];
-  for (const model of models) {
+  let models = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "qwen/qwen3.6-27b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
+  let triedDynamic = false;
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
     try {
       const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
@@ -563,6 +582,18 @@ async function executeWithGroq(prompt: string, systemInstruction?: string, tempe
         const data: any = await resp.json();
         const text = data?.choices?.[0]?.message?.content;
         if (text && text.trim()) return text.trim();
+      } else if (!triedDynamic && (resp.status === 400 || resp.status === 404)) {
+        triedDynamic = true;
+        try {
+          const mr = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+          if (mr.ok) {
+            const md: any = await mr.json().catch(() => null);
+            const extras = (md?.data || [])
+              .map((x: any) => String(x?.id || ""))
+              .filter((id: string) => id && !/whisper|guard|tts|playai|orpheus/i.test(id) && !models.includes(id));
+            models = models.concat(extras.slice(0, 4));
+          }
+        } catch {}
       }
     } catch (err: any) {
       console.warn(`[Groq Failover] Model ${model} error:`, err?.message);
@@ -2132,63 +2163,162 @@ Return ONLY a valid raw JSON object with this exact structure:
   // Verify / Test Custom User Gemini API Key
   // Key checker: detects provider and returns real quota where the provider exposes it.
   app.post("/api/keys/check", async (req, res) => {
-    const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
+    const key = typeof req.body?.key === "string" ? cleanKeyInput(req.body.key) : "";
     if (key.length < 12 || key.length > 300) return res.status(400).json({ valid: false, error: "Key format galat lag raha hai" });
     const provider = detectProvider(key);
     const num = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+    const friendlyErr = (raw: any, fallback: string) => {
+      const s = String(raw || "").trim();
+      if (!s) return fallback;
+      try {
+        const parsed = JSON.parse(s);
+        if (parsed?.error?.message) return String(parsed.error.message).slice(0, 140);
+      } catch {}
+      const mMatch = s.match(/"message"\s*:\s*"([^"]+)"/);
+      if (mMatch && mMatch[1]) return mMatch[1].slice(0, 140);
+      return s.slice(0, 140);
+    };
     try {
       if (provider === "gemini") {
-        const client = keyPool.getClient(key);
-        const r = await client.models.generateContent({ model: "gemini-3.1-flash-lite", contents: "Reply OK" });
-        return res.json({ valid: !!(r && r.text), provider, quota: null, note: "Google quota nahi batata; app apna count rakhta hai" });
+        let publicErrMsg = "";
+        const isAq = key.startsWith("AQ.");
+        if (!isAq) {
+          try {
+            const mr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(key)}`);
+            if (mr.ok) {
+              return res.json({ valid: true, provider, quota: null, note: "Google quota nahi batata; app apna count rakhta hai" });
+            }
+            if (mr.status === 429) {
+              return res.json({ valid: true, exhausted: true, provider, quota: null, note: "Key valid hai, abhi rate limit par hai" });
+            }
+            const mErr: any = await mr.json().catch(() => null);
+            publicErrMsg = mErr?.error?.message || "";
+            if ((mr.status === 400 || mr.status === 401 || mr.status === 403) && !process.env.GEMINI_BASE_URL) {
+              return res.json({
+                valid: false,
+                provider,
+                error: friendlyErr(publicErrMsg, "Google ne Gemini key reject kar di"),
+              });
+            }
+          } catch {}
+        }
+
+        const clientsToTry = isAq
+          ? [keyPool.getClient(key, true, true), keyPool.getClient(key, true, false)]
+          : (process.env.GEMINI_BASE_URL
+              ? [keyPool.getClient(key, false, false), keyPool.getClient(key, true, false)]
+              : [keyPool.getClient(key, true, false)]);
+        const testModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite"];
+        let lastErr = publicErrMsg;
+        for (const client of clientsToTry) {
+          for (const m of testModels) {
+            try {
+              const r = await client.models.generateContent({ model: m, contents: "Reply OK" });
+              if (r && r.text) {
+                return res.json({ valid: true, provider, quota: null, note: "Google quota nahi batata; app apna count rakhta hai" });
+              }
+            } catch (gErr: any) {
+              const msg = String(gErr?.message || gErr || "");
+              const status = Number(gErr?.status || gErr?.code || 0);
+              if (status === 429 || /429|RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(msg)) {
+                return res.json({ valid: true, exhausted: true, provider, quota: null, note: "Key valid hai, abhi rate limit par hai" });
+              }
+              if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED|UNAUTHENTICATED|401/i.test(msg)) {
+                lastErr = msg;
+                break;
+              }
+              lastErr = msg;
+            }
+          }
+        }
+        return res.json({ valid: false, provider, error: friendlyErr(lastErr, "Gemini key verify nahi ho saki") });
       }
       if (provider === "groq") {
+        // Step 1: Verify key & fetch actual models enabled for this key
+        const mr = await fetch("https://api.groq.com/openai/v1/models", {
+          headers: { Authorization: `Bearer ${key}` },
+        });
+        if (mr.status === 401 || mr.status === 403) {
+          return res.json({ valid: false, provider, error: "Groq ne key reject kar di" });
+        }
+        let availableIds: string[] = [];
+        if (mr.ok) {
+          const md: any = await mr.json().catch(() => null);
+          availableIds = (md?.data || [])
+            .map((x: any) => String(x?.id || ""))
+            .filter((id: string) => id && !/whisper|guard|tts|playai|orpheus|safeguard/i.test(id));
+        }
+
+        const preferredOrder = [
+          "llama-3.1-8b-instant",
+          "llama-3.3-70b-versatile",
+          "openai/gpt-oss-20b",
+          "openai/gpt-oss-120b",
+          "qwen/qwen3-32b",
+          "meta-llama/llama-4-scout-17b-16e-instruct",
+        ];
+        const testModel = preferredOrder.find((m) => availableIds.includes(m)) || availableIds[0] || "llama-3.1-8b-instant";
+
         const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-          body: JSON.stringify({ model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+          body: JSON.stringify({ model: testModel, messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
         });
-        if (r.status === 401) return res.json({ valid: false, provider, error: "Groq ne key reject kar di" });
+        if (r.status === 401 || r.status === 403) {
+          return res.json({ valid: false, provider, error: "Groq ne key reject kar di" });
+        }
         const h = r.headers;
         const quota = {
           limit: num(h.get("x-ratelimit-limit-requests")), remaining: num(h.get("x-ratelimit-remaining-requests")),
           tokenLimit: num(h.get("x-ratelimit-limit-tokens")), tokenRemaining: num(h.get("x-ratelimit-remaining-tokens")),
           reset: h.get("x-ratelimit-reset-requests") || null, unit: "requests/day",
         };
-        return res.json({ valid: r.ok || r.status === 429, provider, exhausted: r.status === 429, quota });
+        if (r.ok || r.status === 429) {
+          return res.json({ valid: true, provider, exhausted: r.status === 429, quota });
+        }
+        // Key listed models successfully (200), only completion test hit a model-level quirk
+        if (mr.ok) {
+          return res.json({ valid: true, provider, quota: null, note: "Groq key verify ho gayi" });
+        }
+        const d: any = await r.json().catch(() => null);
+        return res.json({ valid: false, provider, error: friendlyErr(d?.error?.message, `Groq error (HTTP ${r.status})`) });
       }
       if (provider === "openrouter") {
         const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` } });
         if (r.status === 401 || r.status === 403) return res.json({ valid: false, provider, error: "OpenRouter ne key reject kar di" });
-        const d: any = (await r.json().catch(() => ({}))).data || {};
+        const rawBody: any = await r.json().catch(() => ({}));
+        if (!r.ok) return res.json({ valid: false, provider, error: friendlyErr(rawBody?.error?.message, `OpenRouter error (HTTP ${r.status})`) });
+        const d: any = rawBody?.data || {};
         const limit = num(d.limit), remaining = num(d.limit_remaining);
-        return res.json({ valid: r.ok, provider, quota: { limit, remaining, used: num(d.usage), free: !!d.is_free_tier, unit: "credits ($)" } });
+        return res.json({ valid: true, provider, quota: { limit, remaining, used: num(d.usage), free: !!d.is_free_tier, unit: "credits ($)" } });
       }
-      if (provider === "openai" || provider === "cerebras") {
+      if (provider === "openai" || provider === "anthropic" || provider === "cerebras") {
         return res.json({ valid: true, provider, supported: false, note: "Pehchan liya, par app abhi iska use nahi karta" });
       }
-      return res.json({ valid: false, provider: "unknown", error: "Provider pehchana nahi gaya (Gemini AIza…, Groq gsk_…, OpenRouter sk-or-…)" });
+      return res.json({ valid: false, provider: "unknown", error: "Provider pehchana nahi gaya (Gemini AIza… / AQ.…, Groq gsk_…, OpenRouter sk-or-…)" });
     } catch (err: any) {
-      return res.json({ valid: false, provider, error: String(err?.message || err).slice(0, 160) });
+      return res.json({ valid: false, provider, error: friendlyErr(err?.message || err, "Key check fail hua") });
     }
   });
 
   app.post("/api/gemini/validate", async (req, res) => {
     try {
-      const { apiKey } = req.body;
-      if (!apiKey || typeof apiKey !== "string" || apiKey.trim().length < 8) {
+      const apiKey = cleanKeyInput(String(req.body?.apiKey || ""));
+      if (!apiKey || apiKey.length < 12) {
         return res.status(400).json({ valid: false, error: "Please enter a valid Gemini API key" });
       }
 
-      const client = keyPool.getClient(apiKey.trim());
-      const testResp = await client.models.generateContent({
-        model: "gemini-3.1-flash-lite",
-        contents: "Respond with 'OK' only.",
-      });
-
-      if (testResp && testResp.text) {
-        return res.json({ valid: true, message: "Key verified successfully!" });
+      if (!apiKey.startsWith("AQ.")) {
+        const mr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(apiKey)}`);
+        if (mr.ok || mr.status === 429) {
+          return res.json({ valid: true, message: "Key verified successfully!" });
+        }
+        const mErr: any = await mr.json().catch(() => ({}));
+        return res.status(400).json({ valid: false, error: mErr?.error?.message || "Failed to validate key with Google Gemini." });
       }
+      const client = keyPool.getClient(apiKey, true, true);
+      const r = await client.models.generateContent({ model: "gemini-2.5-flash", contents: "Reply OK" });
+      if (r && r.text) return res.json({ valid: true, message: "Key verified successfully!" });
       return res.status(400).json({ valid: false, error: "Invalid response from Gemini" });
     } catch (err: any) {
       console.warn("Key validation failed:", err.message);

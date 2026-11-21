@@ -452,7 +452,12 @@ function scheduleSave() { clearTimeout(ps.saveT); ps.saveT = setTimeout(flushSav
 function flushSave() { clearTimeout(ps.saveT); const r = currentRec(); if (r) PaperStore.save(r); }
 
 /* ============================== RESULT ============================== */
-function resultRows(r, at) {
+function resultHtml() {
+  const r = currentRec(); if (!r) { ps.screen = 'home'; return homeHtml(); }
+  const at = r.attempt; const self = mergedSelf(r);
+  const sc = C.scorePaper(r, at.answers, self);
+  const pct = sc.max ? Math.round((sc.got / sc.max) * 100) : 0;
+  const circ = 2 * Math.PI * 52;
   const units = C.flattenUnits(r);
   const altById = {}; units.filter((u) => u.alt).forEach((u) => { altById[u.id.replace('o', '')] = u; });
   const rows = [];
@@ -466,15 +471,6 @@ function resultRows(r, at) {
     const state = !unitHasAnswer(at.answers, u.id) ? 'skip' : isAuto ? (g > 0 ? 'ok' : 'bad') : 'written';
     rows.push({ u, u0, a, g, state, isAuto, flagged: !!at.flags[u0.qNo] });
   }
-  return rows;
-}
-function resultHtml() {
-  const r = currentRec(); if (!r) { ps.screen = 'home'; return homeHtml(); }
-  const at = r.attempt; const self = mergedSelf(r);
-  const sc = C.scorePaper(r, at.answers, self);
-  const pct = sc.max ? Math.round((sc.got / sc.max) * 100) : 0;
-  const circ = 2 * Math.PI * 52;
-  const rows = resultRows(r, at);
   const f = ps.filter;
   const shown = rows.filter((x) => f === 'all' || (f === 'wrong' && x.state === 'bad') || (f === 'skip' && x.state === 'skip') || (f === 'written' && !x.isAuto) || (f === 'flag' && x.flagged));
   const counts = { ok: rows.filter((x) => x.state === 'ok').length, bad: rows.filter((x) => x.state === 'bad').length, skip: rows.filter((x) => x.state === 'skip').length };
@@ -487,7 +483,7 @@ function resultHtml() {
     <div class="pp-secres">${Object.entries(sc.bySection).map(([k, s]) => `<div class="pp-sr"><span class="pp-pk">${esc(k)}</span><div class="pp-bar"><i style="width:${s.max ? Math.round((s.got / s.max) * 100) : 0}%"></i></div><span class="pp-srn">${marksStr(s.got)}/${marksStr(s.max)}</span></div>`).join('')}</div>
     ${writtenPending ? `<div class="pp-warn"><div><b>${writtenPending} written answer${writtenPending > 1 ? 's' : ''} not marked yet.</b> Mark them yourself against the scheme, or let the AI check them.</div><button class="btn btn-primary" data-act="aigrade" ${ps.busy ? 'disabled' : ''}>${ic('sparkle')} Check with AI</button></div>` : ''}
     <div class="pp-actions pp-actions3"><button class="btn btn-ghost" data-act="download">${ic('upload')} Download with my answers</button><button class="btn btn-ghost" data-act="attempt">${ic('rotateCcw')} Retry</button></div>
-    ${counts.bad + counts.skip ? `<button class="btn btn-primary pp-revbtn" data-act="revise">${ic('cards')} Make ${counts.bad + counts.skip} revision card${counts.bad + counts.skip > 1 ? 's' : ''} from my mistakes</button>` : ''}
+    ${counts.bad + counts.skip ? `<button class="btn btn-primary pp-revbtn" data-act="revise" style="margin-bottom:12px;width:100%;">${ic('cards')} Make ${counts.bad + counts.skip} revision card${counts.bad + counts.skip > 1 ? 's' : ''} from my mistakes</button>` : ''}
     <div class="pp-filters no-scrollbar">${[['all', 'All'], ['wrong', 'Wrong'], ['skip', 'Skipped'], ['written', 'Written'], ['flag', 'Flagged']].map(([k, l]) => `<button class="pp-pre ${f === k ? 'on' : ''}" data-act="filter" data-v="${k}">${l}</button>`).join('')}</div>
     ${shown.map((x) => reviewCard(x, r, self)).join('') || '<div class="pp-empty"><small>Nothing in this filter.</small></div>'}
   </div></div>`;
@@ -538,7 +534,26 @@ async function onClick(e) {
     case 'home': ps.list = await PaperStore.list(); ps.screen = 'home'; return mount();
     case 'new': return startNew();
     case 'open': { if (e.target.closest('.pp-kebab')) return; ps.paperId = el.dataset.id; const rr = currentRec(); ps.screen = rr && (rr.status === 'running' || rr.status === 'queued') ? 'progress' : 'paper'; ps.unseenDone.delete(ps.paperId); return mount(); }
-    case 'del': { e.stopPropagation(); const id = el.dataset.id; if (!confirm('Delete this paper and its attempt history?')) return; PaperJobs.cancel(id); await PaperStore.remove(id); ps.list = await PaperStore.list(); ps.screen = 'home'; ps.paperId = null; return mount(); }
+    case 'del': {
+      e.stopPropagation();
+      const id = el.dataset.id;
+      confirmSheetModal(
+        'Delete this question paper?',
+        'This paper and all your attempt history will be permanently deleted.',
+        'Delete Paper',
+        async () => {
+          PaperJobs.cancel(id);
+          await PaperStore.remove(id);
+          ps.list = await PaperStore.list();
+          ps.screen = 'home';
+          ps.paperId = null;
+          mount();
+          toast('Question paper deleted');
+        },
+        true
+      );
+      return;
+    }
     case 'openrun': { const id = PaperJobs.runningIds()[0]; ps.paperId = id; ps.screen = 'progress'; return mount(); }
     case 'progress': ps.screen = 'progress'; return mount();
     case 'board': { const id = C.blueprintsFor(el.dataset.v, c.level)[0]?.id || C.blueprintsFor(el.dataset.v, '10')[0].id; pickBlueprint(id); savePrefs(); return mount(true); }
@@ -609,21 +624,62 @@ async function onGenerate(btn) {
   mount();
 }
 
+function confirmSheetModal(title, subtitle, confirmLabel, onConfirm, isDanger = false) {
+  const html = `<div class="pp-confirm-sheet" style="padding:22px 18px;text-align:center;">
+    <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;">${title}</div>
+    ${subtitle ? `<div style="font-size:13px;color:var(--text-dim);margin-bottom:20px;line-height:1.45;">${subtitle}</div>` : ''}
+    <div style="display:flex;gap:12px;justify-content:center;">
+      <button class="btn btn-ghost" id="pp-modal-cancel" style="flex:1;padding:10px 14px;">Cancel</button>
+      <button class="btn ${isDanger ? 'btn-danger' : 'btn-primary'}" id="pp-modal-confirm" style="flex:1;padding:10px 14px;">${confirmLabel}</button>
+    </div>
+  </div>`;
+  window.Sheet.open(html);
+  const cancelBtn = document.getElementById('pp-modal-cancel');
+  const confirmBtn = document.getElementById('pp-modal-confirm');
+  if (cancelBtn) cancelBtn.onclick = () => window.Sheet.close();
+  if (confirmBtn) {
+    confirmBtn.onclick = () => {
+      window.Sheet.close();
+      onConfirm();
+    };
+  }
+}
+
 async function startAttempt() {
   const r = currentRec(); if (!r) return;
   if (r.attempt.submittedAt) {
-    if (!confirm('Start a fresh attempt? Your previous answers and score will be cleared.')) return;
-    r.attempt = { answers: {}, self: {}, flags: {}, startedAt: null, submittedAt: null, elapsed: 0 };
-    await PaperStore.save(r);
+    confirmSheetModal(
+      'Start a fresh attempt?',
+      'Your previous answers and score will be cleared.',
+      'Start Fresh',
+      async () => {
+        r.attempt = { answers: {}, self: {}, flags: {}, startedAt: null, submittedAt: null, elapsed: 0 };
+        await PaperStore.save(r);
+        ps.ci = 0; ps.altSel = {}; ps.screen = 'attempt'; mount();
+      }
+    );
+    return;
   }
   ps.ci = 0; ps.altSel = {}; ps.screen = 'attempt'; mount();
 }
 function submitAttempt() {
-  const r = currentRec(); const cards = cardsOf(r);
+  const r = currentRec(); if (!r) return;
+  const cards = cardsOf(r);
   const un = cards.filter((c) => !unitsFor(c, 'main').concat(c.q.alt ? unitsFor(c, 'alt') : []).some((u) => unitHasAnswer(r.attempt.answers, u.id))).length;
-  if (!confirm(un ? `${un} question${un > 1 ? 's are' : ' is'} still unanswered. Submit anyway?` : 'Submit your paper?')) return;
-  r.attempt.submittedAt = Date.now(); clearTimer(); flushSave();
-  ps.screen = 'result'; ps.filter = 'all'; mount();
+  
+  const doSubmit = () => {
+    r.attempt.submittedAt = Date.now();
+    clearTimer();
+    flushSave();
+    ps.screen = 'result';
+    ps.filter = 'all';
+    mount();
+    window.toast('Paper submitted successfully! 🎉');
+  };
+
+  const title = un ? `${un} question${un > 1 ? 's are' : ' is'} still unanswered` : 'Submit your question paper?';
+  const subtitle = un ? 'Are you sure you want to submit now? Unanswered questions will receive 0 marks.' : 'Your answers will be evaluated and marking scheme unlocked.';
+  confirmSheetModal(title, subtitle, 'Submit now', doSubmit);
 }
 function openPalette() {
   const r = currentRec(); const cards = cardsOf(r); const at = r.attempt;
@@ -649,16 +705,38 @@ async function runAiGrade() {
 async function replaceQuestion(no) {
   const r = currentRec(); if (!r || ps.replacing.has(no)) return;
   if (PaperJobs.isRunning(r.id)) return toast('Wait until the paper finishes generating.');
-  if (!confirm(`Replace question ${no} with a new one?`)) return;
-  ps.replacing.add(no); ps.busy = `Writing a new question ${no}…`; mount(true);
-  try { await regenerateQuestion(r, no, 'main'); toast('Question replaced.'); } catch (e) { toast(e?.message || 'Could not replace the question.'); }
-  ps.replacing.delete(no); ps.busy = null; mount(true);
+  confirmSheetModal(
+    `Replace question ${no}?`,
+    'A new AI question matching the blueprint will be generated.',
+    'Replace',
+    async () => {
+      ps.replacing.add(no); ps.busy = `Writing a new question ${no}…`; mount(true);
+      try { await regenerateQuestion(r, no, 'main'); toast('Question replaced.'); } catch (e) { toast(e?.message || 'Could not replace the question.'); }
+      ps.replacing.delete(no); ps.busy = null; mount(true);
+    }
+  );
 }
 
 /* ------------------------------ Revision cards ------------------------------ */
 async function makeRevisionCards() {
   const r = currentRec(); if (!r?.attempt) return;
-  const rows = resultRows(r, r.attempt).filter((x) => x.state === 'bad' || x.state === 'skip');
+  const at = r.attempt;
+  const rows = [];
+  const units = C.flattenUnits(r);
+  const altById = {}; units.filter((u) => u.alt).forEach((u) => { altById[u.id.replace('o', '')] = u; });
+  for (const u0 of units) {
+    if (u0.alt) continue;
+    const au = altById[u0.id];
+    const u = au && !unitHasAnswer(at.answers, u0.id) && unitHasAnswer(at.answers, au.id) ? au : u0;
+    const a = at.answers[u.id];
+    const isAuto = ['mcq', 'ar', 'tf', 'fill', 'map', 'grammar'].includes(u.q.type) || ((u.q.type === 'vsa' || u.q.type === 'short') && u.q.marks <= 1);
+    const g = isAuto ? C.gradeObjective(u.q, a) : null;
+    const state = !unitHasAnswer(at.answers, u.id) ? 'skip' : isAuto ? (g > 0 ? 'ok' : 'bad') : 'written';
+    if (state === 'bad' || state === 'skip') {
+      rows.push({ u });
+    }
+  }
+
   if (!rows.length) return toast('No mistakes to revise. Nice!');
   let n = 0;
   for (const x of rows) {
@@ -666,7 +744,20 @@ async function makeRevisionCards() {
     const opts = Array.isArray(q.options) ? '\n' + q.options.map((o, i) => `${'ABCD'[i]}. ${o}`).join('\n') : '';
     const ans = Array.isArray(q.options) && typeof q.correct === 'number' ? `${'ABCD'[q.correct]}. ${q.options[q.correct]}` : (q.answer || '');
     const page = (q.source && q.source.page) || q.page || 1;
-    await window.DB.put('flashcards', { id: `pp-${r.id}-${x.u.id}`, fileId: r.fileId || 'global', page, category: 'Paper mistakes', front: q.q + opts, back: String(ans) + (q.explanation ? `\n\n${q.explanation}` : ''), due: Date.now(), stability: 0.5, difficulty: 5, reps: 0, lapses: 1, createdAt: Date.now() });
+    await window.DB.put('flashcards', {
+      id: `pp-${r.id}-${x.u.id}`,
+      fileId: r.fileId || 'global',
+      page,
+      category: 'Paper mistakes',
+      front: q.q + opts,
+      back: String(ans) + (q.explanation ? `\n\n${q.explanation}` : ''),
+      due: Date.now(),
+      stability: 0.5,
+      difficulty: 5,
+      reps: 0,
+      lapses: 1,
+      createdAt: Date.now()
+    });
     n++;
   }
   toast(`Added ${n} card${n > 1 ? 's' : ''} to Review.`);
@@ -682,8 +773,8 @@ function openDownload() {
     ${dlRow('mine', 'My answers & result', attempted ? 'Your written answers with marks' : 'Attempt the paper first', false, !attempted)}
     ${dlRow('refs', 'Book page references', 'Adds chapter, page and source line in the marking scheme', false)}
     ${dlRow('roll', 'Name and roll number line', 'Printed under the paper heading', true)}
-    <button class="btn btn-primary pp-dlgo" id="pp-dlgo">${ic('upload')} Save as PDF</button>
-    <div class="pp-dln">A print window opens. Set the printer to <b>Save as PDF</b>, then tap Save. Hindi text and fonts stay intact.</div></div>`);
+    <button class="btn btn-primary pp-dlgo" id="pp-dlgo">${ic('upload')} Download</button>
+    <div class="pp-dln">In the print window choose <b>Save as PDF</b>.</div></div>`);
   const state = { paper: true, key: false, mine: false, refs: false, roll: true };
   document.querySelectorAll('.pp-dl [data-dl]').forEach((row) => {
     row.onclick = () => { if (row.dataset.disabled) return; const k = row.dataset.dl; state[k] = !state[k]; row.querySelector('.pp-sw').classList.toggle('on', state[k]); row.setAttribute('aria-checked', state[k]); };
@@ -691,8 +782,8 @@ function openDownload() {
   $('#pp-dlgo').onclick = async () => {
     if (!state.paper && !state.key && !state.mine) return toast('Choose at least one part.');
     window.Sheet.close();
-    const ok = await printPaper(r, { paper: state.paper, key: state.key, mine: state.mine, refs: state.refs, rollBox: state.roll });
-    if (!ok) toast('Opened in a new tab. Use your browser’s print / save option.');
+    await printPaper(r, { paper: state.paper, key: state.key, mine: state.mine, refs: state.refs, rollBox: state.roll });
+    toast('Paper downloaded! Open file to print or save as PDF 📄');
   };
 }
 function dlRow(k, t, s, on, disabled) {

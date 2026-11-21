@@ -94,11 +94,11 @@ export async function synthesizeMicrosoftTTS(
   const cleanText = escapeXml(text.trim());
 
   const requestId = crypto.randomUUID().replace(/-/g, '');
-  const connId = crypto.randomUUID();
+  const connId = crypto.randomUUID().replace(/-/g, '');
   const timestamp = new Date().toISOString();
   const secMsGec = generateSecMsGec();
 
-  const wsUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-143.0.3650.96&ConnectionId=${connId}`;
+  const wsUrl = `wss://api.msedgeservices.com/tts/cognitiveservices/websocket/v1?Ocp-Apim-Subscription-Key=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-143.0.3650.96&ConnectionId=${connId}`;
 
   const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
     <voice name='${voice}'>
