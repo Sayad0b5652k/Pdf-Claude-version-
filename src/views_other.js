@@ -1,5 +1,6 @@
 // @ts-nocheck
 import QRCode from 'qrcode';
+import { GUIDE, searchGuide, askHelpAI, logMiss } from './help_guide.js';
 
 /* ============================================================
    SETTINGS VIEW
@@ -56,6 +57,12 @@ export async function renderSettings(){
     <div style="padding:0 20px;">
 
     ${!isAdv ? `
+    <!-- Help & Guide -->
+    <div class="card help-card" id="help-card">
+      <div class="help-head"><div class="help-q">?</div><div><div class="help-title">Help &amp; Guide</div><div class="help-sub">App ke baare me kuch bhi poocho</div></div></div>
+      <div class="help-box"><span>🔍</span><input id="help-input" type="search" placeholder="Jaise: PIN lock kaise lagaun?" autocomplete="off" enterkeyhint="search" /></div>
+      <div id="help-out" class="help-out"></div>
+    </div>
     <!-- 1. Appearance -->
     <div class="section-title" style="margin-bottom:10px;">Appearance</div>
     <div class="card" style="padding:14px; margin-bottom:22px;">
@@ -315,7 +322,7 @@ export async function renderSettings(){
 
     <!-- Reset -->
     <div class="section-title adv-title"><span>Reset App</span></div>
-    <div class="card adv-card adv-danger">
+    <div class="card adv-card adv-danger" id="reset-card">
       <div class="adv-lead">Sab kuch mita do: books, notes, highlights, settings, keys, lock. Wapas nahi aayega. Pehle Backup le lena.</div>
       <input id="reset-input" class="adv-reset-input" placeholder="Confirm karne ke liye RESET type karo" autocomplete="off" autocapitalize="characters" />
       <button class="btn" id="reset-go" disabled style="width:100%; justify-content:center; padding:12px; font-weight:800; border-radius:12px;">Sab kuch erase karo</button>
@@ -484,6 +491,49 @@ export async function renderSettings(){
       }
     };
   });
+
+  // ---- Help & Guide card ----
+  const hIn = document.getElementById('help-input'), hOut = document.getElementById('help-out');
+  if (hIn && hOut) {
+    const esc = window.escapeHtml;
+    const goTo = (g) => {
+      const scroll = (id, sel) => setTimeout(() => {
+        const el = sel ? document.querySelector(sel) : document.getElementById(id);
+        if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('help-flash'); setTimeout(() => el.classList.remove('help-flash'), 1600); }
+      }, 120);
+      if (g.t === 'adv') { window.State.settingsPage = 'advanced'; renderSettings(); window.scrollTo(0, 0); scroll(g.id); }
+      else if (g.t === 'set') { if (window.State.settingsPage !== 'main') { window.State.settingsPage = 'main'; renderSettings(); } scroll(g.id, g.sel || (g.id ? '#' + g.id : null)); }
+      else if (g.t === 'nav') { window.State.settingsPage = 'main'; const b = document.querySelector(`[data-nav="${g.n}"]`); if (b) b.click(); }
+    };
+    const answerCard = (e, others) => `<div class="help-ans"><div class="help-ans-t">${esc(e.title)}</div><div class="help-ans-a">${esc(e.a)}</div>
+      ${e.go && e.go.length ? `<div class="help-go">${e.go.map((g, i) => `<button type="button" class="help-gobtn" data-gi="${i}">${esc(g.l)} →</button>`).join('')}</div>` : ''}
+      ${others.length ? `<div class="help-more"><span>Ye bhi dekho:</span>${others.map(o => `<button type="button" data-more="${o.id}">${esc(o.title)}</button>`).join('')}</div>` : ''}</div>`;
+    const showEntry = (e, others) => {
+      hOut.innerHTML = answerCard(e, others);
+      hOut.querySelectorAll('[data-gi]').forEach(b => b.onclick = () => goTo(e.go[+b.dataset.gi]));
+      hOut.querySelectorAll('[data-more]').forEach(b => b.onclick = () => { const x = GUIDE.find(g => g.id === b.dataset.more); showEntry(x, others.filter(o => o !== x).concat(e === x ? [] : [e]).slice(0, 2)); });
+    };
+    const aiBtn = (q) => navigator.onLine ? `<button type="button" class="help-ai" id="help-ai">✨ AI se poocho</button>` : `<div class="help-off">Offline ho — AI ke liye internet chahiye</div>`;
+    const bindAI = (q) => { const b = document.getElementById('help-ai'); if (!b) return; b.onclick = async () => {
+      b.disabled = true; b.textContent = 'AI soch raha hai…';
+      const t = await askHelpAI(q);
+      const box = document.createElement('div'); box.className = 'help-ans help-ai-ans';
+      box.innerHTML = t ? `<div class="help-ans-t">✨ AI ne samjhaya</div><div class="help-ans-a">${esc(t)}</div>` : `<div class="help-ans-a">AI abhi jawab nahi de paaya. Thodi der baad try karo.</div>`;
+      b.replaceWith(box); }; };
+    const chips = ['PIN lock kaise lagaun', 'API key daalna', 'App slow hai', 'Backup lena'];
+    const idle = () => { hOut.innerHTML = `<div class="help-chips">${chips.map(c => `<button type="button">${c}</button>`).join('')}</div>`;
+      hOut.querySelectorAll('.help-chips button').forEach(b => b.onclick = () => { hIn.value = b.textContent; run(); }); };
+    let timer = null;
+    const run = () => {
+      const q = hIn.value.trim();
+      if (!q) return idle();
+      const r = searchGuide(q, 3);
+      if (r.length) { showEntry(r[0], r.slice(1)); const extra = document.createElement('div'); extra.id = 'help-ai-slot'; extra.innerHTML = aiBtn(q); hOut.appendChild(extra); bindAI(q); }
+      else { logMiss(q); hOut.innerHTML = `<div class="help-ans"><div class="help-ans-a">Guide me ye nahi mila. Doosre shabd try karo (jaise "lock", "key", "backup").</div></div>` + aiBtn(q); bindAI(q); }
+    };
+    hIn.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 160); };
+    idle();
+  }
 
   // ---- Advanced: multi-key vault + response style ----
   const KV = window.KeyVault;
