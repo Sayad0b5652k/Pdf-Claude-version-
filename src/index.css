@@ -554,7 +554,7 @@ html[data-theme="dark"] .marker-mark {
   border-top-right-radius: 18px;
   border: 1px solid var(--border);
   border-bottom: none;
-  box-shadow: 0 -16px 48px -12px rgba(0, 0, 0, .45);
+  box-shadow: 0 -8px 24px -8px rgba(0, 0, 0, .4);
   transform: translate3d(0, 100%, 0);
   transition: transform .24s cubic-bezier(0.16, 1, 0.3, 1);
   will-change: transform;
@@ -8429,3 +8429,5 @@ html[data-pro-theme="editorial"] .cw-hero-title { font-family: 'Playfair Display
 .cw-focus-chip .icon { color: var(--accent); }
 .cw-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; display: inline-block; }
 .cw-head-sub { overflow: visible; }
+
+.sheet-body { contain: layout paint; }

@@ -109,6 +109,8 @@ export const Sheet = {
     const peek = options.peek === true;
     this.el.classList.toggle('peek', peek);
     if (!peek || !isAlreadyOpen) this.el.classList.remove('expanded');
+    // lay the new content out while the sheet is still off-screen, so the slide itself starts on a clean frame
+    if (!isAlreadyOpen) void this.el.offsetHeight;
     this.el.classList.add('open');
     this.backdrop.classList.toggle('open', !peek);
     keepBottomBarPositioned(this.el);
@@ -126,9 +128,6 @@ export const Sheet = {
         this.body.scrollTop = prevScroll;
       }
       this.updateScrollIndicator();
-      if (typeof window.enhanceCustomSelects === 'function') {
-        window.enhanceCustomSelects(this.body);
-      }
       if (typeof window.renderMermaidDiagrams === 'function') {
         window.renderMermaidDiagrams(this.body);
       }
@@ -1316,22 +1315,105 @@ export function downloadDiagram(buttonEl) {
 // Bind to window for global availability
 window.toast = toast;
 window.Sheet = Sheet;
-/** Theme switch with a circular colour reveal from the tapped control (View Transitions API; plain switch when unsupported). */
-window.themeTransition = function themeTransition(apply, originEl) {
+/**
+ * Theme switch with a signature reveal per theme (View Transitions API; plain switch when unsupported / reduced motion).
+ *   dark      night falls: circle reveal + twinkling stars
+ *   light     sunrise: circle reveal + warm flash and rays
+ *   classic   shockwave rings
+ *   editorial curtain sweep with a gold edge
+ *   notebook  page peel from the corner + doodle burst
+ * kind = 'light' | 'dark' | 'classic' | 'editorial' | 'notebook'
+ */
+window.themeTransition = function themeTransition(apply, originEl, kind) {
   let reduce = false;
   try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* ignore */ }
-  if (typeof document.startViewTransition !== 'function' || reduce) { apply(); return; }
-  let x = innerWidth / 2, y = innerHeight / 2;
+  if (typeof document.startViewTransition !== 'function' || reduce || window.__themeFx) { apply(); return; }
+  const W = innerWidth, H = innerHeight;
+  let x = W / 2, y = H / 2;
   try { const r = originEl && originEl.getBoundingClientRect(); if (r && r.width) { x = r.left + r.width / 2; y = r.top + r.height / 2; } } catch (e) { /* ignore */ }
-  const end = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+  const end = Math.hypot(Math.max(x, W - x), Math.max(y, H - y));
+  const accent = (() => { try { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#d9560f'; } catch (e) { return '#d9560f'; } })();
   let vt;
-  try { vt = document.startViewTransition(() => { apply(); }); } catch (e) { apply(); return; }
+  window.__themeFx = true;
+  try { vt = document.startViewTransition(() => { apply(); }); } catch (e) { window.__themeFx = false; apply(); return; }
+
+  const fx = document.createElement('div');
+  fx.style.cssText = 'position:fixed;inset:0;z-index:2147483000;pointer-events:none;overflow:hidden;';
+  const el = (css, html) => { const d = document.createElement('div'); d.style.cssText = 'position:absolute;will-change:transform,opacity;' + css; if (html) d.innerHTML = html; fx.appendChild(d); return d; };
+  const run = (node, frames, opts) => node.animate(frames, Object.assign({ fill: 'both' }, opts));
+  const EASE = 'cubic-bezier(.22,.8,.26,1)';
+  const anims = [];
+
   vt.ready.then(() => {
-    document.documentElement.animate(
-      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${end}px at ${x}px ${y}px)`] },
-      { duration: 620, easing: 'cubic-bezier(.22,.8,.26,1)', pseudoElement: '::view-transition-new(root)' }
-    );
+    document.body.appendChild(fx);
+    const root = document.documentElement;
+    let dur = 760, newFrames, easing = EASE;
+
+    // the old page recedes a little so the new one feels like it arrives in front of it
+    anims.push(root.animate(
+      { transform: ['scale(1)', 'scale(.965)'], filter: ['blur(0px) brightness(1)', 'blur(4px) brightness(.85)'], opacity: [1, .7] },
+      { duration: dur, easing, fill: 'both', pseudoElement: '::view-transition-old(root)' }
+    ));
+
+    if (kind === 'editorial') {
+      dur = 820;
+      newFrames = { clipPath: ['polygon(0 0, 0 0, 0 100%, 0 100%)', 'polygon(0 0, 155% 0, 130% 100%, 0 100%)'] };
+      const line = el(`top:-5%;left:0;width:3px;height:110%;background:linear-gradient(#e6c36a,${accent});box-shadow:0 0 22px 4px ${accent};transform-origin:50% 50%;`);
+      anims.push(run(line, [{ transform: 'translateX(0) skewX(-3deg)', opacity: 1 }, { transform: `translateX(${W * 1.45}px) skewX(-6deg)`, opacity: .9 }], { duration: dur, easing }));
+      const veil = el('inset:0;background:linear-gradient(90deg,transparent,rgba(230,195,106,.18) 50%,transparent);');
+      anims.push(run(veil, [{ transform: `translateX(-100%)` }, { transform: `translateX(${100}%)` }], { duration: dur, easing }));
+    } else if (kind === 'notebook') {
+      dur = 860;
+      newFrames = { clipPath: [`polygon(100% 100%, 100% 100%, 100% 100%)`, `polygon(100% 100%, 100% -130%, -130% 100%)`] };
+      // paper edge curling over the diagonal
+      const edge = el(`left:50%;top:50%;width:${(W + H) * 1.6}px;height:34px;margin-left:${-(W + H) * .8}px;margin-top:-17px;background:linear-gradient(180deg,rgba(0,0,0,.28),rgba(255,255,255,.0) 30%,#fffdf6 55%,rgba(0,0,0,.18));transform-origin:50% 50%;`);
+      const L = (W + H) * .65;
+      anims.push(run(edge, [
+        { transform: `translate(${W * .5 + L * .85}px,${H * .5 + L * .85}px) rotate(-45deg)`, opacity: 1 },
+        { transform: `translate(${W * .5 - L}px,${H * .5 - L}px) rotate(-45deg)`, opacity: .9 }
+      ], { duration: dur, easing }));
+      // doodle burst from the tapped control
+      const glyphs = ['★', '✦', '✿', '✎', '♥', '☺', '✧', '〰'];
+      const cols = ['#FF4F9A', '#8B6CFF', '#14B88A', '#F5A300', '#2D5BFF'];
+      for (let i = 0; i < 18; i++) {
+        const ang = (i / 18) * Math.PI * 2 + Math.random() * .5, r = 90 + Math.random() * Math.min(W, H) * .55;
+        const g = el(`left:${x}px;top:${y}px;font-size:${16 + Math.random() * 20}px;font-weight:900;color:${cols[i % cols.length]};text-shadow:0 2px 0 #1a1a2e22;`, glyphs[i % glyphs.length]);
+        anims.push(run(g, [
+          { transform: 'translate(-50%,-50%) scale(0) rotate(0deg)', opacity: 0 },
+          { transform: `translate(calc(-50% + ${Math.cos(ang) * r * .6}px), calc(-50% + ${Math.sin(ang) * r * .6}px)) scale(1.2) rotate(${(Math.random() - .5) * 200}deg)`, opacity: 1, offset: .35 },
+          { transform: `translate(calc(-50% + ${Math.cos(ang) * r}px), calc(-50% + ${Math.sin(ang) * r + 40}px)) scale(.6) rotate(${(Math.random() - .5) * 360}deg)`, opacity: 0 }
+        ], { duration: dur + 120, easing: 'cubic-bezier(.2,.7,.3,1)', delay: Math.random() * 90 }));
+      }
+    } else {
+      // circle reveal from the tapped control
+      newFrames = { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${end}px at ${x}px ${y}px)`] };
+      const ringBg = (col, t) => `radial-gradient(circle closest-side, transparent calc(100% - ${t}px), ${col} calc(100% - ${t * .35}px), transparent 100%)`;
+      const rings = kind === 'classic' ? [[accent, 22, 0], ['#ffffff', 12, 90], [accent, 8, 170]] : kind === 'light' ? [['#ffd36a', 30, 0], ['#fff4cf', 16, 80]] : [['#8fb4ff', 26, 0]];
+      rings.forEach(([col, t, delay]) => {
+        const rg = el(`left:${x - end}px;top:${y - end}px;width:${end * 2}px;height:${end * 2}px;border-radius:50%;background:${ringBg(col, t)};`);
+        anims.push(run(rg, [{ transform: 'scale(0)', opacity: 1 }, { transform: 'scale(1)', opacity: .15 }], { duration: dur, easing, delay }));
+      });
+      if (kind === 'light') {
+        const flash = el(`left:${x - 160}px;top:${y - 160}px;width:320px;height:320px;border-radius:50%;background:radial-gradient(circle,rgba(255,236,170,.95),rgba(255,200,80,.0) 70%);mix-blend-mode:screen;`);
+        anims.push(run(flash, [{ transform: 'scale(.2)', opacity: 1 }, { transform: `scale(${end / 90})`, opacity: 0 }], { duration: dur, easing }));
+        for (let i = 0; i < 12; i++) {
+          const ray = el(`left:${x}px;top:${y}px;width:${end}px;height:3px;background:linear-gradient(90deg,rgba(255,214,102,.9),transparent);transform-origin:0 50%;`);
+          anims.push(run(ray, [{ transform: `rotate(${i * 30}deg) scaleX(0)`, opacity: 1 }, { transform: `rotate(${i * 30 + 25}deg) scaleX(1)`, opacity: 0 }], { duration: dur, easing }));
+        }
+      } else if (kind === 'dark') {
+        for (let i = 0; i < 28; i++) {
+          const sx = Math.random() * W, sy = Math.random() * H, sz = 3 + Math.random() * 4;
+          const st = el(`left:${sx}px;top:${sy}px;width:${sz}px;height:${sz}px;border-radius:50%;background:#dbe6ff;box-shadow:0 0 8px 2px #8fb4ff;`);
+          anims.push(run(st, [{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1.4)', opacity: 1, offset: .5 }, { transform: 'scale(0)', opacity: 0 }], { duration: 700 + Math.random() * 500, delay: Math.random() * 350, easing: 'ease-in-out' }));
+        }
+      }
+    }
+    anims.push(root.animate(newFrames, { duration: dur, easing, fill: 'both', pseudoElement: '::view-transition-new(root)' }));
   }).catch(() => { /* transition skipped */ });
+
+  const done = () => { window.__themeFx = false; try { anims.forEach(a => a.cancel()); } catch (e) { /* ignore */ } fx.remove(); };
+  vt.finished.then(() => setTimeout(done, 200), done);
+  setTimeout(done, 2600);
 };
 
 window.Modal = Sheet; // Safety alias for modals and bottom sheets

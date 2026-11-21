@@ -554,7 +554,7 @@ export async function renderSettings(){
       const chosen = b.dataset.setProTheme;
       if (window.State.proTheme === chosen) return;
       window.State.proTheme = chosen;
-      document.documentElement.dataset.proTheme = chosen;
+      window.themeTransition(() => { document.documentElement.dataset.proTheme = chosen; }, b, chosen);
       try { localStorage.setItem('sayad_pro_theme', chosen); } catch(e){}
       if (window.DB && window.DB.setting) {
         await window.DB.setting('proTheme', chosen);
@@ -574,7 +574,7 @@ export async function renderSettings(){
         document.documentElement.dataset.theme = chosen;
         if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
         updateThemeButtonsDOM(chosen);
-      }, b);
+      }, b, /dark|night|black|amoled/i.test(chosen) ? 'dark' : 'light');
       try { localStorage.setItem('sayad_theme', chosen); } catch(e){}
       await window.DB.setting('theme', chosen);
       await window.DB.setting('autoTheme', false);

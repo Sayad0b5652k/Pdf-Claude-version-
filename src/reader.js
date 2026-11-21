@@ -1719,7 +1719,7 @@ export function openReadingThemesModal() {
       window.themeTransition(() => {
         document.documentElement.dataset.theme = th;
         if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
-      }, btn);
+      }, btn, /dark|night|black|amoled/i.test(th) ? 'dark' : 'light');
       try { localStorage.setItem('sayad_theme', th); } catch(e){}
       if (window.DB) {
         await window.DB.setting('theme', th);
