@@ -380,6 +380,8 @@ async function deleteBookAndOrphans(fileId) {
   window.State.files = (window.State.files || []).filter(f => f.id !== fileId);
 }
 
+window.deleteBookAndOrphans = deleteBookAndOrphans;
+
 export async function openMergeBookPicker(initialFid = null) {
   const allBooks = [...(window.State.files || [])];
   if (allBooks.length < 2) {

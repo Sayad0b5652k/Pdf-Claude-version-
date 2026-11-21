@@ -42,7 +42,7 @@ export async function renderSettings(){
           <div>
             <div class="font-display" style="font-size:20px; font-weight:800; letter-spacing:.02em; line-height:1.1;">${isAdv ? 'Advanced' : 'Settings'}</div>
             <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); margin-top:3px; font-weight:600;">
-              <span>${isAdv ? 'AI keys &amp; response' : 'Preferences &amp; Reader Mode'}</span>
+              <span>${isAdv ? 'AI, lock &amp; storage' : 'Preferences &amp; Reader Mode'}</span>
               <span style="color:var(--text-faint); font-size:10px;">•</span>
               <span style="color:var(--accent); font-weight:700;">${window.fmtBytes(totalSize)}</span>
             </div>
@@ -301,6 +301,26 @@ export async function renderSettings(){
       <div class="adv-preview" id="adv-preview" data-mode="${window.State.streamingMode || 'sse'}"></div>
     </div>
 
+    <!-- Privacy Lock -->
+    <div class="section-title adv-title"><span>Privacy Lock</span><span class="adv-badge" id="lock-badge"></span></div>
+    <div class="card adv-card" id="lock-card"></div>
+
+    <!-- Storage Cleaner -->
+    <div class="section-title adv-title"><span>Storage Cleaner</span><span class="adv-badge" id="clean-badge" data-on="0">Scan</span></div>
+    <div class="card adv-card" id="clean-card">
+      <div class="adv-lead">Purani, bina khuli books dhundh ke jagah khali karo. Delete hone par us book ke notes &amp; highlights bhi jaate hain — pehle Backup le lo.</div>
+      <div id="clean-list"></div>
+      <button class="btn btn-ghost" id="clean-scan" style="width:100%; justify-content:center; padding:11px; font-weight:800; border-radius:12px;">Books scan karo</button>
+    </div>
+
+    <!-- Reset -->
+    <div class="section-title adv-title"><span>Reset App</span></div>
+    <div class="card adv-card adv-danger">
+      <div class="adv-lead">Sab kuch mita do: books, notes, highlights, settings, keys, lock. Wapas nahi aayega. Pehle Backup le lena.</div>
+      <input id="reset-input" class="adv-reset-input" placeholder="Confirm karne ke liye RESET type karo" autocomplete="off" autocapitalize="characters" />
+      <button class="btn" id="reset-go" disabled style="width:100%; justify-content:center; padding:12px; font-weight:800; border-radius:12px;">Sab kuch erase karo</button>
+    </div>
+
 
     `}
   </div>
@@ -529,6 +549,85 @@ export async function renderSettings(){
     window._advKeysListener = () => { if (document.getElementById('adv-key-list')) paintKeys(); };
     window.addEventListener('sayad-keys-changed', window._advKeysListener);
   }
+
+  // ---- Privacy Lock card ----
+  const lockCard = document.getElementById('lock-card');
+  if (lockCard && window.AppLock) {
+    const AL = window.AppLock;
+    const lm = (t, bad) => { const e = lockCard.querySelector('.adv-msg'); if (e) { e.style.display = t ? 'block' : 'none'; e.textContent = t || ''; e.dataset.tone = bad ? 'bad' : ''; } };
+    const paintLock = () => {
+      const on = AL.enabled();
+      const b = document.getElementById('lock-badge'); b.textContent = on ? 'On' : 'Off'; b.dataset.on = on ? '1' : '0';
+      const dl = AL.delay();
+      lockCard.innerHTML = on ? `
+        <div class="adv-lead">App kholte hi (aur door jaane ke baad) PIN maangega. Ye casual logon se bachne ke liye hai, encryption nahi.</div>
+        <div class="adv-lbl">Auto-lock kab?</div>
+        <div class="adv-pills" id="lock-delay">${[[0,'Turant'],[60,'1 min'],[300,'5 min']].map(([v,t]) => `<button type="button" data-d="${v}" class="${dl === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+        <div class="adv-btnrow"><button class="btn btn-ghost" id="lock-now">Abhi lock karo</button><button class="btn btn-ghost" id="lock-change">PIN badlo</button><button class="btn btn-ghost" id="lock-off" style="color:var(--danger,#ef4444)">Band karo</button></div>
+        <div id="lock-form"></div><div class="adv-msg" style="display:none"></div>` : `
+        <div class="adv-lead">4 digit PIN lagao. Fingerprint abhi support nahi hai.</div>
+        <div id="lock-form"><div class="adv-pin-row"><input id="pin1" type="password" inputmode="numeric" maxlength="4" placeholder="Naya PIN" /><input id="pin2" type="password" inputmode="numeric" maxlength="4" placeholder="Dobara PIN" /></div>
+        <button class="btn btn-primary" id="lock-save" style="width:100%; justify-content:center; padding:11px; font-weight:800; border-radius:12px; margin-top:10px;">Lock lagao</button></div><div class="adv-msg" style="display:none"></div>`;
+      const save = lockCard.querySelector('#lock-save');
+      if (save) save.onclick = async () => {
+        const a = lockCard.querySelector('#pin1').value, c = lockCard.querySelector('#pin2').value;
+        if (!/^\d{4}$/.test(a)) return lm('PIN 4 digit ka hona chahiye', 1);
+        if (a !== c) return lm('Dono PIN match nahi kar rahe', 1);
+        await AL.setPin(a, 0); window.toast('Privacy Lock on 🔒'); paintLock();
+      };
+      lockCard.querySelectorAll('#lock-delay [data-d]').forEach(x => x.onclick = () => { AL.setDelay(+x.dataset.d); paintLock(); });
+      const now = lockCard.querySelector('#lock-now'); if (now) now.onclick = () => AL.lock();
+      const ch = lockCard.querySelector('#lock-change'), off = lockCard.querySelector('#lock-off');
+      const askPin = (label, cb) => {
+        lockCard.querySelector('#lock-form').innerHTML = `<div class="adv-pin-row"><input id="pin0" type="password" inputmode="numeric" maxlength="4" placeholder="Abhi ka PIN" />${label === 'change' ? '<input id="pin1" type="password" inputmode="numeric" maxlength="4" placeholder="Naya PIN" />' : ''}</div><button class="btn btn-primary" id="pin-ok" style="width:100%; justify-content:center; padding:11px; font-weight:800; border-radius:12px; margin-top:10px;">Confirm</button>`;
+        lockCard.querySelector('#pin-ok').onclick = async () => {
+          if (!(await AL.verify(lockCard.querySelector('#pin0').value))) return lm('Abhi ka PIN galat hai', 1);
+          try { await cb(lockCard.querySelector('#pin1') && lockCard.querySelector('#pin1').value); } catch (e) { return lm(e.message, 1); }
+          paintLock();
+        };
+      };
+      if (ch) ch.onclick = () => askPin('change', async (n) => { await AL.setPin(n); window.toast('PIN badal gaya'); });
+      if (off) off.onclick = () => askPin('off', async () => { AL.disable(); window.toast('Privacy Lock band'); });
+    };
+    paintLock();
+  }
+
+  // ---- Storage Cleaner ----
+  const cleanBtn = document.getElementById('clean-scan');
+  if (cleanBtn) cleanBtn.onclick = async () => {
+    const list = document.getElementById('clean-list'), badge = document.getElementById('clean-badge');
+    cleanBtn.disabled = true; cleanBtn.textContent = 'Scan ho raha hai…';
+    const rows = []; const files = (window.State.files || []).filter(f => f.folder !== 'Sample');
+    for (const f of files) {
+      let size = 0; try { const r = await window.DB.get('files', f.id); const d = r && r.data; size = d ? (d.byteLength || d.size || 0) : 0; } catch (e) {}
+      const days = f.lastOpened ? Math.floor((Date.now() - f.lastOpened) / 86400000) : null;
+      rows.push({ f, size, days, stale: days == null || days >= 60 });
+    }
+    rows.sort((a, b) => (b.stale - a.stale) || (b.size - a.size));
+    const mb = (n) => (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + ' MB';
+    if (!rows.length) { list.innerHTML = '<div class="adv-empty">Koi book nahi mili.</div>'; }
+    else {
+      list.innerHTML = rows.map(r => `<label class="cl-row"><input type="checkbox" data-cid="${r.f.id}" data-sz="${r.size}" ${r.stale ? 'checked' : ''} /><span class="cl-main"><b>${window.escapeHtml((r.f.name || 'Book').replace(/\.pdf$/i, ''))}</b><small>${r.days == null ? 'Kabhi nahi khuli' : r.days === 0 ? 'Aaj khuli' : r.days + ' din pehle khuli'}</small></span><span class="cl-size">${mb(r.size)}</span></label>`).join('')
+        + `<div class="cl-foot"><span id="cl-sum"></span><button class="btn btn-ghost" id="cl-del" style="color:var(--danger,#ef4444); border-color:var(--danger,#ef4444); font-weight:800; border-radius:10px;">Delete</button></div>`;
+      const sum = () => { const cs = [...list.querySelectorAll('[data-cid]:checked')]; document.getElementById('cl-sum').textContent = cs.length ? `${cs.length} selected · ${mb(cs.reduce((a, c) => a + +c.dataset.sz, 0))}` : 'Kuch select nahi'; document.getElementById('cl-del').disabled = !cs.length; };
+      list.querySelectorAll('[data-cid]').forEach(c => c.onchange = sum); sum();
+      const stale = rows.filter(r => r.stale);
+      badge.textContent = stale.length ? `${stale.length} purani · ${mb(stale.reduce((a, r) => a + r.size, 0))}` : 'Sab fresh'; badge.dataset.on = stale.length ? '0' : '1';
+      let armed = false; const del = document.getElementById('cl-del');
+      del.onclick = async () => {
+        if (!armed) { armed = true; del.textContent = 'Pakka? Dobara tap karo'; setTimeout(() => { armed = false; del.textContent = 'Delete'; }, 3500); return; }
+        del.disabled = true; del.textContent = 'Delete ho rahi hain…';
+        for (const c of [...list.querySelectorAll('[data-cid]:checked')]) { try { await window.deleteBookAndOrphans(c.dataset.cid); } catch (e) {} }
+        window.toast('Jagah khali ho gayi 🧹'); cleanBtn.disabled = false; cleanBtn.click();
+      };
+    }
+    cleanBtn.disabled = false; cleanBtn.textContent = 'Dobara scan karo';
+  };
+
+  // ---- Reset ----
+  const ri = document.getElementById('reset-input'), rg = document.getElementById('reset-go');
+  if (ri && rg) { ri.oninput = () => { rg.disabled = ri.value.trim() !== 'RESET'; rg.classList.toggle('armed', !rg.disabled); };
+    rg.onclick = () => { rg.disabled = true; rg.textContent = 'Erase ho raha hai…'; window.resetEverything(); }; }
 
   // Response style
   const STYLE = {
