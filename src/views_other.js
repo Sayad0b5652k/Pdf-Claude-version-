@@ -42,7 +42,7 @@ export async function renderSettings(){
           <div>
             <div class="font-display" style="font-size:20px; font-weight:800; letter-spacing:.02em; line-height:1.1;">${isAdv ? 'Advanced' : 'Settings'}</div>
             <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); margin-top:3px; font-weight:600;">
-              <span>${isAdv ? 'AI, key &amp; updates' : 'Preferences &amp; Reader Mode'}</span>
+              <span>${isAdv ? 'AI keys &amp; response' : 'Preferences &amp; Reader Mode'}</span>
               <span style="color:var(--text-faint); font-size:10px;">•</span>
               <span style="color:var(--accent); font-weight:700;">${window.fmtBytes(totalSize)}</span>
             </div>
@@ -144,40 +144,16 @@ export async function renderSettings(){
     </div>
 
     <!-- Advanced (opens its own page) -->
+    <div class="section-title" style="margin-bottom:10px;">Advanced</div>
     <button class="card" id="btn-open-advanced" style="width:100%; padding:14px 16px; margin-bottom:22px; display:flex; align-items:center; gap:12px; text-align:left; cursor:pointer; color:var(--text);">
       <div style="width:38px; height:38px; border-radius:10px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">${window.icon('settings','icon icon-sm')}</div>
       <div style="flex:1; min-width:0;">
         <div style="font-size:14px; font-weight:700;">Advanced</div>
-        <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">AI key &amp; engine, answer delivery, app update</div>
+        <div style="font-size:12px; color:var(--text-dim); margin-top:2px;">AI keys, quota &amp; response style</div>
       </div>
       ${window.icon('chevRight','icon icon-sm')}
     </button>
 
-    <!-- 10. App Installation Option at Very Bottom of Settings -->
-    <div class="section-title" style="margin-top:24px; margin-bottom:12px;">App Installation</div>
-    <div class="card" style="padding:18px 20px; margin-bottom:24px; border:1px solid var(--border); background:var(--surface); border-radius:20px; box-shadow:0 6px 20px rgba(0,0,0,0.12); position:relative; overflow:hidden;">
-      <div style="display:flex; align-items:center; gap:16px; margin-bottom:14px;">
-        <div style="width:48px; height:48px; flex-shrink:0; border-radius:14px; overflow:hidden; border:1px solid var(--border); box-shadow:0 3px 10px rgba(0,0,0,0.15); background:var(--surface-2);">
-          <img src="/icons/theme-classic-512.png" alt="S.A.Y.A.D." style="width:100%; height:100%; object-fit:cover; border-radius:14px;" />
-        </div>
-        <div>
-          <div style="font-size:16px; font-weight:800; color:var(--text); letter-spacing:-0.01em;">Install S.A.Y.A.D. App</div>
-          <div style="font-size:12px; color:var(--text-dim); margin-top:2px; line-height:1.4;">
-            ${(typeof window.isStandalone === 'function' && window.isStandalone()) ? '✅ App is already installed and running in standalone mode.' : 'Install on your device home screen for fast offline study and full-screen view.'}
-          </div>
-        </div>
-      </div>
-
-      ${(typeof window.isStandalone === 'function' && window.isStandalone()) ? `
-        <div style="padding:10px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; font-size:12.5px; color:var(--accent); font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;">
-          <span>✅ App Installed &amp; Ready</span>
-        </div>
-      ` : `
-        <button class="btn btn-primary" id="btn-install-pwa-settings" style="width:100%; padding:13px; font-size:14px; font-weight:800; background:linear-gradient(135deg, #FF6A2B 0%, #D9540E 100%); color:#ffffff; border:none; border-radius:12px; box-shadow:0 4px 14px rgba(217, 84, 14, 0.35); display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">
-          <span>📲 Install S.A.Y.A.D. App</span>
-        </button>
-      `}
-    </div>
     <!-- 7. About S.A.Y.A.D. with QR Code on Right & Link Below -->
     <div class="section-title" style="margin-bottom:10px;">About S.A.Y.A.D.</div>
     <div class="card" style="padding:18px; font-size:13px; color:var(--text-dim); line-height:1.7; margin-bottom:22px;">
@@ -241,222 +217,6 @@ export async function renderSettings(){
     </div>
 
 
-    ` : `
-    <!-- 8. AI Engine & Custom API Key Section (Technical - Shifted Down Above App Installation) -->
-    <div class="section-title" style="margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;">
-      <span>AI Engine &amp; Custom API Key</span>
-      <span style="font-size:11px; padding:2px 8px; border-radius:20px; font-weight:700; background:${window.State.customGeminiKey ? 'rgba(16, 185, 129, 0.15)' : 'var(--accent-soft)'}; color:${window.State.customGeminiKey ? '#10b981' : 'var(--accent)'}; border:1px solid ${window.State.customGeminiKey ? '#10b981' : 'var(--accent)'};">
-        ${window.State.customGeminiKey ? '● Custom Key Active' : '● App Default Key Pool'}
-      </span>
-    </div>
-    <div class="card" style="padding:16px 18px; margin-bottom:22px; border:1px solid var(--border); border-radius:16px;">
-      
-      <div style="font-size:13px; color:var(--text); font-weight:700; margin-bottom:4px;">Personal Google Gemini API Key</div>
-      <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px; line-height:1.4;">
-        Free unlimited Google Gemini API key direct Google AI Studio se create karein aur yahan paste karein.
-      </div>
-
-      <div style="display:flex; gap:8px; margin-bottom:12px;">
-        <div style="position:relative; flex:1;">
-          <input type="password" id="input-custom-gemini-key" placeholder="Paste your Gemini API key (AIzaSy...)" 
-            value="${window.escapeHtml(window.State.customGeminiKey || '')}" 
-            style="width:100%; padding:10px 38px 10px 12px; font-size:13px; font-family:var(--font-mono, monospace); background:var(--bg); border:1.5px solid var(--border); border-radius:10px; color:var(--text); outline:none;" />
-          <button type="button" id="btn-toggle-key-visibility" title="Toggle visibility" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-dim); cursor:pointer; font-size:14px; padding:4px;">
-            👁️
-          </button>
-        </div>
-      </div>
-
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-        <button class="btn btn-primary" id="btn-save-custom-key" style="flex:1; min-width:130px; padding:10px 14px; font-size:12.5px; font-weight:800; border-radius:10px; justify-content:center; gap:6px;">
-          ${window.icon('check','icon icon-sm')}
-          <span>Save &amp; Test Key</span>
-        </button>
-        ${window.State.customGeminiKey ? `
-          <button class="btn btn-ghost" id="btn-remove-custom-key" style="padding:10px 14px; font-size:12.5px; font-weight:700; border-radius:10px; color:var(--danger, #ef4444); border-color:var(--danger, #ef4444); justify-content:center;">
-            Remove Key
-          </button>
-        ` : ''}
-      </div>
-
-      <div id="custom-key-status-msg" style="display:none; padding:8px 12px; border-radius:8px; font-size:12px; font-weight:600; margin-bottom:12px;"></div>
-
-      <!-- Quick Link to Google AI Studio -->
-      <div style="display:flex; align-items:center; justify-content:space-between; padding-top:10px; border-top:1px dashed var(--border); font-size:12px;">
-        <span style="color:var(--text-dim);">🔑 Key kaise milegi?</span>
-        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="color:var(--accent); font-weight:700; text-decoration:none; display:flex; align-items:center; gap:4px;">
-          <span>Get Free Gemini Key (AI Studio)</span>
-          <span style="font-size:11px;">↗</span>
-        </a>
-      </div>
-    </div>
-
-    <!-- 9. AI Response & Delivery Settings (Harmonized With App & Pro Design Themes) -->
-    <div class="section-title" style="margin-bottom:10px; display:flex; align-items:center; justify-content:space-between;">
-      <span>AI Response &amp; Delivery</span>
-      <span id="settings-delivery-header-badge" style="font-size:11px; padding:2px 8px; border-radius:20px; font-weight:700; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent);">
-        ${(window.State.streamingMode || 'sse') === 'sse' ? '● Word-By-Word Flow' : (window.State.streamingMode === 'typewriter' ? '● Morphic Wave' : '● Turbo Instant')}
-      </span>
-    </div>
-    <div class="card" style="padding:0; margin-bottom:22px; border:1px solid var(--border); border-radius:16px; overflow:hidden; background:var(--surface);">
-      <details id="ai-delivery-advanced-details" ${window._settingsDeliveryOpen ? 'open' : ''} class="settings-advanced-details">
-        <summary style="padding:14px 16px; cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; list-style:none; outline:none; transition:background 0.15s ease;">
-          <div style="display:flex; align-items:center; gap:12px; min-width:0;">
-            <div style="width:36px; height:36px; border-radius:10px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-              ${window.icon('zap','icon icon-md')}
-            </div>
-            <div style="min-width:0;">
-              <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                <span style="font-size:14px; font-weight:800; color:var(--text); letter-spacing:-0.01em;">Delivery Style &amp; Pacing</span>
-                <span style="font-size:9.5px; font-weight:800; padding:1px 6px; border-radius:6px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent);">ADVANCED</span>
-              </div>
-              <div id="settings-delivery-summary-subtitle" style="font-size:11.5px; color:var(--text-dim); margin-top:2px;">
-                ${(window.State.streamingMode || 'sse') === 'sse' ? 'Active: Word-By-Word (ChatGPT Style)' : (window.State.streamingMode === 'typewriter' ? 'Active: Smooth Morphic Wave' : 'Active: Turbo Instant Jump')}
-              </div>
-            </div>
-          </div>
-          <div style="display:flex; align-items:center; gap:10px; flex-shrink:0; margin-left:8px;">
-            <span class="delivery-details-chevron" style="font-size:12px; color:var(--text-dim); transition:transform 0.2s ease;">▼</span>
-          </div>
-        </summary>
-
-        <div style="padding:16px; border-top:1px solid var(--border); background:var(--surface);">
-          <div style="font-size:12px; color:var(--text-dim); margin-bottom:14px; line-height:1.5;">
-            Choose how AI text, summaries, and book explanations stream onto your screen:
-          </div>
-
-          <div style="display:grid; grid-template-columns:1fr; gap:12px;">
-            <!-- Option 1: Word-By-Word Live Stream (ChatGPT & Claude Style) -->
-            ${(() => {
-              const active = (window.State.streamingMode || 'sse') === 'sse';
-              return `
-              <div data-set-streaming-mode="sse" class="delivery-card-option" style="padding:14px; border-radius:14px; cursor:pointer;
-                background:${active ? 'var(--accent-soft)' : 'var(--surface-2)'};
-                border:1.5px solid ${active ? 'var(--accent)' : 'var(--border)'};
-                box-shadow:${active ? '0 4px 16px var(--accent-soft)' : 'none'};">
-                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
-                  <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                    <div class="delivery-icon-box" style="width:34px; height:34px; border-radius:10px; background:${active ? 'var(--accent)' : 'var(--surface)'}; color:${active ? 'var(--accent-ink, #ffffff)' : 'var(--accent)'}; border:1px solid ${active ? 'var(--accent)' : 'var(--border)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                      ${window.icon('sparkle', 'icon icon-sm')}
-                    </div>
-                    <div style="min-width:0;">
-                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <span style="font-size:13.5px; font-weight:800; color:var(--text);">Word-By-Word Live Flow</span>
-                        <span class="delivery-chip" style="font-size:9.5px; padding:1px 6px; border-radius:6px; background:${active ? 'var(--accent)' : 'var(--surface)'}; color:${active ? 'var(--accent-ink, #ffffff)' : 'var(--text-dim)'}; font-weight:800; border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};">ChatGPT Style</span>
-                      </div>
-                      <div style="font-size:11.5px; color:var(--text-dim); margin-top:2px; line-height:1.4;">
-                        Ek-ek word real-time me fluidly type hota hai screen par bina kisi jhatke ke.
-                      </div>
-                    </div>
-                  </div>
-                  <div class="delivery-status-indicator" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                    ${active ? `
-                      <span class="pulsing-accent-dot"></span>
-                      <span style="font-size:11px; font-weight:800; color:var(--accent);">ACTIVE</span>
-                    ` : `
-                      <span style="font-size:11px; font-weight:600; color:var(--text-faint);">Select</span>
-                    `}
-                  </div>
-                </div>
-
-                <!-- Visual Simulation Box for Mode 1 -->
-                <div class="delivery-simulation-box" style="margin-top:10px; padding:8px 12px; border-radius:10px; background:var(--surface); border:1px dashed ${active ? 'var(--accent)' : 'var(--border)'}; font-family:var(--font-mono, monospace); font-size:11px; color:var(--text);">
-                  <span style="color:var(--accent); font-weight:700;">Live stream: </span>
-                  <span>"The molecule enters the cycle word by word...</span><span class="ai-typing-cursor">▌</span>
-                </div>
-              </div>`;
-            })()}
-
-            <!-- Option 2: Smooth Morphic Wave (Section Transition Progression) -->
-            ${(() => {
-              const active = window.State.streamingMode === 'typewriter';
-              return `
-              <div data-set-streaming-mode="typewriter" class="delivery-card-option" style="padding:14px; border-radius:14px; cursor:pointer;
-                background:${active ? 'var(--accent-soft)' : 'var(--surface-2)'};
-                border:1.5px solid ${active ? 'var(--accent)' : 'var(--border)'};
-                box-shadow:${active ? '0 4px 16px var(--accent-soft)' : 'none'};">
-                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
-                  <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                    <div class="delivery-icon-box" style="width:34px; height:34px; border-radius:10px; background:${active ? 'var(--accent)' : 'var(--surface)'}; color:${active ? 'var(--accent-ink, #ffffff)' : 'var(--accent)'}; border:1px solid ${active ? 'var(--accent)' : 'var(--border)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                      ${window.icon('cards', 'icon icon-sm')}
-                    </div>
-                    <div style="min-width:0;">
-                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <span style="font-size:13.5px; font-weight:800; color:var(--text);">Smooth Morphic Card Wave</span>
-                        <span class="delivery-chip" style="font-size:9.5px; padding:1px 6px; border-radius:6px; background:${active ? 'var(--accent)' : 'var(--surface)'}; color:${active ? 'var(--accent-ink, #ffffff)' : 'var(--text-dim)'}; font-weight:800; border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};">Section Wave</span>
-                      </div>
-                      <div style="font-size:11.5px; color:var(--text-dim); margin-top:2px; line-height:1.4;">
-                        Paragraphs and sections slide &amp; fade in with an elegant calm wave transition.
-                      </div>
-                    </div>
-                  </div>
-                  <div class="delivery-status-indicator" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                    ${active ? `
-                      <span class="pulsing-accent-dot"></span>
-                      <span style="font-size:11px; font-weight:800; color:var(--accent);">ACTIVE</span>
-                    ` : `
-                      <span style="font-size:11px; font-weight:600; color:var(--text-faint);">Select</span>
-                    `}
-                  </div>
-                </div>
-
-                <!-- Visual Simulation Box for Mode 2 -->
-                <div class="delivery-simulation-box" style="margin-top:10px; padding:8px 12px; border-radius:10px; background:var(--surface); border:1px dashed ${active ? 'var(--accent)' : 'var(--border)'}; font-size:11px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                  <span style="color:var(--accent); font-weight:700;">Wave sequence: </span>
-                  <span style="padding:2px 6px; border-radius:6px; background:var(--accent-soft); color:var(--accent); font-size:10px; font-weight:700; border:1px solid var(--accent-soft);">▤ Section 1</span>
-                  <span style="color:var(--text-faint);">➔</span>
-                  <span style="padding:2px 6px; border-radius:6px; background:var(--accent-soft); color:var(--accent); font-size:10px; font-weight:700; border:1px solid var(--accent-soft);">▤ Key Points</span>
-                  <span style="color:var(--text-faint);">➔</span>
-                  <span style="padding:2px 6px; border-radius:6px; background:var(--accent-soft); color:var(--accent); font-size:10px; font-weight:700; border:1px solid var(--accent-soft);">📊 Flowchart</span>
-                </div>
-              </div>`;
-            })()}
-
-            <!-- Option 3: Instant Turbo Jump (Zero Animation Delay) -->
-            ${(() => {
-              const active = window.State.streamingMode === 'instant';
-              return `
-              <div data-set-streaming-mode="instant" class="delivery-card-option" style="padding:14px; border-radius:14px; cursor:pointer;
-                background:${active ? 'var(--accent-soft)' : 'var(--surface-2)'};
-                border:1.5px solid ${active ? 'var(--accent)' : 'var(--border)'};
-                box-shadow:${active ? '0 4px 16px var(--accent-soft)' : 'none'};">
-                <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
-                  <div style="display:flex; align-items:center; gap:10px; min-width:0;">
-                    <div class="delivery-icon-box" style="width:34px; height:34px; border-radius:10px; background:${active ? 'var(--accent)' : 'var(--surface)'}; color:${active ? 'var(--accent-ink, #ffffff)' : 'var(--accent)'}; border:1px solid ${active ? 'var(--accent)' : 'var(--border)'}; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-                      ${window.icon('zap', 'icon icon-sm')}
-                    </div>
-                    <div style="min-width:0;">
-                      <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                        <span style="font-size:13.5px; font-weight:800; color:var(--text);">Turbo Flash Jump</span>
-                        <span class="delivery-chip" style="font-size:9.5px; padding:1px 6px; border-radius:6px; background:${active ? 'var(--accent)' : 'var(--surface)'}; color:${active ? 'var(--accent-ink, #ffffff)' : 'var(--text-dim)'}; font-weight:800; border:1px solid ${active ? 'var(--accent)' : 'var(--border)'};">Fastest Direct</span>
-                      </div>
-                      <div style="font-size:11.5px; color:var(--text-dim); margin-top:2px; line-height:1.4;">
-                        Zero waiting animation. Full generated output, formulas, and diagrams render immediately.
-                      </div>
-                    </div>
-                  </div>
-                  <div class="delivery-status-indicator" style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
-                    ${active ? `
-                      <span class="pulsing-accent-dot"></span>
-                      <span style="font-size:11px; font-weight:800; color:var(--accent);">ACTIVE</span>
-                    ` : `
-                      <span style="font-size:11px; font-weight:600; color:var(--text-faint);">Select</span>
-                    `}
-                  </div>
-                </div>
-
-                <!-- Visual Simulation Box for Mode 3 -->
-                <div class="delivery-simulation-box" style="margin-top:10px; padding:8px 12px; border-radius:10px; background:var(--surface); border:1px dashed ${active ? 'var(--accent)' : 'var(--border)'}; font-size:11px; display:flex; align-items:center; gap:8px;">
-                  <span style="color:var(--accent); font-weight:700;">Turbo mode: </span>
-                  <span style="color:var(--text-dim);">Zero waiting delay · 100% full content rendered in one frame</span>
-                </div>
-              </div>`;
-            })()}
-          </div>
-        </div>
-      </details>
-    </div>
-
     <!-- 9. App Updates & Refresh (Technical - Shifted Down Above App Installation) -->
     <div class="section-title" style="margin-bottom:10px;">App Updates &amp; Refresh</div>
     <div class="card" style="padding:16px; margin-bottom:22px; border:1px solid var(--border); border-radius:16px; background:var(--surface);">
@@ -474,6 +234,71 @@ export async function renderSettings(){
       <button class="btn btn-primary" id="btn-force-safe-update" style="width:100%; padding:12px; font-size:13px; font-weight:800; border-radius:10px; justify-content:center; gap:8px;">
         <span>🔄 Check Updates &amp; Refresh App</span>
       </button>
+    </div>
+
+
+    <!-- 10. App Installation Option at Very Bottom of Settings -->
+    <div class="section-title" style="margin-top:24px; margin-bottom:12px;">App Installation</div>
+    <div class="card" style="padding:18px 20px; margin-bottom:24px; border:1px solid var(--border); background:var(--surface); border-radius:20px; box-shadow:0 6px 20px rgba(0,0,0,0.12); position:relative; overflow:hidden;">
+      <div style="display:flex; align-items:center; gap:16px; margin-bottom:14px;">
+        <div style="width:48px; height:48px; flex-shrink:0; border-radius:14px; overflow:hidden; border:1px solid var(--border); box-shadow:0 3px 10px rgba(0,0,0,0.15); background:var(--surface-2);">
+          <img src="/icons/theme-classic-512.png" alt="S.A.Y.A.D." style="width:100%; height:100%; object-fit:cover; border-radius:14px;" />
+        </div>
+        <div>
+          <div style="font-size:16px; font-weight:800; color:var(--text); letter-spacing:-0.01em;">Install S.A.Y.A.D. App</div>
+          <div style="font-size:12px; color:var(--text-dim); margin-top:2px; line-height:1.4;">
+            ${(typeof window.isStandalone === 'function' && window.isStandalone()) ? '✅ App is already installed and running in standalone mode.' : 'Install on your device home screen for fast offline study and full-screen view.'}
+          </div>
+        </div>
+      </div>
+
+      ${(typeof window.isStandalone === 'function' && window.isStandalone()) ? `
+        <div style="padding:10px 14px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; font-size:12.5px; color:var(--accent); font-weight:700; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <span>✅ App Installed &amp; Ready</span>
+        </div>
+      ` : `
+        <button class="btn btn-primary" id="btn-install-pwa-settings" style="width:100%; padding:13px; font-size:14px; font-weight:800; background:linear-gradient(135deg, #FF6A2B 0%, #D9540E 100%); color:#ffffff; border:none; border-radius:12px; box-shadow:0 4px 14px rgba(217, 84, 14, 0.35); display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">
+          <span>📲 Install S.A.Y.A.D. App</span>
+        </button>
+      `}
+    </div>
+
+    ` : `
+    <!-- AI Engine: multi-key vault -->
+    <div class="section-title adv-title"><span>AI Engine</span><span class="adv-badge" id="adv-key-badge"></span></div>
+    <div class="card adv-card" id="adv-keys-card">
+      <div class="adv-lead">Apni keys daalo — Gemini, Groq ya OpenRouter. App khud pehchan leti hai, aur ek khatam ho to agli use karti hai.</div>
+      <div id="adv-key-list"></div>
+      <div class="adv-add">
+        <div class="adv-add-row">
+          <input type="password" id="adv-key-input" placeholder="API key paste karo…" autocomplete="off" spellcheck="false" />
+          <button type="button" id="adv-key-eye" aria-label="Show or hide key">👁️</button>
+        </div>
+        <div class="adv-add-foot">
+          <span id="adv-detect" class="adv-detect">Provider auto-detect hoga</span>
+          <button class="btn btn-primary" id="adv-key-add" style="padding:9px 16px; font-size:12.5px; font-weight:800; border-radius:10px;">Add key</button>
+        </div>
+        <div id="adv-key-msg" class="adv-msg" style="display:none;"></div>
+      </div>
+      <div class="adv-links">
+        <span>Free key:</span>
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Gemini ↗</a>
+        <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">Groq ↗</a>
+        <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer">OpenRouter ↗</a>
+        <button type="button" id="adv-key-testall" class="adv-link-btn">Sab check karo</button>
+      </div>
+    </div>
+
+    <!-- AI Response & Delivery -->
+    <div class="section-title adv-title"><span>AI Response Style</span><span class="adv-badge" id="settings-delivery-header-badge"></span></div>
+    <div class="card adv-card" style="padding:14px;">
+      <div class="adv-seg" id="adv-seg">
+        ${[['sse','sparkle','Live Flow','Word by word'],['typewriter','cards','Wave','Section by section'],['instant','zap','Instant','Sab ek saath']].map(([m,ic,t,s]) => {
+          const on = (window.State.streamingMode || 'sse') === m;
+          return `<button type="button" data-set-streaming-mode="${m}" class="adv-seg-btn${on ? ' on' : ''}"><span class="adv-seg-ic">${window.icon(ic,'icon icon-sm')}</span><b>${t}</b><small>${s}</small></button>`;
+        }).join('')}
+      </div>
+      <div class="adv-preview" id="adv-preview" data-mode="${window.State.streamingMode || 'sse'}"></div>
     </div>
 
 
@@ -640,180 +465,91 @@ export async function renderSettings(){
     };
   });
 
-  // Custom Gemini API Key Event Handlers
-  const customKeyInput = document.getElementById('input-custom-gemini-key');
-  const toggleVisibilityBtn = document.getElementById('btn-toggle-key-visibility');
-  const saveCustomKeyBtn = document.getElementById('btn-save-custom-key');
-  const removeCustomKeyBtn = document.getElementById('btn-remove-custom-key');
-  const statusMsgEl = document.getElementById('custom-key-status-msg');
-
-  if (toggleVisibilityBtn && customKeyInput) {
-    toggleVisibilityBtn.onclick = () => {
-      if (customKeyInput.type === 'password') {
-        customKeyInput.type = 'text';
-        toggleVisibilityBtn.textContent = '🔒';
-      } else {
-        customKeyInput.type = 'password';
-        toggleVisibilityBtn.textContent = '👁️';
-      }
-    };
-  }
-
-  if (saveCustomKeyBtn && customKeyInput) {
-    saveCustomKeyBtn.onclick = async () => {
-      const enteredKey = (customKeyInput.value || '').trim();
-      if (!enteredKey) {
-        window.toast('Please enter a Gemini API key');
-        return;
-      }
-
-      saveCustomKeyBtn.disabled = true;
-      saveCustomKeyBtn.innerHTML = `<span>Testing Key...</span>`;
-      if (statusMsgEl) {
-        statusMsgEl.style.display = 'block';
-        statusMsgEl.style.background = 'var(--surface-2)';
-        statusMsgEl.style.color = 'var(--text-dim)';
-        statusMsgEl.style.border = '1px solid var(--border)';
-        statusMsgEl.textContent = 'Validating key with Google Gemini API...';
-      }
-
-      try {
-        const resp = await fetch('/api/gemini/validate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ apiKey: enteredKey })
-        });
-        const resData = await resp.json();
-
-        if (resp.ok && resData.valid) {
-          window.State.customGeminiKey = enteredKey;
-          try { localStorage.setItem('sayad_custom_gemini_key', enteredKey); } catch(e){}
-          if (window.DB && window.DB.setting) {
-            await window.DB.setting('customGeminiKey', enteredKey);
-          }
-          window.toast('Custom Gemini key saved & verified! 🎉');
-          renderSettings();
-        } else {
-          if (statusMsgEl) {
-            statusMsgEl.style.display = 'block';
-            statusMsgEl.style.background = 'rgba(239, 68, 68, 0.12)';
-            statusMsgEl.style.color = 'var(--danger, #ef4444)';
-            statusMsgEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
-            statusMsgEl.textContent = `❌ Validation Failed: ${resData.error || 'Invalid API Key'}`;
-          }
-          saveCustomKeyBtn.disabled = false;
-          saveCustomKeyBtn.innerHTML = `${window.icon('check','icon icon-sm')}<span>Save &amp; Test Key</span>`;
-        }
-      } catch (err) {
-        if (statusMsgEl) {
-          statusMsgEl.style.display = 'block';
-          statusMsgEl.style.background = 'rgba(239, 68, 68, 0.12)';
-          statusMsgEl.style.color = 'var(--danger, #ef4444)';
-          statusMsgEl.style.border = '1px solid rgba(239, 68, 68, 0.3)';
-          statusMsgEl.textContent = `Network Error: ${err.message}`;
-        }
-        saveCustomKeyBtn.disabled = false;
-        saveCustomKeyBtn.innerHTML = `${window.icon('check','icon icon-sm')}<span>Save &amp; Test Key</span>`;
-      }
-    };
-  }
-
-  if (removeCustomKeyBtn) {
-    removeCustomKeyBtn.onclick = async () => {
-      window.State.customGeminiKey = '';
-      try { localStorage.removeItem('sayad_custom_gemini_key'); } catch(e){}
-      if (window.DB && window.DB.setting) {
-        await window.DB.setting('customGeminiKey', '');
-      }
-      window.toast('Reverted to default app key pool 🔄');
-      renderSettings();
-    };
-  }
-
-  // Handle Advanced AI Delivery Details Accordion State
-  const deliveryDetails = document.getElementById('ai-delivery-advanced-details');
-  if (deliveryDetails) {
-    deliveryDetails.ontoggle = () => {
-      window._settingsDeliveryOpen = deliveryDetails.open;
-    };
-  }
-
-  // Surgical inline DOM updater for AI streaming delivery cards
-  function updateStreamingModeCardsDOM(mode) {
-    const modeLabels = {
-      sse: 'Word-By-Word Live Flow (ChatGPT Style)',
-      typewriter: 'Smooth Morphic Card Wave',
-      instant: 'Turbo Flash Jump'
-    };
-    const modeShort = {
-      sse: '● Word-By-Word Flow',
-      typewriter: '● Morphic Wave',
-      instant: '● Turbo Instant'
-    };
-
-    const headerBadge = document.getElementById('settings-delivery-header-badge');
-    if (headerBadge) {
-      headerBadge.textContent = modeShort[mode] || mode;
-    }
-
-    const subTitle = document.getElementById('settings-delivery-summary-subtitle');
-    if (subTitle) {
-      subTitle.textContent = `Active: ${modeLabels[mode] || mode}`;
-    }
-
-    document.querySelectorAll('[data-set-streaming-mode]').forEach(card => {
-      const active = card.dataset.setStreamingMode === mode;
-      card.style.background = active ? 'var(--accent-soft)' : 'var(--surface-2)';
-      card.style.border = `1.5px solid ${active ? 'var(--accent)' : 'var(--border)'}`;
-      card.style.boxShadow = active ? '0 4px 16px var(--accent-soft)' : 'none';
-
-      const statusWrap = card.querySelector('.delivery-status-indicator');
-      if (statusWrap) {
-        statusWrap.innerHTML = active
-          ? `<span class="pulsing-accent-dot"></span><span style="font-size:11px; font-weight:800; color:var(--accent);">ACTIVE</span>`
-          : `<span style="font-size:11px; font-weight:600; color:var(--text-faint);">Select</span>`;
-      }
-
-      const iconBox = card.querySelector('.delivery-icon-box');
-      if (iconBox) {
-        iconBox.style.background = active ? 'var(--accent)' : 'var(--surface)';
-        iconBox.style.color = active ? 'var(--accent-ink, #ffffff)' : 'var(--accent)';
-        iconBox.style.border = `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`;
-      }
-
-      const chip = card.querySelector('.delivery-chip');
-      if (chip) {
-        chip.style.background = active ? 'var(--accent)' : 'var(--surface)';
-        chip.style.color = active ? 'var(--accent-ink, #ffffff)' : 'var(--text-dim)';
-        chip.style.border = `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`;
-      }
-
-      const simBox = card.querySelector('.delivery-simulation-box');
-      if (simBox) {
-        simBox.style.border = `1px dashed ${active ? 'var(--accent)' : 'var(--border)'}`;
-      }
+  // ---- Advanced: multi-key vault + response style ----
+  const KV = window.KeyVault;
+  const keyList = document.getElementById('adv-key-list');
+  const keyMsg = (t, tone) => {
+    const el = document.getElementById('adv-key-msg'); if (!el) return;
+    el.style.display = t ? 'block' : 'none'; el.textContent = t || ''; el.dataset.tone = tone || '';
+  };
+  const paintKeys = () => {
+    if (!keyList || !KV) return;
+    const list = KV.list();
+    const badge = document.getElementById('adv-key-badge');
+    if (badge) { const live = list.filter(k => k.state !== 'bad' && k.state !== 'unsupported').length; badge.textContent = list.length ? `${live} active` : 'App default'; badge.dataset.on = list.length ? '1' : '0'; }
+    if (!list.length) { keyList.innerHTML = `<div class="adv-empty">Abhi koi personal key nahi — app apni default key pool use kar rahi hai.</div>`; return; }
+    keyList.innerHTML = list.map(k => {
+      const P = KV.PROV[k.provider] || KV.PROV.unknown, st = KV.statusOf(k);
+      return `<div class="kv-row" data-kid="${k.id}">
+        ${KV.ringSvg(k)}
+        <div class="kv-main">
+          <div class="kv-top"><span class="kv-chip" style="--pc:${P.color}">${P.short}</span><span class="kv-label">${window.escapeHtml(k.label)}</span></div>
+          <div class="kv-mask">${KV.mask(k)}</div>
+          <div class="kv-status" data-tone="${st.tone}">${st.text}</div>
+        </div>
+        <div class="kv-actions">
+          <button type="button" data-kv-refresh="${k.id}" aria-label="Check key" title="Check">↻</button>
+          <button type="button" data-kv-del="${k.id}" aria-label="Remove key" title="Remove">✕</button>
+        </div></div>`;
+    }).join('');
+    keyList.querySelectorAll('[data-kv-refresh]').forEach(b => b.onclick = async () => {
+      b.classList.add('spin'); try { await KV.check(b.dataset.kvRefresh); } catch (e) { window.toast('Check fail: ' + e.message); } paintKeys();
     });
+    keyList.querySelectorAll('[data-kv-del]').forEach(b => b.onclick = () => { KV.remove(b.dataset.kvDel); window.toast('Key hata di'); paintKeys(); });
+  };
+  if (KV && keyList) {
+    paintKeys();
+    // quietly refresh real quota for Groq/OpenRouter keys (cheap); Gemini is counted locally
+    KV.list().filter(k => k.provider !== 'gemini' && k.state !== 'unsupported' && Date.now() - (k.checkedAt || 0) > 120000)
+      .forEach(k => KV.check(k.id).then(paintKeys).catch(() => {}));
+    const inp = document.getElementById('adv-key-input'), det = document.getElementById('adv-detect');
+    const eye = document.getElementById('adv-key-eye'), add = document.getElementById('adv-key-add');
+    inp.oninput = () => {
+      const v = inp.value.trim(); keyMsg('');
+      if (!v) { det.textContent = 'Provider auto-detect hoga'; det.dataset.tone = ''; return; }
+      const p = KV.detect(v), P = KV.PROV[p];
+      det.textContent = p === 'unknown' ? 'Pehchan nahi paayi…' : `✓ ${P.name} key${P.supported ? '' : ' (abhi supported nahi)'}`;
+      det.style.setProperty('--pc', P.color); det.dataset.tone = p === 'unknown' ? 'dim' : 'ok';
+    };
+    eye.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; eye.textContent = inp.type === 'password' ? '👁️' : '🔒'; };
+    add.onclick = async () => {
+      const v = inp.value.trim(); if (!v) return keyMsg('Pehle key paste karo', 'bad');
+      add.disabled = true; add.textContent = 'Checking…'; keyMsg('Key verify ho rahi hai…', 'dim');
+      try { const k = await KV.add(v); inp.value = ''; inp.oninput(); keyMsg(''); window.toast(`${KV.PROV[k.provider].name} key add ho gayi 🎉`); paintKeys(); }
+      catch (e) { keyMsg('❌ ' + e.message, 'bad'); }
+      add.disabled = false; add.textContent = 'Add key';
+    };
+    inp.onkeydown = (e) => { if (e.key === 'Enter') add.click(); };
+    document.getElementById('adv-key-testall').onclick = async (e) => {
+      const btn = e.currentTarget; btn.textContent = 'Checking…';
+      for (const k of KV.list()) { try { await KV.check(k.id); } catch (er) {} paintKeys(); }
+      btn.textContent = 'Sab check karo';
+    };
+    window._advKeysListener && window.removeEventListener('sayad-keys-changed', window._advKeysListener);
+    window._advKeysListener = () => { if (document.getElementById('adv-key-list')) paintKeys(); };
+    window.addEventListener('sayad-keys-changed', window._advKeysListener);
   }
 
-  // Handle AI Delivery Mode Selection
+  // Response style
+  const STYLE = {
+    sse: { badge: '● Live Flow', demo: 'The molecule enters the cycle word by word<span class="ai-typing-cursor">▌</span>' },
+    typewriter: { badge: '● Wave', demo: '<i>▤ Section 1</i> → <i>▤ Key points</i> → <i>📊 Flowchart</i>' },
+    instant: { badge: '● Instant', demo: 'Poora jawab ek hi frame me — zero wait' },
+  };
+  const paintStyle = (mode) => {
+    const b = document.getElementById('settings-delivery-header-badge'); if (b) b.textContent = (STYLE[mode] || STYLE.sse).badge;
+    const pv = document.getElementById('adv-preview'); if (pv) { pv.dataset.mode = mode; pv.innerHTML = (STYLE[mode] || STYLE.sse).demo; }
+    document.querySelectorAll('[data-set-streaming-mode]').forEach(x => x.classList.toggle('on', x.dataset.setStreamingMode === mode));
+  };
+  paintStyle(window.State.streamingMode || 'sse');
   document.querySelectorAll('[data-set-streaming-mode]').forEach(btn => {
     btn.onclick = async (e) => {
       e.stopPropagation();
-      const mode = btn.dataset.setStreamingMode;
-      if (!mode) return;
+      const mode = btn.dataset.setStreamingMode; if (!mode) return;
       window.State.streamingMode = mode;
-      window._settingsDeliveryOpen = true; // Keep accordion open upon selection
-      try { localStorage.setItem('sayad_streaming_mode', mode); } catch(e){}
-      if (window.DB && window.DB.setting) {
-        await window.DB.setting('streamingMode', mode);
-      }
-      const modeLabels = {
-        sse: 'Word-By-Word Live Flow (ChatGPT Style)',
-        typewriter: 'Smooth Morphic Card Wave',
-        instant: 'Turbo Flash Jump'
-      };
-      window.toast(`Activated: ${modeLabels[mode] || mode}`);
-      updateStreamingModeCardsDOM(mode);
+      try { localStorage.setItem('sayad_streaming_mode', mode); } catch (e) {}
+      if (window.DB && window.DB.setting) await window.DB.setting('streamingMode', mode);
+      paintStyle(mode);
     };
   });
 

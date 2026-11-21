@@ -3,6 +3,7 @@
 import './icons.js';
 import './db.js';
 import './ai.js';
+import './keyvault.js';
 import './utils.js';
 import './seed.js';
 import './views_dashboard.js';
@@ -500,7 +501,7 @@ export async function boot(){
   window.State.liteMotion = await window.DB.getSetting('liteMotion', false);
   window.applyLiteMotion && window.applyLiteMotion(window.State.liteMotion);
   window.State.streamingMode = (await window.DB.getSetting('streamingMode', 'sse')) || (typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_streaming_mode') || 'sse') : 'sse');
-  window.State.customGeminiKey = (await window.DB.getSetting('customGeminiKey', '')) || (typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_custom_gemini_key') || '') : '');
+  try { const _k = await window.DB.getSetting('aiKeys', null); if (_k && _k.length && !window.KeyVault.count()) { window.KeyVault.restore(_k); } } catch(e){}
   window.State.activeIconTheme = typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_active_icon_theme') || 'crest-dark') : 'crest-dark';
   window.State.mwDictKey = await window.DB.getSetting('mw_dict_key', 'a25615d3-9057-4b18-b917-f4bf6c173c5c');
   window.State.mwThesaurusKey = await window.DB.getSetting('mw_thesaurus_key', 'f0f9a8b2-85d7-4064-9737-f4432f18ef65');

@@ -4,12 +4,28 @@ dotenv.config();
 import express from "express";
 import compression from "compression";
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import dns from "node:dns/promises";
 import net from "node:net";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { MICROSOFT_NEURAL_VOICES, synthesizeMicrosoftTTS } from "./server/microsoft_tts.ts";
+
+
+// Per-request user-supplied keys (BYOK for Groq / OpenRouter). Falls back to server env keys.
+const userKeyCtx = new AsyncLocalStorage<{ groq?: string; openrouter?: string }>();
+const groqKey = (): string | undefined => userKeyCtx.getStore()?.groq || process.env.GROQ_API_KEY || undefined;
+const orKey = (): string | undefined => userKeyCtx.getStore()?.openrouter || process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI || undefined;
+
+function detectProvider(k: string): "gemini" | "groq" | "openrouter" | "openai" | "cerebras" | "unknown" {
+  if (/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)) return "gemini";
+  if (/^gsk_[0-9A-Za-z]{20,}$/.test(k)) return "groq";
+  if (/^sk-or-/.test(k)) return "openrouter";
+  if (/^csk-/.test(k)) return "cerebras";
+  if (/^sk-(proj-)?[0-9A-Za-z_\-]{20,}$/.test(k)) return "openai";
+  return "unknown";
+}
 
 // -------------------------------------------------------------
 // DYNAMIC MULTI-KEY GEMINI POOL MANAGER
@@ -520,7 +536,7 @@ async function executeWithGeminiPoolStream(
 }
 
 async function executeWithGroq(prompt: string, systemInstruction?: string, temperature = 0.3): Promise<string | null> {
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = groqKey();
   if (!apiKey) return null;
 
   const models = ["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "openai/gpt-oss-20b"];
@@ -561,7 +577,7 @@ async function executeWithOpenRouter(
   temperature = 0.3,
   preferredModel?: string
 ): Promise<{ text: string; model: string } | null> {
-  const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI;
+  const apiKey = orKey();
   if (!apiKey) return null;
 
   const models = Array.from(new Set([
@@ -1271,7 +1287,7 @@ function sanitizeAIResponse(text: string): string {
 }
 
 async function generateAIImage(prompt: string): Promise<{ imageUrl: string; description?: string } | null> {
-  const apiKey = process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI;
+  const apiKey = orKey();
   if (!apiKey) return null;
 
   try {
@@ -1497,6 +1513,18 @@ async function startServer() {
   }));
 
   app.use(express.json({ limit: "30mb" }));
+  // BYOK: client may send its own Groq / OpenRouter keys in a header; scoped to this request only.
+  app.use((req, _res, next) => {
+    const raw = req.headers["x-sayad-aux"];
+    if (typeof raw !== "string" || !raw) return next();
+    try {
+      const o = JSON.parse(decodeURIComponent(raw));
+      const store: { groq?: string; openrouter?: string } = {};
+      if (typeof o.groq === "string" && detectProvider(o.groq.trim()) === "groq") store.groq = o.groq.trim();
+      if (typeof o.openrouter === "string" && detectProvider(o.openrouter.trim()) === "openrouter") store.openrouter = o.openrouter.trim();
+      return userKeyCtx.run(store, next);
+    } catch { return next(); }
+  });
 
   // Health check & Key Pool Diagnostics
   app.get("/api/health", (req, res) => {
@@ -1845,7 +1873,7 @@ async function startServer() {
         }
 
         // Groq Fallback for study tool
-        if (process.env.GROQ_API_KEY) {
+        if (groqKey()) {
           try {
             const groqRes = await executeWithGroq(queryPrompt, studySysInstruction, 0.22);
             if (groqRes) {
@@ -1857,7 +1885,7 @@ async function startServer() {
         }
 
         // OpenRouter Fallback for study tool
-        if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+        if (orKey()) {
           try {
             const orRes = await executeWithOpenRouter(queryPrompt, studySysInstruction, 0.22);
             if (orRes && orRes.text) {
@@ -1899,7 +1927,7 @@ async function startServer() {
       }
 
       // 2. High-speed Groq Inference (Sub-second fallback)
-      if (process.env.GROQ_API_KEY) {
+      if (groqKey()) {
         const groqText = await executeWithGroq(queryPrompt, studySysInstruction, 0.25);
         if (groqText) {
           return res.json({
@@ -1913,7 +1941,7 @@ async function startServer() {
       }
 
       // 3. OpenRouter (DeepSeek V3 / LLaMA 3.3 70B) Fallback
-      if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+      if (orKey()) {
         const orResult = await executeWithOpenRouter(queryPrompt, studySysInstruction, 0.25);
         if (orResult && orResult.text) {
           return res.json({
@@ -2058,7 +2086,7 @@ Return ONLY a valid raw JSON object with this exact structure:
       }
 
       // 2. Fast Groq Fallback
-      if (process.env.GROQ_API_KEY) {
+      if (groqKey()) {
         const groqText = await executeWithGroq(lexiconPrompt, lexiconSysInstruction, 0.1);
         if (groqText) {
           try {
@@ -2075,7 +2103,7 @@ Return ONLY a valid raw JSON object with this exact structure:
       }
 
       // 3. OpenRouter Fallback
-      if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+      if (orKey()) {
         const orResult = await executeWithOpenRouter(lexiconPrompt, lexiconSysInstruction, 0.1);
         if (orResult && orResult.text) {
           try {
@@ -2102,6 +2130,49 @@ Return ONLY a valid raw JSON object with this exact structure:
   });
 
   // Verify / Test Custom User Gemini API Key
+  // Key checker: detects provider and returns real quota where the provider exposes it.
+  app.post("/api/keys/check", async (req, res) => {
+    const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
+    if (key.length < 12 || key.length > 300) return res.status(400).json({ valid: false, error: "Key format galat lag raha hai" });
+    const provider = detectProvider(key);
+    const num = (v: any) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+    try {
+      if (provider === "gemini") {
+        const client = keyPool.getClient(key);
+        const r = await client.models.generateContent({ model: "gemini-3.1-flash-lite", contents: "Reply OK" });
+        return res.json({ valid: !!(r && r.text), provider, quota: null, note: "Google quota nahi batata; app apna count rakhta hai" });
+      }
+      if (provider === "groq") {
+        const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+          body: JSON.stringify({ model: "llama-3.1-8b-instant", messages: [{ role: "user", content: "hi" }], max_tokens: 1 }),
+        });
+        if (r.status === 401) return res.json({ valid: false, provider, error: "Groq ne key reject kar di" });
+        const h = r.headers;
+        const quota = {
+          limit: num(h.get("x-ratelimit-limit-requests")), remaining: num(h.get("x-ratelimit-remaining-requests")),
+          tokenLimit: num(h.get("x-ratelimit-limit-tokens")), tokenRemaining: num(h.get("x-ratelimit-remaining-tokens")),
+          reset: h.get("x-ratelimit-reset-requests") || null, unit: "requests/day",
+        };
+        return res.json({ valid: r.ok || r.status === 429, provider, exhausted: r.status === 429, quota });
+      }
+      if (provider === "openrouter") {
+        const r = await fetch("https://openrouter.ai/api/v1/key", { headers: { Authorization: `Bearer ${key}` } });
+        if (r.status === 401 || r.status === 403) return res.json({ valid: false, provider, error: "OpenRouter ne key reject kar di" });
+        const d: any = (await r.json().catch(() => ({}))).data || {};
+        const limit = num(d.limit), remaining = num(d.limit_remaining);
+        return res.json({ valid: r.ok, provider, quota: { limit, remaining, used: num(d.usage), free: !!d.is_free_tier, unit: "credits ($)" } });
+      }
+      if (provider === "openai" || provider === "cerebras") {
+        return res.json({ valid: true, provider, supported: false, note: "Pehchan liya, par app abhi iska use nahi karta" });
+      }
+      return res.json({ valid: false, provider: "unknown", error: "Provider pehchana nahi gaya (Gemini AIza…, Groq gsk_…, OpenRouter sk-or-…)" });
+    } catch (err: any) {
+      return res.json({ valid: false, provider, error: String(err?.message || err).slice(0, 160) });
+    }
+  });
+
   app.post("/api/gemini/validate", async (req, res) => {
     try {
       const { apiKey } = req.body;
@@ -2158,7 +2229,7 @@ Return ONLY a valid raw JSON object with this exact structure:
       }
 
       // Tier 2: Groq API (if configured)
-      if (process.env.GROQ_API_KEY) {
+      if (groqKey()) {
         const groqText = await executeWithGroq(prompt, systemInstruction, typeof temperature === "number" ? temperature : 0.3);
         if (groqText) {
           return res.json({ text: groqText, status: "success", provider: "groq", model: "gpt-oss-120b" });
@@ -2166,7 +2237,7 @@ Return ONLY a valid raw JSON object with this exact structure:
       }
 
       // Tier 3: OpenRouter API (if configured in environment)
-      if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+      if (orKey()) {
         const orResult = await executeWithOpenRouter(prompt, systemInstruction, typeof temperature === "number" ? temperature : 0.3);
         if (orResult && orResult.text) {
           return res.json({ text: orResult.text, status: "success", provider: "openrouter", model: orResult.model });
@@ -2354,7 +2425,7 @@ MANDATORY RULES:
               customKey,
             });
             flowchartResult = expResult?.text || "";
-          } else if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+          } else if (orKey()) {
             const expResult = await executeWithOpenRouter(flowchartPrompt, "You are an expert visual educator.", 0.2);
             flowchartResult = expResult?.text || "";
           }
@@ -2423,7 +2494,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
                   customKey,
                 });
                 explanation = expResult?.text || netImg.description || "";
-              } else if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+              } else if (orKey()) {
                 const expResult = await executeWithOpenRouter(visualContextPrompt, "You are an elite academic educator.", 0.25);
                 explanation = expResult?.text || netImg.description || "";
               }
@@ -2442,7 +2513,7 @@ Strictly NO greetings, NO filler, and start directly with the analysis.`;
           }
 
           // Fallback to Generative AI Image if configured and specific prompt exists
-          if (resolvedSubject && (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI)) {
+          if (resolvedSubject && orKey()) {
             const imgResult = await generateAIImage(resolvedSubject);
             if (imgResult && imgResult.imageUrl) {
               let explanation = "";
@@ -2714,14 +2785,14 @@ LAST LINE RULE (machine-read, never mention it): after your answer, on a new fin
 Now reply in ${userLang}, in a natural conversational voice, with only as much depth as the question deserves:`;
 
       // Specific user engine preference handling
-      if ((preferredEngine === 'deepseek' || preferredEngine === 'openrouter-deepseek') && (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI)) {
+      if ((preferredEngine === 'deepseek' || preferredEngine === 'openrouter-deepseek') && orKey()) {
         const orResult = await executeWithOpenRouter(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.25, "deepseek/deepseek-chat");
         if (orResult && orResult.text) {
           return res.json({ text: finishReply(orResult.text), status: "success", engine: "deepseek-v3", provider: "openrouter" });
         }
       }
 
-      if ((preferredEngine === 'llama' || preferredEngine === 'openrouter-llama') && (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI)) {
+      if ((preferredEngine === 'llama' || preferredEngine === 'openrouter-llama') && orKey()) {
         const orResult = await executeWithOpenRouter(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.25, "meta-llama/llama-3.3-70b-instruct");
         if (orResult && orResult.text) {
           return res.json({ text: finishReply(orResult.text), status: "success", engine: "openrouter-llama-3.3-70b", provider: "openrouter" });
@@ -2784,7 +2855,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
         }
 
         // Tier 2 Fallback: Groq Ultra-Fast Llama 3.3 70B
-        if (process.env.GROQ_API_KEY) {
+        if (groqKey()) {
           try {
             const groqReply = await executeWithGroq(hybridPrompt, "You are an elite academic professor.", 0.25);
             if (groqReply) {
@@ -2797,7 +2868,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
         }
 
         // Tier 3 Fallback: OpenRouter
-        if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+        if (orKey()) {
           try {
             const orResult = await executeWithOpenRouter(hybridPrompt, "You are an elite academic professor.", 0.25);
             if (orResult && orResult.text) {
@@ -2837,7 +2908,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
       }
 
       // Tier 2: OpenRouter DeepSeek V3 / LLaMA 3.3 70B (State of the art reasoning & fast responses)
-      if (process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI) {
+      if (orKey()) {
         const orResult = await executeWithOpenRouter(
           hybridPrompt,
           "You are an elite AI Super-Intelligence operating with the exact intelligence and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Strictly match the user's language (Hinglish/Hindi/English).",
@@ -2855,7 +2926,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
       }
 
       // Tier 3: Open-Source LLaMA / GPT on Groq (High speed, instant responses)
-      if (process.env.GROQ_API_KEY) {
+      if (groqKey()) {
         const groqText = await executeWithGroq(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.3);
         if (groqText) {
           return res.json({ text: finishReply(groqText), status: "success", engine: "groq-gpt-oss-120b" });

@@ -1,0 +1,153 @@
+// @ts-nocheck
+// KeyVault: several personal API keys (Gemini / Groq / OpenRouter), auto-detected by format.
+// Keys live only on this device (localStorage + IndexedDB settings) and ride along per request.
+const LS = 'sayad_keys_v1';
+const PROV = {
+  gemini:     { name: 'Google Gemini', short: 'Gemini', color: '#4285F4', link: 'https://aistudio.google.com/app/apikey', supported: true },
+  groq:       { name: 'Groq', short: 'Groq', color: '#F55036', link: 'https://console.groq.com/keys', supported: true },
+  openrouter: { name: 'OpenRouter', short: 'OpenRouter', color: '#7C5CFF', link: 'https://openrouter.ai/keys', supported: true },
+  openai:     { name: 'OpenAI', short: 'OpenAI', color: '#10A37F', supported: false },
+  cerebras:   { name: 'Cerebras', short: 'Cerebras', color: '#FF7A1A', supported: false },
+  unknown:    { name: 'Unknown', short: '?', color: '#888', supported: false },
+};
+function detect(k) {
+  k = String(k || '').trim();
+  if (/^AIza[0-9A-Za-z_\-]{20,}$/.test(k)) return 'gemini';
+  if (/^gsk_[0-9A-Za-z]{20,}$/.test(k)) return 'groq';
+  if (/^sk-or-/.test(k)) return 'openrouter';
+  if (/^csk-/.test(k)) return 'cerebras';
+  if (/^sk-(proj-)?[0-9A-Za-z_\-]{20,}$/.test(k)) return 'openai';
+  return 'unknown';
+}
+const today = () => new Date().toISOString().slice(0, 10);
+let keys = [];
+function load() {
+  try { keys = JSON.parse(localStorage.getItem(LS) || '[]') || []; } catch (e) { keys = []; }
+  if (!keys.length) { // migrate the old single Gemini key
+    try { const old = localStorage.getItem('sayad_custom_gemini_key'); if (old && old.length > 10) keys = [mk(old, 'Gemini key')]; } catch (e) {}
+  }
+}
+function mk(key, label) {
+  const provider = detect(key);
+  return { id: 'k' + Math.random().toString(36).slice(2, 9), provider, key, label: label || PROV[provider].short + ' key',
+    addedAt: Date.now(), day: today(), n: 0, cooldownUntil: 0, quota: null, state: 'new', checkedAt: 0 };
+}
+function save() {
+  try { localStorage.setItem(LS, JSON.stringify(keys)); } catch (e) {}
+  try { const g = keys.find(k => k.provider === 'gemini' && k.state !== 'bad'); localStorage.setItem('sayad_custom_gemini_key', g ? g.key : ''); } catch (e) {}
+  try { window.DB && window.DB.setting && window.DB.setting('aiKeys', keys); } catch (e) {}
+  try { window.dispatchEvent(new CustomEvent('sayad-keys-changed')); } catch (e) {}
+}
+load();
+
+let rr = 0;
+function nextGemini() {
+  const now = Date.now();
+  const pool = keys.filter(k => k.provider === 'gemini' && k.state !== 'bad');
+  if (!pool.length) return '';
+  const ready = pool.filter(k => k.cooldownUntil < now);
+  const list = ready.length ? ready : pool;
+  const k = list[rr++ % list.length];
+  return k.key;
+}
+function firstOf(p) { return keys.find(k => k.provider === p && k.state !== 'bad' && k.cooldownUntil < Date.now()) || keys.find(k => k.provider === p && k.state !== 'bad'); }
+
+const Vault = {
+  PROV, detect,
+  list: () => keys.slice(),
+  count: () => keys.length,
+  async add(key, label) {
+    key = String(key || '').trim();
+    if (key.length < 12) throw new Error('Key bahut chhoti hai');
+    if (keys.some(k => k.key === key)) throw new Error('Ye key pehle se added hai');
+    const k = mk(key, label);
+    keys.push(k); save();
+    const r = await Vault.check(k.id).catch(e => ({ error: e.message }));
+    if (r && r.valid === false) { keys = keys.filter(x => x.id !== k.id); save(); throw new Error(r.error || 'Key valid nahi hai'); }
+    return keys.find(x => x.id === k.id);
+  },
+  restore(list) { if (Array.isArray(list)) { keys = list; save(); } },
+  remove(id) { keys = keys.filter(k => k.id !== id); save(); },
+  rename(id, label) { const k = keys.find(x => x.id === id); if (k) { k.label = String(label || '').slice(0, 24) || k.label; save(); } },
+  async check(id) {
+    const k = keys.find(x => x.id === id); if (!k) return null;
+    const resp = await fetch('/api/keys/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k.key }) });
+    const d = await resp.json();
+    k.checkedAt = Date.now();
+    if (d.provider && PROV[d.provider]) k.provider = d.provider;
+    k.state = d.valid ? (d.exhausted ? 'limit' : 'ok') : 'bad';
+    if (d.exhausted) k.cooldownUntil = Date.now() + 60000;
+    k.quota = d.quota || null; k.note = d.note || d.error || '';
+    if (d.supported === false) k.state = 'unsupported';
+    save();
+    return d;
+  },
+  // 0..1 share left, or null when unknown
+  remaining(k) {
+    if (k.state === 'bad' || k.state === 'unsupported') return null;
+    const q = k.quota;
+    if (k.provider === 'gemini') { const used = k.day === today() ? k.n : 0; return Math.max(0, 1 - used / 250); }
+    if (q && q.limit && q.remaining != null) return Math.max(0, Math.min(1, q.remaining / q.limit));
+    if (q && q.limit == null && k.provider === 'openrouter') return 1; // no cap set on this key
+    return null;
+  },
+  usedToday(k) { return k.day === today() ? k.n : 0; },
+  anyActive: () => keys.some(k => k.state !== 'bad' && k.state !== 'unsupported'),
+  auxHeader() {
+    const o = {}; const g = firstOf('groq'), r = firstOf('openrouter');
+    if (g) o.groq = g.key; if (r) o.openrouter = r.key;
+    return Object.keys(o).length ? encodeURIComponent(JSON.stringify(o)) : '';
+  },
+};
+window.KeyVault = Vault;
+
+// State.customGeminiKey stays the single read point for every existing AI call; it now rotates across healthy Gemini keys.
+try {
+  Object.defineProperty(window.State, 'customGeminiKey', { configurable: true, enumerable: true, get: nextGemini, set() {} });
+} catch (e) {}
+
+// Count usage per key and learn from 429s; attach Groq/OpenRouter keys to our own /api calls.
+const _fetch = window.fetch.bind(window);
+window.fetch = function (input, init) {
+  try {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.startsWith('/api/') && !url.startsWith('/api/keys/')) {
+      init = init || {};
+      const aux = Vault.auxHeader();
+      let used = null;
+      if (typeof init.body === 'string' && init.body.includes('customKey')) {
+        try { const ck = JSON.parse(init.body).customKey; used = keys.find(k => k.key === ck) || null; } catch (e) {}
+      }
+      if (used) { if (used.day !== today()) { used.day = today(); used.n = 0; } used.n++; }
+      if (aux) { const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {}); h.set('x-sayad-aux', aux); init = { ...init, headers: h }; }
+      const p = _fetch(input, init);
+      if (used) p.then(r => { if (r.status === 429) { used.cooldownUntil = Date.now() + 60000; used.state = 'limit'; } else if (used.state === 'limit' && r.ok) used.state = 'ok'; save(); }).catch(() => {});
+      return p;
+    }
+  } catch (e) {}
+  return _fetch(input, init);
+};
+
+// ---- small UI helpers used by Settings → Advanced ----
+Vault.mask = (k) => k.key.slice(0, 4) + '••••' + k.key.slice(-4);
+Vault.statusOf = (k) => {
+  const left = Vault.remaining(k);
+  if (k.state === 'bad') return { tone: 'bad', text: 'Key reject hui' };
+  if (k.state === 'unsupported') return { tone: 'dim', text: 'Pehchani, par abhi use nahi hoti' };
+  if (k.state === 'limit' || k.cooldownUntil > Date.now()) return { tone: 'warn', text: 'Limit chhoo li, thodi der me wapas' };
+  if (k.provider === 'gemini') return { tone: left != null && left < 0.15 ? 'warn' : 'ok', text: `Aaj ${Vault.usedToday(k)} calls (estimate)` };
+  const q = k.quota;
+  if (q && q.limit != null && q.remaining != null) return { tone: left < 0.15 ? 'warn' : 'ok', text: `${q.remaining.toLocaleString()} / ${q.limit.toLocaleString()} ${k.provider === 'groq' ? 'requests bache' : 'credits bache'}` };
+  if (k.provider === 'openrouter') return { tone: 'ok', text: 'Koi limit set nahi' };
+  return { tone: 'dim', text: 'Status check karo' };
+};
+Vault.ringSvg = (k, size = 46) => {
+  const st = Vault.statusOf(k), left = Vault.remaining(k), r = 18, c = 2 * Math.PI * r;
+  const col = st.tone === 'bad' ? '#ef4444' : st.tone === 'warn' ? '#f59e0b' : st.tone === 'dim' ? 'var(--text-faint)' : (left != null && left < 0.4 ? '#f59e0b' : '#10b981');
+  const frac = left == null ? (st.tone === 'bad' ? 1 : 0.0) : left;
+  const centre = st.tone === 'bad' ? '!' : left == null ? '–' : Math.round(left * 100) + '%';
+  return `<svg class="kv-ring" width="${size}" height="${size}" viewBox="0 0 44 44" aria-hidden="true">
+    <circle cx="22" cy="22" r="${r}" fill="none" stroke="var(--border)" stroke-width="4"/>
+    <circle cx="22" cy="22" r="${r}" fill="none" stroke="${col}" stroke-width="4" stroke-linecap="round" stroke-dasharray="${(c * frac).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 22 22)" style="transition:stroke-dasharray .6s cubic-bezier(.2,.8,.2,1)"/>
+    <text x="22" y="26" text-anchor="middle" font-size="${centre.length > 3 ? 9 : 11}" font-weight="800" fill="var(--text)" font-family="var(--font-mono, monospace)">${centre}</text></svg>`;
+};
