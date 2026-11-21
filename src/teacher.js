@@ -92,25 +92,12 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
       <button class="cw-back" id="teacher-back-btn" title="Back to Reader" aria-label="Back">${window.icon('chevLeft','icon icon-sm')}</button>
       <div class="cw-head-text">
         <div class="cw-head-title" title="${window.escapeHtml(docTitle)}">${window.escapeHtml(docTitle)}</div>
-        <div class="cw-head-sub">${isGlobal ? 'Universal Library' : `Page ${currentPage} of ${totalPages}`} · <span class="cw-grounded">Grounded</span></div>
+        <div class="cw-head-sub">${isGlobal ? 'Universal Library · Grounded' : `Page ${currentPage} of ${totalPages} · <button type="button" class="cw-focus-chip" id="cw-focus-chip"><i class="cw-dot"></i><span id="cw-reading-text">…</span>${window.icon('chevDown','icon icon-xs')}</button>`}</div>
       </div>
       <button class="cw-tune" id="teacher-custom-toggle" title="Tutor style, engine and persona" aria-label="Tutor settings">${window.icon('sliders','icon icon-sm')}<span>Tutor</span></button>
     </header>
 
-    <!-- What the chat reads from: Page / Chapter / Book -->
-    <div class="cw-scope" id="teacher-scope-bar">
-      ${!isGlobal ? `
-      <div class="cw-seg" id="cw-seg" role="tablist" aria-label="Chat focus">
-        <button type="button" data-scope="page">Page ${currentPage}</button>
-        <button type="button" data-scope="chapter">Chapter</button>
-        <button type="button" data-scope="book">Book</button>
-      </div>
-      <button type="button" class="cw-reading" id="cw-reading">
-        <span class="cw-reading-lbl">Reading from</span><b id="cw-reading-text">…</b>${window.icon('chevDown','icon icon-xs')}
-      </button>
-      <select id="teacher-chapter-select" data-native="true" hidden></select><span id="teacher-scope-badge-pill" hidden></span>
-      ` : '<div class="cw-reading cw-reading-static"><span class="cw-reading-lbl">Reading from</span><b>Whole library</b></div>'}
-    </div>
+    ${!isGlobal ? '<select id="teacher-chapter-select" data-native="true" hidden></select><span id="teacher-scope-badge-pill" hidden></span>' : ''}
 
     <!-- Main Clean Chat Log Scroll Container -->
     <div id="teacher-chat-log" class="chat-scroll-container no-scrollbar">
@@ -1358,34 +1345,47 @@ Provide the complete academic answer now:`;
 
   // ---- Page / Chapter / Book switch + chapter picker ----
   function paintScope() {
-    document.querySelectorAll('#cw-seg [data-scope]').forEach(b => b.classList.toggle('on', b.dataset.scope === activeContextScope));
     const rt = document.getElementById('cw-reading-text');
     if (rt) {
       const c = teacherState.currentSessionChapter;
-      if (activeContextScope === 'chapter' && c) {
-        rt.textContent = `${c.chapterNumber ? 'Ch ' + c.chapterNumber + ' · ' : ''}${c.chapterTitle || 'Chapter'} · pp. ${c.startPage}–${c.endPage}`;
-      } else if (activeContextScope === 'book') {
-        rt.textContent = `Whole book · pp. 1–${totalPages}`;
-      } else {
-        rt.textContent = `Page ${currentPage}`;
-      }
+      rt.textContent = (activeContextScope === 'chapter' && c)
+        ? (c.chapterNumber ? `Chapter ${c.chapterNumber}` : (c.chapterTitle || 'Chapter'))
+        : activeContextScope === 'book' ? 'Whole book' : `Page ${currentPage}`;
     }
     if (chatMessages.length === 0) renderMessages();   // tiles mention the current focus
   }
   function openChapterPicker() {
-    if (!cachedChapterList.length) { window.toast('Chapters detect nahi hue — Page ya Book focus use karo'); return; }
     const cur = teacherState.currentSessionChapter;
+    const hasCh = cachedChapterList.length > 0;
     window.Sheet.open(`
-      <div class="font-display" style="font-size:17px; font-weight:600; margin:6px 0 10px;">Chapter chuno</div>
+      <div class="font-display" style="font-size:17px; font-weight:600; margin:6px 0 4px;">Chat kis hisse se jawab de?</div>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:12px;">Answers isi focus se grounded rahenge.</div>
+      <div class="cw-seg" id="cw-seg">
+        <button type="button" data-scope="page" class="${activeContextScope === 'page' ? 'on' : ''}">Page ${currentPage}</button>
+        <button type="button" data-scope="chapter" class="${activeContextScope === 'chapter' ? 'on' : ''}"${hasCh ? '' : ' disabled'}>Chapter</button>
+        <button type="button" data-scope="book" class="${activeContextScope === 'book' ? 'on' : ''}">Book</button>
+      </div>
+      ${hasCh ? `
+      <div style="font:700 10px var(--font-mono, monospace); letter-spacing:.12em; color:var(--text-dim); margin:14px 0 8px;">CHAPTERS</div>
       ${cachedChapterList.length > 8 ? '<input id="cw-ch-search" class="cw-ch-search" placeholder="Search chapter…" autocomplete="off">' : ''}
       <div class="cw-chlist" id="cw-chlist">
         ${cachedChapterList.map((ch, i) => {
           const on = activeContextScope === 'chapter' && cur && cur.startPage === ch.startPage && cur.endPage === ch.endPage;
           return `<button type="button" class="cw-chrow${on ? ' on' : ''}" data-i="${i}"><span class="cw-chn">${i + 1}</span><span class="cw-cht">${window.escapeHtml(String(ch.label || ch.title || '').replace(/\s*\(pp\.[^)]*\)/i, ''))}</span><span class="cw-chp">pp. ${ch.startPage}–${ch.endPage}</span></button>`;
         }).join('')}
-      </div>`);
+      </div>` : ''}`);
+    document.querySelectorAll('#cw-seg [data-scope]').forEach(b => {
+      b.onclick = () => {
+        const sc = b.dataset.scope;
+        if (sc === 'chapter') {
+          const idx = cur ? cachedChapterList.findIndex(ch => ch.startPage === cur.startPage && ch.endPage === cur.endPage) : -1;
+          scopeSelect.value = 'ch_' + Math.max(0, idx);
+        } else scopeSelect.value = sc === 'page' ? '__page__' : '__book__';
+        scopeSelect.onchange(); window.Sheet.close();
+      };
+    });
     const list = document.getElementById('cw-chlist');
-    list.querySelectorAll('.cw-chrow').forEach(r => {
+    if (list) list.querySelectorAll('.cw-chrow').forEach(r => {
       r.onclick = () => { scopeSelect.value = 'ch_' + r.dataset.i; scopeSelect.onchange(); window.Sheet.close(); };
     });
     const q = document.getElementById('cw-ch-search');
@@ -1395,22 +1395,8 @@ Provide the complete academic answer now:`;
     };
   }
   function bindScopeUi() {
-    document.querySelectorAll('#cw-seg [data-scope]').forEach(b => {
-      b.onclick = () => {
-        const sc = b.dataset.scope;
-        if (sc === 'chapter') {
-          const cur = teacherState.currentSessionChapter;
-          const idx = cur ? cachedChapterList.findIndex(ch => ch.startPage === cur.startPage && ch.endPage === cur.endPage) : -1;
-          if (activeContextScope !== 'chapter' && idx >= 0) { scopeSelect.value = 'ch_' + idx; scopeSelect.onchange(); }
-          else openChapterPicker();
-          return;
-        }
-        scopeSelect.value = sc === 'page' ? '__page__' : '__book__';
-        scopeSelect.onchange();
-      };
-    });
-    const rd = document.getElementById('cw-reading');
-    if (rd) rd.onclick = openChapterPicker;
+    const chip = document.getElementById('cw-focus-chip');
+    if (chip) chip.onclick = openChapterPicker;
   }
 
   async function setupChapterScope() {

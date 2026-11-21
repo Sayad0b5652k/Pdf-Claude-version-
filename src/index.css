@@ -8423,3 +8423,9 @@ html[data-pro-theme="editorial"] .cw-seg button { border-radius: 2px; }
 html[data-pro-theme="editorial"] .cw-hero-title { font-family: 'Playfair Display', Georgia, serif; }
 .cw-card .chat-msg-ai-bubble > :first-child { margin-top: 0 !important; }
 .cw-card .chat-msg-ai-bubble h1, .cw-card .chat-msg-ai-bubble h2 { margin-top: 0 !important; }
+
+/* focus chip in header (replaces the always-visible strip) */
+.cw-focus-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 2px 8px 2px 7px; margin-left: 2px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font: inherit; font-size: 11.5px; font-weight: 700; color: var(--text); cursor: pointer; vertical-align: middle; }
+.cw-focus-chip .icon { color: var(--accent); }
+.cw-dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; display: inline-block; }
+.cw-head-sub { overflow: visible; }
