@@ -742,7 +742,7 @@ function normSearch(t) {
 function escRe(x) { return x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 /* The index fills in the background (a few pages per tick) so the reader never freezes. Searching works on what is ready. */
-export function buildSearchIndex(onProgress) {
+export function buildSearchIndex(onProgress, startDelay = 0) {
   const fid = window.State.currentFile.id;
   const doc = window.State.currentDoc;
   let job = window.State.searchIndex[fid];
@@ -750,6 +750,7 @@ export function buildSearchIndex(onProgress) {
   job = { pages: [], done: false, total: window.State.numPages, listeners: new Set(onProgress ? [onProgress] : []), legacy: null };
   window.State.searchIndex[fid] = job;
   (async () => {
+    if (startDelay) await new Promise((r) => setTimeout(r, startDelay));   // let the sheet finish sliding in first
     const { fixLegacyHindi, pageIsLegacyHindi } = await import('./hindi_fix.js');
     for (let i = 1; i <= job.total; i++) {
       if (window.State.currentDoc !== doc) return;               // another book opened meanwhile
@@ -832,7 +833,14 @@ export async function openInDocSearch() {
   const render = run;
   const debounced = window.debounce(() => { shown = 60; run(); }, 200);
   inp.oninput = debounced;
-  const job = buildSearchIndex(() => { if (document.getElementById('doc-search-status') === stEl) run(); });
+  let lastRun = 0;
+  const job = buildSearchIndex((j) => {
+    if (document.getElementById('doc-search-status') !== stEl) return;
+    const now = performance.now();
+    if (!inp.value.trim()) { stEl.textContent = j && !j.done ? `Indexing pages… ${j.pages.length}/${j.total}` : ''; return; }
+    if (j && !j.done && now - lastRun < 350) return;          // don't re-scan the whole book on every progress tick
+    lastRun = now; run();
+  }, 600);
   run();
   if (inp.value) { inp.focus(); inp.select(); }
 }
