@@ -1324,10 +1324,14 @@ window.Sheet = Sheet;
  *   notebook  page peel from the corner + doodle burst
  * kind = 'light' | 'dark' | 'classic' | 'editorial' | 'notebook'
  */
+window.applyLiteMotion = function applyLiteMotion(on) {
+  document.documentElement.classList.toggle('lite-motion', !!on);
+  try { localStorage.setItem('sayad_lite_motion', on ? '1' : '0'); } catch (e) { /* ignore */ }
+};
 window.themeTransition = function themeTransition(apply, originEl, kind) {
   let reduce = false;
   try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { /* ignore */ }
-  if (typeof document.startViewTransition !== 'function' || reduce || window.__themeFx) { apply(); return; }
+  if (typeof document.startViewTransition !== 'function' || reduce || window.__themeFx || document.documentElement.classList.contains('lite-motion')) { apply(); return; }
   const W = innerWidth, H = innerHeight;
   let x = W / 2, y = H / 2;
   try { const r = originEl && originEl.getBoundingClientRect(); if (r && r.width) { x = r.left + r.width / 2; y = r.top + r.height / 2; } } catch (e) { /* ignore */ }

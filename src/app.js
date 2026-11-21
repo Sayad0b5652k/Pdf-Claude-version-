@@ -93,6 +93,7 @@ export function bindBottomNav(){
       e.stopPropagation();
       const targetView = b.dataset.nav;
       if (targetView) {
+        if (targetView === 'settings') window.State.settingsPage = 'main';
         window.State.view = targetView;
         pushAppScreen(targetView);
         window.scrollTo(0, 0);
@@ -496,6 +497,8 @@ export async function boot(){
   window.State.autoTheme = await window.DB.getSetting('autoTheme', false);
   window.State.showPageNumber = await window.DB.getSetting('showPageNumber', true);
   window.State.smoothScroll = await window.DB.getSetting('smoothScroll', true);
+  window.State.liteMotion = await window.DB.getSetting('liteMotion', false);
+  window.applyLiteMotion && window.applyLiteMotion(window.State.liteMotion);
   window.State.streamingMode = (await window.DB.getSetting('streamingMode', 'sse')) || (typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_streaming_mode') || 'sse') : 'sse');
   window.State.customGeminiKey = (await window.DB.getSetting('customGeminiKey', '')) || (typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_custom_gemini_key') || '') : '');
   window.State.activeIconTheme = typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_active_icon_theme') || 'crest-dark') : 'crest-dark';

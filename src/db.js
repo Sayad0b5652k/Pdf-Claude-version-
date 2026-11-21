@@ -341,6 +341,7 @@ export const State = {
   autoTheme: false,
   showPageNumber: true,
   smoothScroll: true,
+  liteMotion: false,
   streamingMode: 'sse',
   brushColor: '#FF6A2B',
   filterView: 'all',
