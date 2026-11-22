@@ -69,10 +69,9 @@ b) Zoom in/out with highlights, underlines and a freehand drawing on the page: t
 c) Change Day/Night/Sepia from Settings and from the reader's "Reading Themes" sheet: sweep now lasts about 1.2-1.4 s and is smoother (gentler easing). Report if it stutters on a slow phone.
 d) Advanced > Double-Tap Page Action: "AI Explain" was removed (did nothing). New: "Read Aloud" and "Light / Dark Toggle". Old saved value is migrated to Read Aloud.
 
+## 14b. Zoom engine change (Claude) - please test on the slowest phone you have
+Pinch zoom no longer rebuilds the whole page: bitmap is stretched by CSS, text layer/marks/drawings stay, and only the visible area is repainted sharp (tile system). Test: pinch in/out many times on a long PDF (continuous and single-page mode), with highlights, a drawing and Read Aloud running.
+Expected: no flicker/jump, text stays selectable, sharp text within ~0.3 s of releasing the pinch. Report any page that stays blurry after scrolling to it while zoomed.
+
 ## 15. Anything else that looks broken
 List it with steps and a screenshot description.
-
-
-## Note from Claude on zoom
-Commits bf8c0c3 and 584f8fb (soft zoom: keep painted pages + CSS stretch + sharp tiles, GPU layer only while pinching, lighter tiles) were reverted (689dc5f, 9789b35) so AI Studio can fix zoom without conflicts.
-If your fix is not enough, re-apply with `git revert 9789b35 689dc5f`. My headless A/B (4x CPU throttle, 40-page scan): worst frame on zoom-in 277 ms -> 71 ms with that change.

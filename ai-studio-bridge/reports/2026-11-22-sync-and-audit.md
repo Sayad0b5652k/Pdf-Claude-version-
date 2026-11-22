@@ -7,13 +7,17 @@ Keys configured in server env (`/api/health`): Primary Gemini key present (`tota
 
 ## Upstream Sync Status (AI Studio <-> GitHub)
 
-Synced and verified up to upstream commit **`5196b2c`** (`Sayad0b5652k/Pdf-Claude-version-`):
+Synced and verified up to upstream commit **`bf8c0c3`** (`Sayad0b5652k/Pdf-Claude-version-`):
 - **`994c951`** — `cleanKeyInput` / `detectProvider` / SEO meta tags / AI Engine `AQ.` + Groq audit fixes.
 - **`cec22fb`** — Copied restored binary `.bcmap` files (`CNS2-V.bcmap`, `ETenms-B5-H.bcmap`, `GB-H.bcmap`) + `.gitattributes`. Synced `src/paper_print.js` (`inFrame` hidden-iframe print first, self-printing `.html` download fallback only inside framed/sandboxed previews).
 - **`1c2a37e`** — Synced `src/help_guide.js` (36 offline guide entries covering OCR, selection, AI menu/tools, papers, review, notes, plan, home).
 - **`3e012a8`** — Synced `src/reader.js`, `src/reader_ocr.js`, `src/help_guide.js`, and `src/index.css` for one-tap `"Saare pages scan →"` batch OCR (`openOcrBatch`, progress pill `#ocr-batch-pill`, pause/stop, wake lock, live text layer). Also added `html[data-pro-theme="notebook"]` styling rules in `src/index.css` for `#ocr-batch-pill` and `.ocrb-opt` to match Notebook theme cards/buttons.
 - **`436e6b6`** — Synced `src/annotations_drawing.js` (double-tap text annotation opens `'Edit Text'` / `'Save ✓'` without clearing `downTargetObj` so `mouse:up` doesn't open an empty dialog over it) and `src/index.css` (`#teacher-input` stays borderless inside its outer Notebook pill).
 - **`5196b2c`** — Synced `src/help_guide.js` (`reader-tools` updated + added `reader-settings`, `focus`, and `ambient` entries; 39 total offline Help & Guide entries).
+- **`b3def5d`** & **`33b722b`** — Synced `src/paper_ui.js` (`printed` print/download toast), `src/annot_export.js`, `src/reader.js`, `src/seed.js`, and `ai-studio-bridge/TASKS.md` (Task #13 `stripNativeSayadAnnots`).
+- **`965c265`** — Synced `src/reader_ocr.js` & `src/index.css` (`#ocr-batch-pill` `✕` immediate cancel + worker queue serialization).
+- **`03e0834`** — Synced `src/ai/tts_read_aloud.js`, `src/ai.js`, `src/reader.js`, `src/selection.js`, `src/annotations_drawing.js`, `src/utils.js`, `src/app.js`, `src/reader_settings.js`, and `ai-studio-bridge/TASKS.md` (Task #14: zoom TTS highlight survival, `%` annotation positioning, immediate post-zoom `scheduleDrawSync`, slower smoother theme sweep, Read Aloud / Light-Dark double-tap options + `ai_summary` migration).
+- **`bf8c0c3`** — Synced `src/reader.js` and `ai-studio-bridge/TASKS.md` (Task #14b: fast-path CSS stretch + sharp-tile zoom without rebuilding painted pages).
 
 ---
 
@@ -149,3 +153,20 @@ Synced and verified up to upstream commit **`5196b2c`** (`Sayad0b5652k/Pdf-Claud
     - **Workspace Updates Observed (Claude / Direct Workspace Sync)**:
       - `src/annot_export.js`, `src/reader.js`, `src/seed.js`, `ai-studio-bridge/TASKS.md` (Task #13): Added `stripNativeSayadAnnots(fileId)` (`nativeStripped` flag) to strip duplicate native PDF annotations authored by S.A.Y.A.D. on import / first open while preserving external PDF app annotations.
       - `src/paper_ui.js`: Updated print/download toast to differentiate direct print (`'Print dialog khul gaya 🖨️'`) vs sandbox `.html` download fallback via `const printed = await printPaper(...)`.
+
+11. **Synced Upstream Commit `03e0834` (Zoom Polish, Smoother Theme Sweep, Double-Tap Actions)**
+    - **`src/ai/tts_read_aloud.js`, `src/ai.js`, `src/reader.js`**: Added `reapplyTTSHighlight(pageNum)` and wired it after `renderPageNow` text-layer rebuilds so active sentence/word highlights survive pinch/double-tap zoom.
+    - **`src/selection.js`**: Switched highlight and underline mark positions/sizes (`left`, `top`, `width`, `height`) from pixel coordinates to percentages so marks track page zoom immediately without waiting for repaint.
+    - **`src/annotations_drawing.js`, `src/reader.js`**: Exposed `window.scheduleDrawSync` and triggered it directly at the end of `updateReaderZoom()` so Fabric drawing layers re-fit immediately on zoom.
+    - **`src/utils.js`**: Updated `themeTransition` `EASE`/`CRISP` curves, View Transitions sweep duration (`dur * 1.8`, ~1.2–1.3s), fallback fade (`1000ms`), and cleanup timeout (`2800ms`).
+    - **`src/reader_settings.js`, `src/reader.js`, `src/app.js`, `ai-studio-bridge/TASKS.md`**: Replaced dead `"AI Explain"` (`ai_summary`) double-tap option with `"Read Aloud"` (`tts`) and `"Light / Dark Toggle"` (`theme`), migrating saved `ai_summary` to `tts` on boot, and synced Task #14 in `TASKS.md`.
+
+12. **Synced Upstream Commit `bf8c0c3` (Fast-Path Pinch/Zoom Without Full-Page Rebuild)**
+    - **`src/reader.js`, `ai-studio-bridge/TASKS.md`**: Already-painted pages (`pe.rendered && pe.canvas && pe.textLayerDiv && pe.pageProxy && pe._baseScale`) now keep their existing bitmap, text layer, annotation marks, and drawing layer during `updateReaderZoom()`, updating `_wantScale` and deferring crispness to `scheduleTiles(80)` + refreshing search overlays via `window.onPageRendered(n)` (Task #14b).
+
+13. **Next-Level Zoom Physics & Retina/Low-End Rendering Upgrades (`src/reader.js`, `src/index.css`)**
+    - **2-Finger Pan + Pinch-Zoom (`setupReaderInteractions`)**: Tracked live finger midpoint delta (`translate3d(dx, dy, 0) scale(ratio)`) with soft rubber-band clamping outside `[0.5, MAX_READER_ZOOM]`, snap-to-1.0x near fit, updated `vpX`/`vpY` anchor coordinates so release stays pixel-locked, and added a `280ms` `pinchLockUntil` cooldown so lifting one finger slightly before the other never flips pages or triggers accidental taps.
+    - **Transform-Safe `restoreScrollAnchorPoint` & Single-Page Sync**: Replaced `pe.wrap.offsetLeft/Top` (which drifted by `50%` in zoomed `single` mode due to `translate(-50%, -50%)`) with `getBoundingClientRect()` relative scroll math; also updated `showSinglePage()` to match container bounds per page and trigger `scheduleTiles(40)` for pre-rendered neighbor pages when zoomed.
+    - **Smooth Double-Tap Zoom + `Ctrl + Wheel` Trackpad Zoom**: Added cancelable `200ms` GPU `transform` animation for `toggleFitZoom()` (respecting `liteMotion` / `prefers-reduced-motion`) and precision cursor-anchored `Ctrl`/`Meta + Wheel` pinch zoom.
+    - **Tile Double-Buffering & Quality/Device Tier Tuning**: Kept existing `.page-tile` scaled proportionally during `updateReaderZoom()` until the new tile finishes rendering (`swap-on-ready`, eliminating blurry drops), added `tilesBusy`/`tilesPending` guard + throttled mid-scroll tile refresh (`240ms`), enabled `TILE_MAX_DPR = 3.5` on mid/high phones (`2.5` on low-RAM phones) within `MAX_CANVAS_PIXELS` (`4MP/6MP/8MP`), and switched base + tile canvases to `{ alpha: false }` with `#ffffff` paper backing + `imageSmoothingQuality = 'high'` for crisp normal and scanned PDF rendering.
+    - **1200% Max Zoom + Zoom Limit Feel Setting (`src/reader.js`, `src/reader_settings.js`, `src/app.js`)**: Raised `MAX_READER_ZOOM` from `6` to `12` (`1200%`) with Book Tools presets (`100%–1200%`) and `1.0x` stepping above `600%`; added **Zoom Limit Feel** (`zoomBounceMode`: `'spring'` vs `'hard'`) in Advanced Settings -> Gestures & Flow (`Spring` plays a smooth `190ms` GPU bounce-back onto `[50%, 1200%]` on release, `Hard Cap` stops cleanly at the bounds without overscroll).

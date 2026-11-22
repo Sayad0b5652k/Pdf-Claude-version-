@@ -478,6 +478,7 @@ export function openAdvancedSettingsModal() {
   const selColor = window.State.selectionColor || '#FF4D6D';
   const isSelDisabled = window.State.disableTextSelection === true;
   const doubleTapAction = window.State.doubleTapAction || 'zoom';
+  const zoomBounceMode = window.State.zoomBounceMode === 'hard' ? 'hard' : 'spring';
   const isAutoScroll = window.State.autoScrollEnabled === true;
   const currentAutoSpeed = getAutoScrollSpeed() || 1.5;
   const isReadAloudOled = window.State.readAloudOledVisualizer !== false;
@@ -616,6 +617,18 @@ export function openAdvancedSettingsModal() {
                 <option value="none" ${doubleTapAction === 'none' ? 'selected' : ''}>Disabled</option>
               </select>
               <span class="adv-inline-select-arrow">▼</span>
+            </div>
+          </div>
+
+          <!-- Zoom Boundary Feel (Spring Bounce vs Hard Cap) -->
+          <div class="adv-linear-row">
+            <div class="adv-row-info">
+              <div class="adv-row-title">Zoom Limit Feel</div>
+              <div class="adv-row-sub">Elastic spring bounce at 50%/1200% or hard stop</div>
+            </div>
+            <div id="adv-zoom-bounce-btn" class="adv-pill-switch" role="button">
+              <span class="adv-pill-switch-btn ${zoomBounceMode !== 'hard' ? 'active' : ''}">Spring</span>
+              <span class="adv-pill-switch-btn ${zoomBounceMode === 'hard' ? 'active' : ''}">Hard Cap</span>
             </div>
           </div>
 
@@ -863,6 +876,24 @@ export function openAdvancedSettingsModal() {
         await window.DB.setting('doubleTapAction', val);
       }
       window.toast('Double-tap action updated');
+    };
+  }
+
+  // 3b. Zoom Limit Feel Toggle (Spring Bounce vs Hard Cap)
+  const zoomBounceBtn = document.getElementById('adv-zoom-bounce-btn');
+  if (zoomBounceBtn) {
+    zoomBounceBtn.onclick = async () => {
+      const next = window.State.zoomBounceMode === 'hard' ? 'spring' : 'hard';
+      window.State.zoomBounceMode = next;
+      if (window.DB && window.DB.setting) {
+        await window.DB.setting('zoomBounceMode', next);
+      }
+      const btns = zoomBounceBtn.querySelectorAll('.adv-pill-switch-btn');
+      if (btns.length === 2) {
+        btns[0].classList.toggle('active', next !== 'hard');
+        btns[1].classList.toggle('active', next === 'hard');
+      }
+      window.toast(next === 'hard' ? 'Zoom limit: Hard Cap (stops at 50%/1200%)' : 'Zoom limit: Spring Bounce');
     };
   }
 

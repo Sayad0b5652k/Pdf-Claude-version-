@@ -487,6 +487,7 @@ export async function boot(){
   window.State.selDefaultStyle = await window.DB.getSetting('selDefaultStyle', 'highlight');
   window.State.doubleTapAction = await window.DB.getSetting('doubleTapAction', 'zoom');
   if (window.State.doubleTapAction === 'ai_summary') window.State.doubleTapAction = 'tts';   // old option did nothing
+  window.State.zoomBounceMode = await window.DB.getSetting('zoomBounceMode', 'spring');
   window.State.autoScrollEnabled = await window.DB.getSetting('autoScrollEnabled', false);
   window.State.readAloudOledVisualizer = await window.DB.getSetting('readAloudOledVisualizer', true);
   window.State.alphaWavesEnabled = await window.DB.getSetting('alphaWavesEnabled', false);

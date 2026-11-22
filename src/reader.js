@@ -1012,8 +1012,14 @@ export function restoreScrollAnchorPoint(anchor) {
     const docX = anchor.fracX * wrapWidth;
     const docY = anchor.fracY * wrapHeight;
 
-    const targetScrollLeft = pe.wrap.offsetLeft + docX - anchor.vpX;
-    const targetScrollTop = pe.wrap.offsetTop + docY - anchor.vpY;
+    // Measure actual visual position relative to scrollEl (handles CSS transforms like translate(-50%,-50%) in single mode)
+    const wr = pe.wrap.getBoundingClientRect();
+    const sr = scrollEl.getBoundingClientRect();
+    const curDocLeft = scrollEl.scrollLeft + (wr.left - sr.left);
+    const curDocTop = scrollEl.scrollTop + (wr.top - sr.top);
+
+    const targetScrollLeft = curDocLeft + docX - anchor.vpX;
+    const targetScrollTop = curDocTop + docY - anchor.vpY;
 
     scrollEl.scrollLeft = Math.max(0, targetScrollLeft);
     scrollEl.scrollTop = Math.max(0, targetScrollTop);
@@ -1041,10 +1047,12 @@ export function updateReaderZoom(preserveAnchor = true) {
   }
 
   let runningTop = 14;
+  const softPages = [];
   for (const numStr in pageEls) {
     const pe = pageEls[numStr];
     if (!pe || !pe.wrap) continue;
 
+    const prevScale = pe.scale || computeFitScale(pe.nativeVp, mode);
     const newScale = computeFitScale(pe.nativeVp, mode);
     pe.scale = newScale;
     const w = pe.nativeVp.width * newScale;
@@ -1066,6 +1074,28 @@ export function updateReaderZoom(preserveAnchor = true) {
       pe.textLayerDiv.style.width = w + 'px';
       pe.textLayerDiv.style.height = h + 'px';
       pe.textLayerDiv.style.setProperty('--scale-factor', `${newScale}`);
+    }
+
+    // Fast path: a page that is already painted keeps its bitmap, text layer, marks and drawing layer.
+    // The bitmap (plus any existing crisp tile, double-buffered!) stretches smoothly by CSS while
+    // the sharp-tile system renders the visible area at full DPI in the background before swapping.
+    if (pe.rendered && pe.canvas && pe.canvas.parentNode && pe.textLayerDiv && pe.pageProxy && pe._baseScale) {
+      pe._wantScale = newScale * Math.min(window.devicePixelRatio || 2, TILE_MAX_DPR);
+      pe.spanRects = null;
+      if (pe._tileTask) { try { pe._tileTask.cancel(); } catch(e){} pe._tileTask = null; }
+      pe._tileToken = (pe._tileToken || 0) + 1;
+      if (pe.tile && pe._tileRect && pe.tile.parentNode && prevScale > 0) {
+        const k = newScale / prevScale;
+        const t = pe._tileRect;
+        t.x0 *= k; t.y0 *= k; t.x1 *= k; t.y1 *= k;
+        t.pageScale = newScale;
+        pe.tile.style.left = t.x0 + 'px';
+        pe.tile.style.top = t.y0 + 'px';
+        pe.tile.style.width = (t.x1 - t.x0) + 'px';
+        pe.tile.style.height = (t.y1 - t.y0) + 'px';
+      }
+      softPages.push(Number(numStr));
+      continue;
     }
 
     // The scale changed: drop any render still running for the old scale (it would commit a
@@ -1112,6 +1142,11 @@ export function updateReaderZoom(preserveAnchor = true) {
   }
   // the drawing canvases are sized for the old zoom: re-fit them now instead of waiting for the next scroll
   try { if (window.scheduleDrawSync) window.scheduleDrawSync(); } catch (e) {}
+  // kept pages: sharpen the visible part quickly, and redraw the px-based overlays (search marks)
+  if (softPages.length) {
+    scheduleTiles(40);
+    for (const n of softPages) { try { window.onPageRendered && window.onPageRendered(n); } catch (e) {} }
+  }
 
   if (window.pendingSelection && typeof window.paintPendingOverlay === 'function') {
     const pNum = window.pendingSelection.pageNum;
@@ -1218,7 +1253,16 @@ export function showSinglePage(num, direction=0){
   window.State.currentPage = num;
   updatePageIndicator();
   saveProgress();
+  const sEl = document.getElementById('reader-scroll');
+  const sCont = window.currentPageContainer;
+  if (sEl && sCont && pe.nativeVp) {
+    const curW = pe.nativeVp.width * pe.scale;
+    const curH = pe.nativeVp.height * pe.scale;
+    sCont.style.width = Math.max(sEl.clientWidth, curW) + 'px';
+    sCont.style.height = Math.max(sEl.clientHeight, curH) + 'px';
+  }
   if(!pe.rendered) renderPage(num);
+  else if (window.State.zoom > 1.02) scheduleTiles(40);
   const nums = Object.keys(pageEls).map(Number).sort((a,b)=>a-b);
   const idx = nums.indexOf(num);
   if(idx>0){ const p = pageEls[nums[idx-1]]; if(p && !p.rendered) renderPage(nums[idx-1]); }
@@ -1288,6 +1332,9 @@ export function setupReaderInteractions(scrollEl){
 
   let zoomGesture = null;
   let zoomFrame = null;
+  let pinchLockUntil = 0;
+  let zoomAnimTimer = null;
+  let pendingZoomCommit = null;
   window.zoomGestureActive = false;
 
   let selGesture = null;
@@ -1296,12 +1343,35 @@ export function setupReaderInteractions(scrollEl){
 
   let lastTouchEndTime = 0;
 
+  const rubberBandZoom = (raw) => {
+    if (window.State.zoomBounceMode === 'hard') {
+      return Math.min(MAX_READER_ZOOM, Math.max(0.5, raw));
+    }
+    if (raw < 0.5) return Math.max(0.32, 0.5 - (0.5 - raw) * 0.28);
+    if (raw > MAX_READER_ZOOM) return MAX_READER_ZOOM + Math.min(2.4, (raw - MAX_READER_ZOOM) * 0.22);
+    return raw;
+  };
+
+  function cancelActiveZoomAnim(flush = false) {
+    if (zoomAnimTimer) {
+      clearTimeout(zoomAnimTimer);
+      zoomAnimTimer = null;
+      const fn = pendingZoomCommit;
+      pendingZoomCommit = null;
+      const c = window.currentPageContainer;
+      if (c) { c.style.transition = ''; c.style.transform = ''; c.style.transformOrigin = ''; }
+      window.zoomGestureActive = false;
+      if (flush && typeof fn === 'function') fn();
+    }
+  }
+
   scrollEl.addEventListener('touchstart', (e)=>{
     lastTouchEndTime = Date.now();
     if(e.touches.length===2){
+      cancelActiveZoomAnim(true);
       const t0=e.touches[0], t1=e.touches[1];
       const dist = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
-      if(dist<25){ zoomGesture = null; window.zoomGestureActive = false; return; }
+      if(dist<20){ zoomGesture = null; window.zoomGestureActive = false; return; }
 
       const midX = (t0.clientX+t1.clientX)/2, midY = (t0.clientY+t1.clientY)/2;
       const scrollRect = scrollEl.getBoundingClientRect();
@@ -1333,17 +1403,28 @@ export function setupReaderInteractions(scrollEl){
 
       const container = window.currentPageContainer;
       if (container) {
+        container.style.transition = '';
         const cRect = container.getBoundingClientRect();
         container.style.transformOrigin = `${midX - cRect.left}px ${midY - cRect.top}px`;
       }
 
-      zoomGesture = { startDist: dist, startZoom: window.State.zoom, liveZoom: null, pageNum, fracX, fracY, vpX, vpY };
+      zoomGesture = {
+        startDist: dist,
+        startZoom: window.State.zoom,
+        liveZoom: window.State.zoom,
+        startMidX: midX,
+        startMidY: midY,
+        curMidX: midX,
+        curMidY: midY,
+        pageNum, fracX, fracY, vpX, vpY
+      };
       window.zoomGestureActive = true;
+      pinchLockUntil = Date.now() + 400;
       clearTimeout(longPressTimer);
       selGesture = null;
     } else {
       zoomGesture = null;
-      window.zoomGestureActive = false;
+      if (!zoomAnimTimer) window.zoomGestureActive = false;
       clearTimeout(longPressTimer);
       selGesture = null;
       if(e.touches.length===1){
@@ -1352,10 +1433,9 @@ export function setupReaderInteractions(scrollEl){
       }
       const markupDrawingActive = () => Boolean(window.isMarkupModeActive && window.isMarkupModeActive() && (!window.markupDebug || window.markupDebug.state().activeTool !== 'none'));
       const textLayerEl = e.target.closest && e.target.closest('.textLayer');
-      if(e.touches.length===1 && textLayerEl && !window.State.disableTextSelection && !markupDrawingActive()){
-        const t = e.touches[0];
+      if(e.touches.length===1 && textLayerEl && !window.State.disableTextSelection && !markupDrawingActive() && Date.now() > pinchLockUntil){
         longPressTimer = setTimeout(()=>{
-          if(window.State.disableTextSelection || markupDrawingActive()) return;
+          if(window.State.disableTextSelection || markupDrawingActive() || window.zoomGestureActive) return;
           const pageWrap = textLayerEl.closest('.page-wrap');
           if(!pageWrap) return;
           const pageNum = Number(pageWrap.dataset.page);
@@ -1394,12 +1474,24 @@ export function setupReaderInteractions(scrollEl){
     e.preventDefault();
     const t0=e.touches[0], t1=e.touches[1];
     const dist = Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY);
-    zoomGesture.liveZoom = Math.min(MAX_READER_ZOOM, Math.max(0.5, zoomGesture.startZoom * (dist/zoomGesture.startDist)));
+    const curMidX = (t0.clientX + t1.clientX) / 2;
+    const curMidY = (t0.clientY + t1.clientY) / 2;
+    const rawZoom = zoomGesture.startZoom * (dist / zoomGesture.startDist);
+    zoomGesture.liveZoom = rubberBandZoom(rawZoom);
+    zoomGesture.curMidX = curMidX;
+    zoomGesture.curMidY = curMidY;
+    const scrollRect = scrollEl.getBoundingClientRect();
+    zoomGesture.vpX = curMidX - scrollRect.left;
+    zoomGesture.vpY = curMidY - scrollRect.top;
+    pinchLockUntil = Date.now() + 280;
     if(zoomFrame) return;
     zoomFrame = requestAnimationFrame(()=>{
       zoomFrame = null;
       if(window.currentPageContainer && zoomGesture){
-        window.currentPageContainer.style.transform = `scale(${zoomGesture.liveZoom/zoomGesture.startZoom})`;
+        const dx = zoomGesture.curMidX - zoomGesture.startMidX;
+        const dy = zoomGesture.curMidY - zoomGesture.startMidY;
+        const sc = zoomGesture.liveZoom / zoomGesture.startZoom;
+        window.currentPageContainer.style.transform = `translate3d(${dx.toFixed(2)}px, ${dy.toFixed(2)}px, 0) scale(${sc.toFixed(4)})`;
       }
     });
   }, {passive:false});
@@ -1409,20 +1501,51 @@ export function setupReaderInteractions(scrollEl){
     const g = zoomGesture;
     zoomGesture = null;
     window.zoomGestureActive = false;
+    pinchLockUntil = Date.now() + 280;
+    lastTapTime = 0;
     if(zoomFrame){ cancelAnimationFrame(zoomFrame); zoomFrame = null; }
     const container = window.currentPageContainer;
+    const rawReleased = g.liveZoom || g.startZoom;
+    const clampedZoom = Math.min(MAX_READER_ZOOM, Math.max(0.5, rawReleased));
+    const finalZoom = (clampedZoom > 0.94 && clampedZoom < 1.06 && Math.abs(g.startZoom - 1.0) > 0.08) ? 1.0 : clampedZoom;
+    const movedMid = Math.hypot((g.curMidX || g.startMidX) - g.startMidX, (g.curMidY || g.startMidY) - g.startMidY);
+    const overBound = (window.State.zoomBounceMode !== 'hard') && (rawReleased > MAX_READER_ZOOM + 0.02 || rawReleased < 0.48);
+    const reduceMotion = Boolean(window.State.liteMotion || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches));
+
+    if (overBound && !reduceMotion && container) {
+      const dx = (g.curMidX || g.startMidX) - g.startMidX;
+      const dy = (g.curMidY || g.startMidY) - g.startMidY;
+      const targetScale = finalZoom / g.startZoom;
+      const commitBounce = () => {
+        zoomAnimTimer = null;
+        pendingZoomCommit = null;
+        window.zoomGestureActive = false;
+        container.style.transition = '';
+        container.style.transform = '';
+        container.style.transformOrigin = '';
+        window.State.zoom = finalZoom;
+        updateReaderZoom(g);
+      };
+      pendingZoomCommit = commitBounce;
+      window.zoomGestureActive = true;
+      container.style.transition = 'transform 190ms cubic-bezier(0.22, 1, 0.36, 1)';
+      container.style.transform = `translate3d(${dx.toFixed(2)}px, ${dy.toFixed(2)}px, 0) scale(${targetScale.toFixed(4)})`;
+      zoomAnimTimer = setTimeout(commitBounce, 195);
+      return;
+    }
+
     if(container){
       container.style.transition = '';
       container.style.transform = '';
       container.style.transformOrigin = '';
     }
-    if(!g.liveZoom || Math.abs(g.liveZoom-window.State.zoom)<0.04){
+    if(Math.abs(finalZoom - window.State.zoom) < 0.03 && movedMid < 6){
       if (window.pendingSelection && typeof window.paintPendingOverlay === 'function') {
         window.paintPendingOverlay(window.pendingSelection, true);
       }
       return;
     }
-    window.State.zoom = g.liveZoom;
+    window.State.zoom = finalZoom;
     updateReaderZoom(g);
   }
 
@@ -1478,7 +1601,10 @@ export function setupReaderInteractions(scrollEl){
   }
 
   function toggleFitZoom(viewportX, viewportY){
-    const wasZoomed = window.State.zoom > 1.05;
+    cancelActiveZoomAnim();
+    const startZoom = window.State.zoom || 1;
+    const wasZoomed = startZoom > 1.05;
+    const targetZoom = wasZoomed ? 1.0 : 1.8;
     const scrollRect = scrollEl.getBoundingClientRect();
     const vpX = viewportX - scrollRect.left;
     const vpY = viewportY - scrollRect.top;
@@ -1506,8 +1632,54 @@ export function setupReaderInteractions(scrollEl){
       fracY = Math.max(0, Math.min(1, (viewportY - rect.top) / (rect.height || 1)));
     }
 
-    window.State.zoom = wasZoomed ? 1.0 : 1.8;
-    updateReaderZoom({ pageNum, fracX, fracY, vpX, vpY });
+    const commit = () => {
+      zoomAnimTimer = null;
+      pendingZoomCommit = null;
+      window.zoomGestureActive = false;
+      const container = window.currentPageContainer;
+      if (container) {
+        container.style.transition = '';
+        container.style.transform = '';
+        container.style.transformOrigin = '';
+      }
+      window.State.zoom = targetZoom;
+      updateReaderZoom({ pageNum, fracX, fracY, vpX, vpY });
+    };
+
+    const reduceMotion = Boolean(window.State.liteMotion || (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches));
+    const container = window.currentPageContainer;
+    if (reduceMotion || !container) {
+      commit();
+      return;
+    }
+
+    const ratio = targetZoom / startZoom;
+    const cRect = container.getBoundingClientRect();
+    const originX = (wasZoomed && mode === 'single' && pe && pe.wrap)
+      ? (pe.wrap.getBoundingClientRect().left + pe.wrap.getBoundingClientRect().width / 2) - cRect.left
+      : viewportX - cRect.left;
+    const originY = (wasZoomed && mode === 'single' && pe && pe.wrap)
+      ? (pe.wrap.getBoundingClientRect().top + pe.wrap.getBoundingClientRect().height / 2) - cRect.top
+      : viewportY - cRect.top;
+
+    let tx = 0, ty = 0;
+    if (wasZoomed && mode === 'single' && pe && pe.wrap) {
+      const wr = pe.wrap.getBoundingClientRect();
+      const srCx = scrollRect.left + scrollRect.width / 2;
+      const srCy = scrollRect.top + scrollRect.height / 2;
+      tx = srCx - (wr.left + wr.width / 2);
+      ty = srCy - (wr.top + wr.height / 2);
+    }
+
+    pendingZoomCommit = commit;
+    window.zoomGestureActive = true;
+    container.style.transition = 'none';
+    container.style.transformOrigin = `${originX}px ${originY}px`;
+    container.style.transform = 'translate3d(0,0,0) scale(1)';
+    void container.offsetWidth;
+    container.style.transition = 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)';
+    container.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${ratio.toFixed(4)})`;
+    zoomAnimTimer = setTimeout(commit, 205);
   }
 
   let singleTapTimer = null;
@@ -1554,7 +1726,66 @@ export function setupReaderInteractions(scrollEl){
   });
 
   let lastWheelTime = 0;
+  let wheelZoomSession = null;
+  let wheelZoomCommitTimer = null;
   scrollEl.addEventListener('wheel', (e) => {
+    // Trackpad pinch / Ctrl+Wheel smooth precision zoom
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      cancelActiveZoomAnim();
+      const scrollRect = scrollEl.getBoundingClientRect();
+      if (!wheelZoomSession) {
+        const mode = window.State.readingMode;
+        let pageNum = window.State.currentPage;
+        let pe = pageEls[pageNum];
+        if (mode === 'continuous') {
+          for (const [numStr, p] of Object.entries(pageEls)) {
+            if (!p.wrap) continue;
+            const rect = p.wrap.getBoundingClientRect();
+            if (e.clientY >= rect.top && e.clientY <= rect.bottom) { pageNum = Number(numStr); pe = p; break; }
+          }
+        }
+        let fracX = 0.5, fracY = 0.5;
+        if (pe && pe.wrap) {
+          const rect = pe.wrap.getBoundingClientRect();
+          fracX = Math.max(0, Math.min(1, (e.clientX - rect.left) / (rect.width || 1)));
+          fracY = Math.max(0, Math.min(1, (e.clientY - rect.top) / (rect.height || 1)));
+        }
+        const c = window.currentPageContainer;
+        if (c) {
+          c.style.transition = '';
+          const cr = c.getBoundingClientRect();
+          c.style.transformOrigin = `${e.clientX - cr.left}px ${e.clientY - cr.top}px`;
+        }
+        wheelZoomSession = {
+          startZoom: window.State.zoom || 1,
+          liveZoom: window.State.zoom || 1,
+          pageNum, fracX, fracY,
+          vpX: e.clientX - scrollRect.left,
+          vpY: e.clientY - scrollRect.top
+        };
+        window.zoomGestureActive = true;
+      }
+      const nextZoom = Math.min(MAX_READER_ZOOM, Math.max(0.5, wheelZoomSession.liveZoom * Math.exp(-e.deltaY * 0.0045)));
+      wheelZoomSession.liveZoom = nextZoom;
+      if (window.currentPageContainer) {
+        window.currentPageContainer.style.transform = `scale(${(nextZoom / wheelZoomSession.startZoom).toFixed(4)})`;
+      }
+      clearTimeout(wheelZoomCommitTimer);
+      wheelZoomCommitTimer = setTimeout(() => {
+        const sess = wheelZoomSession;
+        wheelZoomSession = null;
+        window.zoomGestureActive = false;
+        const c = window.currentPageContainer;
+        if (c) { c.style.transition = ''; c.style.transform = ''; c.style.transformOrigin = ''; }
+        if (sess && Math.abs(sess.liveZoom - window.State.zoom) >= 0.01) {
+          window.State.zoom = sess.liveZoom;
+          updateReaderZoom(sess);
+        }
+      }, 95);
+      return;
+    }
+
     if (window.State.readingMode === 'single' && window.State.zoom <= 1.02) {
       const now = Date.now();
       if (now - lastWheelTime < 240) return;
@@ -1564,7 +1795,7 @@ export function setupReaderInteractions(scrollEl){
         turnSinglePage(delta);
       }
     }
-  }, { passive: true });
+  }, { passive: false });
 
   window.onkeydown = (e) => {
     if (!document.getElementById('reader-scroll')) return;
@@ -1597,6 +1828,7 @@ export function setupReaderInteractions(scrollEl){
     const wasSelecting = !!selGesture, wasPinching = window.zoomGestureActive;
     if(e.touches.length===0) finalizeSelectionGesture();
     if(e.touches.length<2) finishZoomGesture();
+    if (wasPinching || Date.now() < pinchLockUntil) return;
     if (window.isMarkupModeActive && window.isMarkupModeActive() && (!window.markupDebug || window.markupDebug.state().activeTool !== 'none')) return;
     if (e.target && e.target.closest && e.target.closest('#markup-toolbar, #mk-fly, #mk-textdlg, #mk-tip')) return;
 
@@ -1669,7 +1901,8 @@ const MAX_CANVAS_PIXELS = { low: 4, mid: 6, high: 8 }[RENDER_TIER] * 1024 * 1024
 // Native sharpness on every phone: budget screens are dpr 2, so nobody is rendered below their screen's resolution.
 // Memory is protected by the pixel cap above, not by blurring normal pages.
 const MAX_DPR = 2.5;
-const MAX_READER_ZOOM = 6;   // tiles keep every zoom level sharp
+const TILE_MAX_DPR = RENDER_TIER === 'low' ? 2.5 : 3.5; // viewport-only tiles render at full phone OLED DPR cleanly
+const MAX_READER_ZOOM = 12;  // 1200% max zoom — tiles keep every zoom level sharp & memory safe
 window.RENDER_TIER = RENDER_TIER;
 let maxParallelRenders = RENDER_TIER === 'low' ? 1 : 2;   // slow phones paint one page at a time so scrolling stays smooth
 const slowRenderTimes = [];
@@ -1821,6 +2054,9 @@ export function setupVirtualRender(){
    without ever holding a gigantic bitmap in memory. Firefox's viewer does the same.
    ============================================================ */
 let tileTimer = null;
+let tilesBusy = false;
+let tilesPending = false;
+let lastTileScrollRun = 0;
 function clearTile(pe){
   if(!pe) return;
   pe._tileToken = (pe._tileToken || 0) + 1;
@@ -1832,22 +2068,29 @@ function clearTile(pe){
   }
   pe._tileRect = null;
 }
-export function scheduleTiles(delay = 140){
+export function scheduleTiles(delay = 100){
   clearTimeout(tileTimer);
   tileTimer = setTimeout(refreshTiles, delay);
 }
 async function refreshTiles(){
-  if(window.zoomGestureActive){ scheduleTiles(220); return; }
+  if(window.zoomGestureActive){ scheduleTiles(180); return; }
+  if(tilesBusy){ tilesPending = true; return; }
   const scrollEl = document.getElementById('reader-scroll');
   if(!scrollEl) return;
-  const sr = scrollEl.getBoundingClientRect();
-  for(const pe of Object.values(pageEls)){
-    if(!pe || !pe.wrap || !pe.nativeVp) continue;
-    const wr = pe.wrap.getBoundingClientRect();
-    const visible = wr.width > 0 && wr.bottom > sr.top && wr.top < sr.bottom && wr.right > sr.left && wr.left < sr.right;
-    const capped = pe.rendered && pe.canvas && pe._baseScale && pe._wantScale && pe._baseScale < pe._wantScale * 0.92;
-    if(!visible || !capped){ if(pe.tile || pe._tileTask) clearTile(pe); continue; }
-    try { await renderTile(pe, sr, wr); } catch(e){ /* a failed tile just leaves the base bitmap */ }
+  tilesBusy = true;
+  try {
+    const sr = scrollEl.getBoundingClientRect();
+    for(const pe of Object.values(pageEls)){
+      if(!pe || !pe.wrap || !pe.nativeVp) continue;
+      const wr = pe.wrap.getBoundingClientRect();
+      const visible = wr.width > 0 && wr.bottom > sr.top && wr.top < sr.bottom && wr.right > sr.left && wr.left < sr.right;
+      const capped = pe.rendered && pe.canvas && pe._baseScale && pe._wantScale && pe._baseScale < pe._wantScale * 0.92;
+      if(!visible || !capped){ if(pe.tile || pe._tileTask) clearTile(pe); continue; }
+      try { await renderTile(pe, sr, wr); } catch(e){ /* a failed tile just leaves the base bitmap */ }
+    }
+  } finally {
+    tilesBusy = false;
+    if(tilesPending){ tilesPending = false; scheduleTiles(30); }
   }
 }
 async function renderTile(pe, sr, wr){
@@ -1860,11 +2103,12 @@ async function renderTile(pe, sr, wr){
     x1: Math.min(cssW, (sr.right - wr.left) / k), y1: Math.min(cssH, (sr.bottom - wr.top) / k)
   };
   if(vis.x1 - vis.x0 < 8 || vis.y1 - vis.y0 < 8) return;
-  const dpr = Math.min(window.devicePixelRatio || 2, MAX_DPR);
-  // d = device pixels per CSS pixel for the tile. Keep as much margin around the screen as the pixel budget allows;
-  // if even the visible part is over budget, lower the sharpness a little.
+  const dpr = Math.min(window.devicePixelRatio || 2, TILE_MAX_DPR);
+  // d = device pixels per CSS pixel for the tile. Keep generous overscan margin around the screen as budget allows;
+  // if even the visible part is over budget, lower sharpness safely.
+  const pads = RENDER_TIER === 'low' ? [0.25, 0.12, 0] : [0.45, 0.25, 0.1, 0];
   let r = vis, d = dpr;
-  for(const pad of [0.35, 0.2, 0.08, 0]){
+  for(const pad of pads){
     const px = (vis.x1 - vis.x0) * pad, py = (vis.y1 - vis.y0) * pad;
     r = { x0: Math.max(0, vis.x0 - px), y0: Math.max(0, vis.y0 - py), x1: Math.min(cssW, vis.x1 + px), y1: Math.min(cssH, vis.y1 + py) };
     d = dpr;
@@ -1873,10 +2117,10 @@ async function renderTile(pe, sr, wr){
     if(pad === 0) d = dpr * Math.sqrt(MAX_CANVAS_PIXELS / area);
   }
   const s = d * pe.scale;                                 // PDF units -> tile pixels
-  if(s < pe._baseScale * 1.15) return;                  // not noticeably sharper than what is already there
+  if(s < pe._baseScale * 1.12) return;                    // not noticeably sharper than what is already there
   const t = pe._tileRect;
-  if(t && t.pageScale === pe.scale && Math.abs(t.d - d) / d < 0.03 &&
-     t.x0 <= vis.x0 + 2 && t.y0 <= vis.y0 + 2 && t.x1 >= vis.x1 - 2 && t.y1 >= vis.y1 - 2) return;   // current tile still covers the screen
+  if(t && t.pdfScale && Math.abs(t.pdfScale - s) / s < 0.03 &&
+     t.x0 <= vis.x0 + 2 && t.y0 <= vis.y0 + 2 && t.x1 >= vis.x1 - 2 && t.y1 >= vis.y1 - 2) return;   // current tile still covers the screen with matching sharpness
 
   const token = ++pe._tileToken;
   if(pe._tileTask){ try { pe._tileTask.cancel(); } catch(e){} pe._tileTask = null; }
@@ -1884,9 +2128,14 @@ async function renderTile(pe, sr, wr){
   cv.width = Math.max(1, Math.ceil((r.x1 - r.x0) * d));
   cv.height = Math.max(1, Math.ceil((r.y1 - r.y0) * d));
   cv.className = 'page-tile';
-  cv.style.cssText = `position:absolute;left:${r.x0}px;top:${r.y0}px;width:${cv.width / d}px;height:${cv.height / d}px;pointer-events:none;`;
-  const ctx = cv.getContext('2d');
+  const cssTileW = cv.width / d, cssTileH = cv.height / d;
+  cv.style.cssText = `position:absolute;left:${r.x0}px;top:${r.y0}px;width:${cssTileW}px;height:${cssTileH}px;pointer-events:none;`;
+  const ctx = cv.getContext('2d', { alpha: false }) || cv.getContext('2d');
   if(!ctx) return;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   const vp = page.getViewport({ scale: s, offsetX: -r.x0 * d, offsetY: -r.y0 * d });
   const task = page.render({ canvasContext: ctx, viewport: vp });
   pe._tileTask = task;
@@ -1897,12 +2146,19 @@ async function renderTile(pe, sr, wr){
   const old = pe.tile;
   pe.canvas.after(cv);
   pe.tile = cv;
-  pe._tileRect = { x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1, d, pageScale: pe.scale };
+  pe._tileRect = { x0: r.x0, y0: r.y0, x1: r.x0 + cssTileW, y1: r.y0 + cssTileH, d, pdfScale: s, pageScale: pe.scale };
   if(old){ try { old.width = 0; old.height = 0; } catch(_){} old.remove(); }
 }
-// Scrolling the zoomed page asks for fresh tiles once it settles (scroll events do not bubble, so listen in the capture phase).
+// Progressive + trailing tile refresh so scrolling while zoomed stays sharp even during long drags
 document.addEventListener('scroll', (e) => {
-  if(e.target && e.target.id === 'reader-scroll') scheduleTiles(140);
+  if(e.target && e.target.id === 'reader-scroll'){
+    const now = performance.now();
+    if(now - lastTileScrollRun > 240 && !window.zoomGestureActive){
+      lastTileScrollRun = now;
+      refreshTiles();
+    }
+    scheduleTiles(95);
+  }
 }, { capture: true, passive: true });
 
 export async function renderPage(num){
@@ -1938,7 +2194,7 @@ async function renderPageNow(num, pe, token){
       renderViewport = page.getViewport({ scale: pe.scale * dpr * Math.sqrt(MAX_CANVAS_PIXELS / pixels) });
     }
     pe._baseScale = renderViewport.scale;   // what the full-page bitmap really has
-    pe._wantScale = pe.scale * dpr;          // what the screen could show; the gap is filled by sharp tiles
+    pe._wantScale = pe.scale * Math.min(window.devicePixelRatio || 2, TILE_MAX_DPR); // viewport tiles render at native screen DPR
 
     canvas = document.createElement('canvas');
     canvas.width = Math.floor(renderViewport.width);
@@ -1947,13 +2203,17 @@ async function renderPageNow(num, pe, token){
     canvas.style.height = viewport.height + 'px';
     canvas.style.display = 'block';
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: false }) || canvas.getContext('2d');
     if (!ctx) {
       console.warn(`Could not acquire 2d context for page ${num}`);
       pe.rendering = false;
       pe._renderPromise = null;
       return;
     }
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     // Fetch the text while the bitmap paints so the two overlap instead of queueing.
     const textPromise = page.getTextContent();
@@ -2353,7 +2613,7 @@ export async function openReaderMenu(){
       <button class="btn btn-icon" id="zoom-step-in" style="width:36px; height:36px;">${window.icon('zoomIn','icon icon-sm')}</button>
     </div>
     <div style="display:flex; gap:6px; margin-top:8px;">
-      ${[100,150,200,300,400,600].map(p=>`<button class="chip zoom-preset" data-zoom="${p}" style="flex:1; text-align:center; ${Math.round(window.State.zoom*100)===p?'background:var(--accent-soft); color:var(--accent); border-color:var(--accent);':''}">${p}%</button>`).join('')}
+      ${[100,150,200,400,800,1200].map(p=>`<button class="chip zoom-preset" data-zoom="${p}" style="flex:1; text-align:center; ${Math.round(window.State.zoom*100)===p?'background:var(--accent-soft); color:var(--accent); border-color:var(--accent);':''}">${p}%</button>`).join('')}
     </div>
     <div style="display:flex; gap:8px; margin-top:10px;">
       <button class="btn" data-fit="width" style="flex:1; padding:11px; background:${window.State.fitMode==='width'?'var(--accent-soft)':'var(--surface-2)'}; color:${window.State.fitMode==='width'?'var(--accent)':'var(--text)'}; border:1px solid ${window.State.fitMode==='width'?'var(--accent)':'var(--border)'};">${window.icon('list','icon icon-sm')} Fit width</button>
@@ -2385,8 +2645,8 @@ export async function openReaderMenu(){
     });
     updateReaderZoom(true);
   }
-  document.getElementById('zoom-step-out').onclick = ()=>applyZoom(window.State.zoom-(window.State.zoom>2.5?0.5:0.1));
-  document.getElementById('zoom-step-in').onclick = ()=>applyZoom(window.State.zoom+(window.State.zoom>=2.5?0.5:0.1));
+  document.getElementById('zoom-step-out').onclick = ()=>applyZoom(window.State.zoom-(window.State.zoom>6?1.0:(window.State.zoom>2.5?0.5:0.1)));
+  document.getElementById('zoom-step-in').onclick = ()=>applyZoom(window.State.zoom+(window.State.zoom>=6?1.0:(window.State.zoom>=2.5?0.5:0.1)));
   document.querySelectorAll('.zoom-preset').forEach(chip=>{
     chip.onclick = ()=>applyZoom(Number(chip.dataset.zoom)/100);
   });
