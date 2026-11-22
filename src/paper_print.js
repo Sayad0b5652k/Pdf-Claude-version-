@@ -216,13 +216,6 @@ export function buildPrintDocument(rec, o = {}) {
 ${o.fontCss || ''}
 <style>@page{size:A4;margin:16mm 14mm 16mm}*{box-sizing:border-box}html,body{margin:0;background:#fff}body{padding:0}${PAPER_CSS}
 @media print{.pp-tools,.pp-ver{display:none!important}}</style>
-<script>
-window.addEventListener('load', function() {
-  setTimeout(function() {
-    try { window.print(); } catch (e) {}
-  }, 400);
-});
-</script>
 </head><body class="pp-sheet">${parts.join('')}</body></html>`;
 }
 
@@ -243,37 +236,38 @@ function collectPaperFontCss() {
 export async function printPaper(rec, o = {}) {
   const html = buildPrintDocument(rec, { ...o, baseHref: location.origin + '/', fontCss: collectPaperFontCss() });
 
-  // 1. Trigger reliable direct file download (works in all browser sandboxes/iFrames)
-  const safeTitle = `${rec.title || rec.subject || 'Question_Paper'}`.replace(/[/\\?%*:|"<>]/g, '_').trim();
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${safeTitle}.html`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
-
-  // 2. Also attempt in-app print via hidden iframe if supported by environment
-  try {
-    const frame = document.createElement('iframe');
-    frame.setAttribute('aria-hidden', 'true');
-    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none';
-    document.body.appendChild(frame);
-    const cleanup = () => setTimeout(() => { try { frame.remove(); } catch (e) {} }, 1500);
-    await new Promise((resolve) => { frame.onload = resolve; frame.srcdoc = html; });
-    const w = frame.contentWindow;
-    if (w) {
-      try { await Promise.race([w.document.fonts?.ready, new Promise((r) => setTimeout(r, 2000))]); } catch (e) {}
-      w.onafterprint = cleanup;
-      w.focus();
-      w.print();
-      setTimeout(cleanup, 120000);
-    }
-  } catch (e) {
-    // Expected in sandboxed iframe without allow-modals; download above guarantees delivery
+  // Normal path: print through a hidden iframe so the user can "Save as PDF".
+  let printed = false;
+  const inFrame = (() => { try { return window.self !== window.top; } catch (e) { return true; } })();
+  if (!inFrame) {
+    try {
+      const frame = document.createElement('iframe');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none';
+      document.body.appendChild(frame);
+      const cleanup = () => setTimeout(() => { try { frame.remove(); } catch (e) {} }, 1500);
+      await new Promise((resolve) => { frame.onload = resolve; frame.srcdoc = html; });
+      const w = frame.contentWindow;
+      if (w) {
+        try { await Promise.race([w.document.fonts?.ready, new Promise((r) => setTimeout(r, 2500))]); } catch (e) {}
+        w.onafterprint = cleanup;
+        w.focus();
+        w.print();
+        setTimeout(cleanup, 120000);
+        printed = true;
+      }
+    } catch (e) { /* fall through to download */ }
   }
+  if (printed) return true;
 
-  return true;
+  // Fallback (sandboxed preview frames block print): download a self-printing HTML file instead.
+  const safeTitle = `${rec.title || rec.subject || 'Question_Paper'}`.replace(/[/\\?%*:|"<>]/g, '_').trim();
+  const auto = '<script>window.addEventListener("load",function(){setTimeout(function(){try{window.print()}catch(e){}},400)})</script>';
+  const doc = html.includes('</body>') ? html.replace('</body>', auto + '</body>') : html + auto;
+  const url = URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = `${safeTitle}.html`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return false;
 }
