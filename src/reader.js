@@ -1153,8 +1153,8 @@ export async function mountReaderContent(){
   scrollEl.classList.toggle('zoomed', mode==='single' && window.State.zoom > 1.02);
   const container = document.createElement('div');
   container.style.cssText = mode==='single'
-    ? 'position:relative; width:100%; height:100%; min-height:100%; display:flex; align-items:center; justify-content:center;'
-    : 'min-height:100%;';
+    ? 'position:relative; width:100%; height:100%; min-height:100%; display:flex; align-items:center; justify-content:center; will-change:transform;'
+    : 'min-height:100%; will-change:transform;';
   scrollEl.appendChild(container);
   window.currentPageContainer = container;
 
@@ -1352,7 +1352,6 @@ export function setupReaderInteractions(scrollEl){
       if (container) {
         const cRect = container.getBoundingClientRect();
         container.style.transformOrigin = `${midX - cRect.left}px ${midY - cRect.top}px`;
-        container.style.willChange = 'transform';   // promoted to a GPU layer only while pinching
       }
 
       zoomGesture = { startDist: dist, startZoom: window.State.zoom, liveZoom: null, pageNum, fracX, fracY, vpX, vpY };
@@ -1433,7 +1432,6 @@ export function setupReaderInteractions(scrollEl){
       container.style.transition = '';
       container.style.transform = '';
       container.style.transformOrigin = '';
-      container.style.willChange = '';
     }
     if(!g.liveZoom || Math.abs(g.liveZoom-window.State.zoom)<0.04){
       if (window.pendingSelection && typeof window.paintPendingOverlay === 'function') {
@@ -1688,7 +1686,6 @@ const MAX_CANVAS_PIXELS = { low: 4, mid: 6, high: 8 }[RENDER_TIER] * 1024 * 1024
 // Native sharpness on every phone: budget screens are dpr 2, so nobody is rendered below their screen's resolution.
 // Memory is protected by the pixel cap above, not by blurring normal pages.
 const MAX_DPR = 2.5;
-const TILE_MAX_PIXELS = { low: 2, mid: 3, high: 4 }[RENDER_TIER] * 1024 * 1024;   // a sharp tile only covers the screen, keep it cheap
 const MAX_READER_ZOOM = 6;   // tiles keep every zoom level sharp
 window.RENDER_TIER = RENDER_TIER;
 let maxParallelRenders = RENDER_TIER === 'low' ? 1 : 2;   // slow phones paint one page at a time so scrolling stays smooth
@@ -1884,13 +1881,13 @@ async function renderTile(pe, sr, wr){
   // d = device pixels per CSS pixel for the tile. Keep as much margin around the screen as the pixel budget allows;
   // if even the visible part is over budget, lower the sharpness a little.
   let r = vis, d = dpr;
-  for(const pad of [0.2, 0.1, 0]){
+  for(const pad of [0.35, 0.2, 0.08, 0]){
     const px = (vis.x1 - vis.x0) * pad, py = (vis.y1 - vis.y0) * pad;
     r = { x0: Math.max(0, vis.x0 - px), y0: Math.max(0, vis.y0 - py), x1: Math.min(cssW, vis.x1 + px), y1: Math.min(cssH, vis.y1 + py) };
     d = dpr;
     const area = (r.x1 - r.x0) * (r.y1 - r.y0) * d * d;
-    if(area <= TILE_MAX_PIXELS) break;
-    if(pad === 0) d = dpr * Math.sqrt(TILE_MAX_PIXELS / area);   // big scans: a slightly softer tile paints 2-3x faster
+    if(area <= MAX_CANVAS_PIXELS) break;
+    if(pad === 0) d = dpr * Math.sqrt(MAX_CANVAS_PIXELS / area);
   }
   const s = d * pe.scale;                                 // PDF units -> tile pixels
   if(s < pe._baseScale * 1.15) return;                  // not noticeably sharper than what is already there
