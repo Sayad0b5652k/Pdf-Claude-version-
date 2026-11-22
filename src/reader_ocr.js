@@ -136,27 +136,59 @@ export function showOCRResult(pageNum, text){
 
 // ---------- One-tap batch scan: reads many scanned pages in a row, in the background ----------
 let batch = null;
+let prevBatchTail = Promise.resolve();
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const fmtEta = (sec) => sec < 60 ? Math.max(5, Math.round(sec / 5) * 5) + ' sec' : Math.round(sec / 60) + ' min';
+
+function dismissPillEl() {
+  const e = document.getElementById('ocr-batch-pill');
+  if (e) e.remove();
+}
+
+function stopActiveBatch() {
+  const b = batch;
+  if (!b) { dismissPillEl(); return; }
+  b.cancel = true;
+  batch = null;
+  dismissPillEl();
+  try { b.lock && b.lock.release(); b.lock = null; } catch (e) {}
+  if (!b.stopNotified) {
+    b.stopNotified = true;
+    window.toast(b.done > 0 ? `${b.done} pages scan hue, baaki ruk gaye` : 'Scan ruk gaya');
+  }
+}
 
 function pillEl() {
   let el = document.getElementById('ocr-batch-pill');
   if (!el) {
     el = document.createElement('div'); el.id = 'ocr-batch-pill';
-    el.innerHTML = `<div class="obp-bar"><i></i></div><span class="obp-t"></span><button type="button" id="obp-pause" aria-label="Pause">⏸</button><button type="button" id="obp-stop" aria-label="Stop">✕</button>`;
+    el.innerHTML = `<div class="obp-bar"><i></i></div><span class="obp-t"></span><button type="button" id="obp-pause" aria-label="Pause" title="Pause / Resume">⏸</button><button type="button" id="obp-stop" aria-label="Stop" title="Stop scan">✕</button>`;
     document.body.appendChild(el);
-    el.querySelector('#obp-pause').onclick = () => { if (!batch) return; batch.paused = !batch.paused; paintPill(); };
-    el.querySelector('#obp-stop').onclick = () => { if (batch) batch.cancel = true; };
+    const stopProp = (ev) => { ev.stopPropagation(); };
+    el.addEventListener('pointerdown', stopProp);
+    el.addEventListener('touchstart', stopProp, { passive: true });
+    el.addEventListener('click', stopProp);
+    el.querySelector('#obp-pause').onclick = (ev) => {
+      ev.stopPropagation();
+      if (!batch || batch.cancel) return;
+      batch.paused = !batch.paused;
+      paintPill();
+    };
+    el.querySelector('#obp-stop').onclick = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      stopActiveBatch();
+    };
   }
   return el;
 }
 function paintPill() {
-  if (!batch) { const e = document.getElementById('ocr-batch-pill'); if (e) e.remove(); return; }
+  if (!batch || batch.cancel) { dismissPillEl(); return; }
   const el = pillEl(), pct = batch.total ? (batch.done / batch.total) * 100 : 0;
   el.querySelector('.obp-bar i').style.width = pct.toFixed(1) + '%';
   let eta = '';
   if (batch.done >= 1 && !batch.paused) { const per = (Date.now() - batch.t0) / batch.done; eta = ' · ~' + fmtEta(per * (batch.total - batch.done) / 1000); }
-  el.querySelector('.obp-t').textContent = batch.paused ? `Paused ${batch.done}/${batch.total}` : `Scanning ${batch.done}/${batch.total}${eta}`;
+  el.querySelector('.obp-t').textContent = batch.paused ? `Paused ${batch.done}/${batch.total}` : (batch.waiting ? 'Preparing OCR…' : `Scanning ${batch.done}/${batch.total}${eta}`);
   el.querySelector('#obp-pause').textContent = batch.paused ? '▶' : '⏸';
 }
 
@@ -182,30 +214,55 @@ async function ocrPageToCache(doc, p, fid, worker) {
 }
 
 async function runBatch(list, doc, fid) {
-  batch = { cancel: false, paused: false, done: 0, failed: 0, total: list.length, t0: Date.now() };
+  const myBatch = { cancel: false, paused: false, waiting: true, stopNotified: false, done: 0, failed: 0, total: list.length, t0: Date.now(), lock: null };
+  batch = myBatch;
   paintPill();
-  let lock = null; try { lock = navigator.wakeLock && await navigator.wakeLock.request('screen'); } catch (e) {}
+
+  let resolveTail;
+  const tailPromise = new Promise((res) => { resolveTail = res; });
+  const prior = prevBatchTail;
+  prevBatchTail = tailPromise;
+
   try {
+    try { await prior; } catch (e) {}
+    if (myBatch.cancel || batch !== myBatch || !window.State.currentFile || window.State.currentFile.id !== fid) return;
+
+    try { myBatch.lock = navigator.wakeLock && await navigator.wakeLock.request('screen'); } catch (e) {}
+    if (myBatch.cancel || batch !== myBatch) return;
+
     const worker = await getTesseractWorker();
+    if (myBatch.cancel || batch !== myBatch || !window.State.currentFile || window.State.currentFile.id !== fid) return;
+
+    myBatch.waiting = false;
+    myBatch.t0 = Date.now();
+    paintPill();
+
     for (const p of list) {
-      while (batch.paused && !batch.cancel) await sleep(300);
-      if (batch.cancel || !window.State.currentFile || window.State.currentFile.id !== fid) break;
-      try { await ocrPageToCache(doc, p, fid, worker); } catch (e) { batch.failed++; console.warn('Batch OCR page failed', p, e); }
-      batch.done++; paintPill();
+      while (myBatch.paused && !myBatch.cancel) await sleep(250);
+      if (myBatch.cancel || batch !== myBatch || !window.State.currentFile || window.State.currentFile.id !== fid) break;
+      try { await ocrPageToCache(doc, p, fid, worker); } catch (e) { if (!myBatch.cancel) { myBatch.failed++; console.warn('Batch OCR page failed', p, e); } }
+      if (myBatch.cancel || batch !== myBatch || !window.State.currentFile || window.State.currentFile.id !== fid) break;
+      myBatch.done++; paintPill();
       await sleep(30);
     }
   } catch (e) {
-    window.toast('OCR shuru nahi ho paaya — pehli baar internet chahiye (language data)');
+    if (!myBatch.cancel) {
+      window.toast('OCR shuru nahi ho paaya — pehli baar internet chahiye (language data)');
+    }
+  } finally {
+    if (batch === myBatch) { batch = null; dismissPillEl(); }
+    try { myBatch.lock && myBatch.lock.release(); myBatch.lock = null; } catch (e) {}
+    if (!myBatch.cancel && myBatch.done && !myBatch.stopNotified) {
+      window.toast(`${myBatch.done - myBatch.failed} pages ready — select, highlight aur search ab chalega`);
+    }
+    resolveTail();
   }
-  const b = batch; batch = null; paintPill();
-  try { lock && lock.release(); } catch (e) {}
-  if (b.done) window.toast(b.cancel ? `${b.done} pages scan hue, baaki ruk gaye` : `${b.done - b.failed} pages ready — select, highlight aur search ab chalega`);
 }
 
 export async function openOcrBatch(startPage) {
   const doc = window.State.currentDoc, file = window.State.currentFile;
   if (!doc || !file) return;
-  if (batch) { window.toast('Scan pehle se chal raha hai'); return; }
+  if (batch && !batch.cancel) { window.toast('Scan pehle se chal raha hai'); return; }
   const fid = file.id, n = doc.numPages;
   window.Sheet.open(`<div id="ocrb-body" style="padding:6px 2px 14px;"><div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:6px;">Saare scanned pages</div><div style="font-size:12.5px;color:var(--text-dim);">Scanned pages dhundh raha hu…</div></div>`);
   const todo = [];

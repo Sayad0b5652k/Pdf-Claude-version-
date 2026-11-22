@@ -8585,10 +8585,11 @@ html[data-pro-theme="notebook"] .lk-badge{border:2px solid var(--border);box-sha
 
 
 /* ===== Batch OCR ===== */
-#ocr-batch-pill{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 66px);z-index:9000;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 14px;border-radius:24px;background:var(--surface);border:1.5px solid var(--accent);box-shadow:0 8px 26px rgba(0,0,0,.22);font-size:12px;font-weight:700;color:var(--text);overflow:hidden;max-width:92vw}
-#ocr-batch-pill .obp-bar{position:absolute;left:0;bottom:0;height:3px;width:100%;background:transparent}
+#ocr-batch-pill{position:fixed;left:50%;transform:translateX(-50%);top:calc(env(safe-area-inset-top,0px) + 66px);z-index:10500;display:flex;align-items:center;gap:8px;padding:7px 8px 7px 14px;border-radius:24px;background:var(--surface);border:1.5px solid var(--accent);box-shadow:0 8px 26px rgba(0,0,0,.22);font-size:12px;font-weight:700;color:var(--text);overflow:hidden;max-width:92vw;pointer-events:auto;touch-action:manipulation}
+#ocr-batch-pill .obp-t{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ocr-batch-pill .obp-bar{position:absolute;left:0;bottom:0;height:3px;width:100%;background:transparent;pointer-events:none}
 #ocr-batch-pill .obp-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .4s}
-#ocr-batch-pill button{width:28px;height:28px;border-radius:50%;border:1px solid var(--border);background:var(--surface-2);color:var(--text);cursor:pointer;font-size:12px;line-height:1}
+#ocr-batch-pill button{flex-shrink:0;width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid var(--border);background:var(--surface-2);color:var(--text);cursor:pointer;font-size:13px;line-height:1;touch-action:manipulation}
 .ocrb-opt{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;padding:13px 14px;margin-bottom:8px;border-radius:14px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text);text-align:left}
 .ocrb-opt b{font-size:14px}.ocrb-opt small{font-size:11.5px;color:var(--text-dim)}
 .ocrb-opt:first-of-type{border-color:var(--accent)}

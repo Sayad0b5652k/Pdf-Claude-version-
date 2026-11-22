@@ -136,3 +136,16 @@ Synced and verified up to upstream commit **`5196b2c`** (`Sayad0b5652k/Pdf-Claud
 - **`/api/keys/check` (`AIza`, `AQ.`, `gsk_`, `sk-or-`, unknown)**: `200` across all 5 cases with clear localized rejection/provider errors.
 - **`/api/tts/voices`**: `200`, 18 voices returned.
 
+---
+
+10. **Batch OCR Pill `✕` Stop Fix & Recent Workspace Sync (`src/reader_ocr.js`, `src/index.css`, `src/annot_export.js`, `src/paper_ui.js`)**
+    - **Batch OCR `✕` (`#obp-stop`) Unresponsive/Non-Closing Bug (`src/reader_ocr.js`, `src/index.css`)**:
+      - *Root Cause*: Tapping `✕` on `#ocr-batch-pill` only set `batch.cancel = true` without dismissing the pill from DOM, while `runBatch` stayed blocked inside `await getTesseractWorker()` (first-run language/WASM fetch) or `await ocrPageToCache(...)` (`worker.recognize` taking 5–20s per page). Additionally, `#ocr-batch-pill` sat at `z-index: 9000` without `flex-shrink: 0` / text truncation or `pointerdown`/`touchstart`/`click` `stopPropagation()`, so long ETA strings and reader tap handlers could squeeze or swallow taps on mobile.
+      - *Fix*:
+        - Added `dismissPillEl()` and `stopActiveBatch()` so `✕` (`#obp-stop`) immediately sets `b.cancel = true`, clears `batch = null`, removes `#ocr-batch-pill` from DOM in 0ms, releases `wakeLock`, and shows a single stop toast (`"${done} pages scan hue, baaki ruk gaye"` or `"Scan ruk gaya"`).
+        - Added `prevBatchTail` promise chaining + `myBatch` identity checks before/after `wakeLock`, `getTesseractWorker()`, each page, and `ocrPageToCache()` so canceling and immediately restarting never collides on the shared Tesseract worker (`Preparing OCR…` while draining the in-flight page).
+        - Added `stopPropagation()` for `pointerdown`, `touchstart` (passive), and `click` on `#ocr-batch-pill` and its buttons.
+        - Updated `#ocr-batch-pill` CSS (`z-index: 10500`, `touch-action: manipulation`, `.obp-t` nowrap/ellipsis truncation, `pointer-events: none` on `.obp-bar`, `flex-shrink: 0` 30×30 buttons).
+    - **Workspace Updates Observed (Claude / Direct Workspace Sync)**:
+      - `src/annot_export.js`, `src/reader.js`, `src/seed.js`, `ai-studio-bridge/TASKS.md` (Task #13): Added `stripNativeSayadAnnots(fileId)` (`nativeStripped` flag) to strip duplicate native PDF annotations authored by S.A.Y.A.D. on import / first open while preserving external PDF app annotations.
+      - `src/paper_ui.js`: Updated print/download toast to differentiate direct print (`'Print dialog khul gaya 🖨️'`) vs sandbox `.html` download fallback via `const printed = await printPaper(...)`.
