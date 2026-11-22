@@ -1041,6 +1041,7 @@ export function updateReaderZoom(preserveAnchor = true) {
   }
 
   let runningTop = 14;
+  const softPages = [];
   for (const numStr in pageEls) {
     const pe = pageEls[numStr];
     if (!pe || !pe.wrap) continue;
@@ -1066,6 +1067,17 @@ export function updateReaderZoom(preserveAnchor = true) {
       pe.textLayerDiv.style.width = w + 'px';
       pe.textLayerDiv.style.height = h + 'px';
       pe.textLayerDiv.style.setProperty('--scale-factor', `${newScale}`);
+    }
+
+    // Fast path: a page that is already painted keeps its bitmap, text layer, marks and drawing layer.
+    // The bitmap is just stretched by CSS (the text layer follows --scale-factor, marks use %), and the
+    // sharp-tile system repaints only what is on screen. Rebuilding the whole page on every zoom was the lag.
+    if (pe.rendered && pe.canvas && pe.canvas.parentNode && pe.textLayerDiv && pe.pageProxy && pe._baseScale) {
+      pe._wantScale = newScale * Math.min(window.devicePixelRatio || 2, MAX_DPR);
+      pe.spanRects = null;
+      clearTile(pe);
+      softPages.push(Number(numStr));
+      continue;
     }
 
     // The scale changed: drop any render still running for the old scale (it would commit a
@@ -1112,6 +1124,11 @@ export function updateReaderZoom(preserveAnchor = true) {
   }
   // the drawing canvases are sized for the old zoom: re-fit them now instead of waiting for the next scroll
   try { if (window.scheduleDrawSync) window.scheduleDrawSync(); } catch (e) {}
+  // kept pages: sharpen the visible part, and redraw the px-based overlays (search marks)
+  if (softPages.length) {
+    scheduleTiles(80);
+    for (const n of softPages) { try { window.onPageRendered && window.onPageRendered(n); } catch (e) {} }
+  }
 
   if (window.pendingSelection && typeof window.paintPendingOverlay === 'function') {
     const pNum = window.pendingSelection.pageNum;
