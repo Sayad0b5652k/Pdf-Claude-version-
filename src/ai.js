@@ -33,6 +33,7 @@ import {
   runTTS,
   skipTTSSentence,
   clearTTSHighlights,
+  reapplyTTSHighlight,
   runPageReadAloud,
   preparePageTTSData,
   pauseTTS,
@@ -79,6 +80,7 @@ window.translatePassageAI = translatePassageAI;
 window.runTTS = runTTS;
 window.skipTTSSentence = skipTTSSentence;
 window.clearTTSHighlights = clearTTSHighlights;
+window.reapplyTTSHighlight = reapplyTTSHighlight;
 window.runPageReadAloud = runPageReadAloud;
 window.preparePageTTSData = preparePageTTSData;
 window.pauseTTS = pauseTTS;

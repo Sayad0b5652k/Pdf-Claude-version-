@@ -63,5 +63,11 @@ Fix: on import (and once on first open of older imports) the real duplicates tha
 Test in live preview: highlight + underline a few lines -> Share/Export annotated PDF -> import that PDF again -> open it -> Reject/Delete a highlight and an underline -> go to another page and back, close and reopen the book.
 Expected: deleted marks stay gone, kept marks still show once (not doubled). Also test a PDF annotated in another PDF app: its own marks should still show (we only strip ones with our ids).
 
-## 14. Anything else that looks broken
+## 14. Zoom / theme / double-tap round (Claude)
+a) Reader: start Read Aloud, then pinch-zoom in/out: the yellow word/sentence highlight must stay (it re-attaches after the page re-renders).
+b) Zoom in/out with highlights, underlines and a freehand drawing on the page: they must stay glued to the text, no jump (marks now use % positions; drawing canvas re-fits right after zoom).
+c) Change Day/Night/Sepia from Settings and from the reader's "Reading Themes" sheet: sweep now lasts about 1.2-1.4 s and is smoother (gentler easing). Report if it stutters on a slow phone.
+d) Advanced > Double-Tap Page Action: "AI Explain" was removed (did nothing). New: "Read Aloud" and "Light / Dark Toggle". Old saved value is migrated to Read Aloud.
+
+## 15. Anything else that looks broken
 List it with steps and a screenshot description.

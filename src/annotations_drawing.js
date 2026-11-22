@@ -2251,6 +2251,7 @@ window.ensurePageDrawLayer = ensurePageDrawLayer;
 window.destroyPageDrawLayer = destroyPageDrawLayer;
 window.isMarkupModeActive = isMarkupModeActive;
 window.syncDrawRegion = syncDrawRegion;
+window.scheduleDrawSync = scheduleDrawSync;
 window.markupDebug = {
   state: () => ({ activeTool, activeColor, activeStrokeWidth, ui: { ...ui }, laserFadeMs, snapShapes, focusBand: !!focusBandEl }),
   setTool: (t) => { activeTool = t; afterToolChange(); },

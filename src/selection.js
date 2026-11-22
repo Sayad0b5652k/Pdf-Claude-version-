@@ -956,18 +956,19 @@ export async function paintAnnotations(pageNum){
         const underlineY = rectY + rectH * 0.88;
         const lineThickness = Math.max(1.5, Math.min(2.5, rectH * 0.12));
 
-        mark.style.left = rectX + 'px';
-        mark.style.top = (underlineY - 4) + 'px';
-        mark.style.width = rectW + 'px';
+        // percentages: the mark follows the page instantly when the page is zoomed (px values went stale until a repaint)
+        mark.style.left = (r.x * 100) + '%';
+        mark.style.top = `calc(${(r.y + r.h * 0.88) * 100}% - 4px)`;
+        mark.style.width = (r.w * 100) + '%';
         mark.style.height = (lineThickness + 8) + 'px';
         mark.style.background = 'transparent';
         mark.innerHTML = `<div style="position:absolute; left:0; right:0; top:4px; height:${lineThickness}px; border-radius:1px; background:${a.color}; opacity:0.95; pointer-events:none;"></div>`;
       }else{
         mark.className = 'marker-mark';
-        mark.style.left = rectX + 'px';
-        mark.style.top = rectY + 'px';
-        mark.style.width = rectW + 'px';
-        mark.style.height = rectH + 'px';
+        mark.style.left = (r.x * 100) + '%';
+        mark.style.top = (r.y * 100) + '%';
+        mark.style.width = (r.w * 100) + '%';
+        mark.style.height = (r.h * 100) + '%';
         mark.style.background = a.color;
         mark.style.mixBlendMode = 'multiply';
         mark.style.opacity = '0.38';

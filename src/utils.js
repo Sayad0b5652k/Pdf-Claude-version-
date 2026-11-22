@@ -1354,8 +1354,8 @@ window.themeTransition = function themeTransition(apply, originEl, kind) {
     catch (e) { return '#d9560f'; }
   })();
 
-  const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
-  const CRISP = 'cubic-bezier(0.16, 1, 0.3, 1)';
+  const EASE = 'cubic-bezier(0.45, 0.05, 0.2, 1)';
+  const CRISP = 'cubic-bezier(0.4, 0, 0.2, 1)';
   const SPRING = 'cubic-bezier(0.34, 1.56, 0.64, 1)';
 
   const fx = document.createElement('div');
@@ -1555,7 +1555,7 @@ window.themeTransition = function themeTransition(apply, originEl, kind) {
 
   // Fallback when View Transitions API is unavailable: still play the signature overlay over a crisp fade
   if (typeof document.startViewTransition !== 'function') {
-    const dur = 520;
+    const dur = 1000;
     document.body.appendChild(fx);
     const tint = kind === 'dark' ? 'rgba(10,15,24,0.28)' : kind === 'sepia' ? 'rgba(218,194,154,0.3)' : 'rgba(255,250,240,0.28)';
     const veil = el(`inset:0;background:${tint};`);
@@ -1604,13 +1604,14 @@ window.themeTransition = function themeTransition(apply, originEl, kind) {
       newFrames = { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${Math.hypot(W, H)}px at ${x}px ${y}px)`] };
     }
 
+    dur = Math.round(dur * 1.8);   // slower, so the change reads as a smooth ~1.2s sweep instead of a snap
     run(root, oldFrames, { duration: dur, easing, pseudoElement: '::view-transition-old(root)' });
     run(root, newFrames, { duration: dur, easing, pseudoElement: '::view-transition-new(root)' });
     buildSignatureOverlay(dur);
   }).catch(() => { clean(false); });
 
   vt.finished.then(() => clean(false), () => clean(false));
-  setTimeout(() => clean(false), 1800);
+  setTimeout(() => clean(false), 2800);
 };
 
 window.Modal = Sheet; // Safety alias for modals and bottom sheets

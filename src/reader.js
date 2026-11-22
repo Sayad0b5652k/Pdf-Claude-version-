@@ -1110,6 +1110,8 @@ export function updateReaderZoom(preserveAnchor = true) {
   if (anchor) {
     restoreScrollAnchorPoint(anchor);
   }
+  // the drawing canvases are sized for the old zoom: re-fit them now instead of waiting for the next scroll
+  try { if (window.scheduleDrawSync) window.scheduleDrawSync(); } catch (e) {}
 
   if (window.pendingSelection && typeof window.paintPendingOverlay === 'function') {
     const pNum = window.pendingSelection.pageNum;
@@ -1450,6 +1452,24 @@ export function setupReaderInteractions(scrollEl){
       const nextFocus = !window.State.isFocusMode;
       toggleFocusMode(nextFocus);
       window.toast(nextFocus ? 'Zen Immersive Mode enabled' : 'Zen Immersive Mode disabled');
+      return;
+    }
+
+    if (action === 'tts' || action === 'ai_summary') {
+      if (typeof window.toggleReadAloud === 'function') window.toggleReadAloud();
+      return;
+    }
+
+    if (action === 'theme') {
+      const next = window.State.theme === 'dark' ? 'light' : 'dark';
+      window.State.theme = next;
+      window.State.autoTheme = false;
+      window.themeTransition(() => {
+        document.documentElement.dataset.theme = next;
+        if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
+      }, null, next);
+      try { localStorage.setItem('sayad_theme', next); } catch (e) {}
+      if (window.DB) { window.DB.setting('theme', next); window.DB.setting('autoTheme', false); }
       return;
     }
 
@@ -2018,6 +2038,7 @@ async function renderPageNow(num, pe, token){
     pe._renderPromise = null;
     scheduleTiles(60);
     try { window.onPageRendered && window.onPageRendered(num); } catch (e) {}
+    try { window.reapplyTTSHighlight && window.reapplyTTSHighlight(num); } catch (e) {}
     // A phone that needs long to paint a page (slow CPU, 6GB RAM report) switches itself to one page at a time.
     if (maxParallelRenders > 1) {
       slowRenderTimes.push(performance.now() - tStart);

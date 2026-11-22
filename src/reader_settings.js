@@ -611,7 +611,8 @@ export function openAdvancedSettingsModal() {
                 <option value="zoom" ${doubleTapAction === 'zoom' ? 'selected' : ''}>Zoom / Fit Toggle</option>
                 <option value="bookmark" ${doubleTapAction === 'bookmark' ? 'selected' : ''}>Bookmark Page</option>
                 <option value="hide_ui" ${doubleTapAction === 'hide_ui' ? 'selected' : ''}>Zen View</option>
-                <option value="ai_summary" ${doubleTapAction === 'ai_summary' ? 'selected' : ''}>AI Explain</option>
+                <option value="tts" ${doubleTapAction === 'tts' ? 'selected' : ''}>Read Aloud</option>
+                <option value="theme" ${doubleTapAction === 'theme' ? 'selected' : ''}>Light / Dark Toggle</option>
                 <option value="none" ${doubleTapAction === 'none' ? 'selected' : ''}>Disabled</option>
               </select>
               <span class="adv-inline-select-arrow">▼</span>

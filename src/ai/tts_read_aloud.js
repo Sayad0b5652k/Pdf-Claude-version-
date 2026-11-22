@@ -574,6 +574,20 @@ export function clearTTSHighlights() {
   });
 }
 
+/** After a zoom / re-render the text layer is rebuilt and loses the highlight classes: put them back on the word being read. */
+export function reapplyTTSHighlight(pageNum) {
+  try {
+    if (!isReadingActive || !activeTTSSentences || !activeTTSSentences.length) return;
+    const sentence = activeTTSSentences[activeTTSSentenceIdx || 0];
+    if (!sentence || sentence.pageNum !== pageNum) return;
+    activeWordEl = null;
+    if (!refreshSentenceEls(sentence)) return;
+    sentence.parentSpans.forEach(sp => sp.classList.add('tts-sentence-active'));
+    const w = sentence.words[Math.min(activeTTSWordIdx || 0, sentence.words.length - 1)];
+    if (w && w.el && w.el.isConnected) { w.el.classList.add('tts-word-active', 'highlight'); activeWordEl = w.el; }
+  } catch (e) { /* highlight is cosmetic */ }
+}
+
 export function ensureFloatingTTSCapsule() {
   let widget = document.getElementById('tts-floating-widget');
   if (!widget) {
