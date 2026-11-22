@@ -782,8 +782,8 @@ function openDownload() {
   $('#pp-dlgo').onclick = async () => {
     if (!state.paper && !state.key && !state.mine) return toast('Choose at least one part.');
     window.Sheet.close();
-    await printPaper(r, { paper: state.paper, key: state.key, mine: state.mine, refs: state.refs, rollBox: state.roll });
-    toast('Paper downloaded! Open file to print or save as PDF 📄');
+    const printed = await printPaper(r, { paper: state.paper, key: state.key, mine: state.mine, refs: state.refs, rollBox: state.roll });
+    toast(printed ? 'Print dialog khul gaya — "Save as PDF" chuno 📄' : 'Paper downloaded! Open file to print or save as PDF 📄');
   };
 }
 function dlRow(k, t, s, on, disabled) {
