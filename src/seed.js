@@ -155,6 +155,7 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
     try {
       const m = await import('./annot_export.js');
       rec.restoredInfo = await m.restoreSayadPayload(rec.id, sharedPayload);
+      await m.stripNativeSayadAnnots(rec.id);
     } catch (e) { console.warn('Could not restore shared annotations:', e); }
   }
   return rec;

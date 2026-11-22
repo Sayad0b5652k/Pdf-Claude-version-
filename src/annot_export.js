@@ -274,6 +274,45 @@ export async function restoreSayadPayload(fileId, payload) {
   return { total, authors: [...authors] };
 }
 
+/**
+ * A PDF exported by S.A.Y.A.D. holds every highlight/underline twice: as a real PDF annotation and as our editable record.
+ * pdf.js paints the real one into the page, so deleting the editable copy made the mark "come back".
+ * This removes the real copies that belong to our payload from the stored bytes (editable records stay the single source).
+ * Runs once per file (flag `nativeStripped`). Returns true when the bytes changed.
+ */
+export async function stripNativeSayadAnnots(fileId) {
+  try {
+    const rec = await window.DB.get('files', fileId);
+    if (!rec || rec.nativeStripped) return false;
+    await window.ensureLib('pdflib');
+    const { PDFDocument, PDFName, PDFDict } = window.PDFLib;
+    const buf = await window.DB.normalizeBuffer(rec.data);
+    const pdfDoc = await PDFDocument.load(buf.slice(0), { ignoreEncryption: true });
+    const payload = readSayadPayload(pdfDoc);
+    let removed = 0;
+    if (payload) {
+      const ours = new Set([...(payload.annotations || []).map((x) => String(x.id)), ...(payload.notes || []).map((x) => 'note_' + x.id)]);
+      for (const pg of pdfDoc.getPages()) {
+        const arr = pg.node.Annots();
+        if (!arr) continue;
+        for (let i = arr.size() - 1; i >= 0; i--) {
+          const d = arr.lookupMaybe(i, PDFDict);
+          const nm = d && d.lookup(PDFName.of('NM'));
+          if (nm && nm.decodeText && ours.has(nm.decodeText())) { arr.remove(i); removed++; }
+        }
+      }
+    }
+    if (removed) {
+      const out = await pdfDoc.save({ useObjectStreams: false });
+      await window.DB.put('files', { ...rec, data: out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength), nativeStripped: true });
+      return true;
+    }
+    await window.DB.updateFileMeta(fileId, { nativeStripped: true });
+  } catch (e) { console.warn('strip native annots skipped:', e); }
+  return false;
+}
+window.stripNativeSayadAnnots = stripNativeSayadAnnots;
+
 window.restoreSayadPayload = restoreSayadPayload;
 window.openShareAnnotatedSheet = openShareAnnotatedSheet;
 window.buildAnnotatedPdf = buildAnnotatedPdf;

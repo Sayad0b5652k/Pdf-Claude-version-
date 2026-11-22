@@ -57,5 +57,11 @@ Report any case where the bar overlaps the selection handles or goes off screen.
 Open Settings. Expected order: Appearance, Reading, Pro Design Theme, AI Engine, AI Response, Storage, Backup, App Updates, App Installation, About.
 Nothing overlaps, "Full meaning, QR & app link" and "Credits" collapse/expand. Report anything cramped.
 
-## 13. Anything else that looks broken
+## 13. Re-imported exported PDF: deleted highlight/underline must NOT come back (new fix, Claude)
+Cause: an exported PDF holds each highlight/underline twice (real PDF annotation + our editable record). Delete removed only ours; pdf.js drew the real one again.
+Fix: on import (and once on first open of older imports) the real duplicates that belong to our payload are stripped from the stored bytes (`stripNativeSayadAnnots` in src/annot_export.js, flag `nativeStripped`).
+Test in live preview: highlight + underline a few lines -> Share/Export annotated PDF -> import that PDF again -> open it -> Reject/Delete a highlight and an underline -> go to another page and back, close and reopen the book.
+Expected: deleted marks stay gone, kept marks still show once (not doubled). Also test a PDF annotated in another PDF app: its own marks should still show (we only strip ones with our ids).
+
+## 14. Anything else that looks broken
 List it with steps and a screenshot description.

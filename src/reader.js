@@ -173,6 +173,13 @@ export async function openReader(fileId, jumpToPage, pageList, pageListLabel){
   const full = await window.DB.get('files', fileId);
   if(!full){ window.toast('Book not found'); return; }
 
+  // Older imports of S.A.Y.A.D.-exported PDFs still carry duplicate native highlights: clean once, then reload bytes
+  if (!full.nativeStripped) {
+    try {
+      const m = await import('./annot_export.js');
+      if (await m.stripNativeSayadAnnots(fileId)) { const f2 = await window.DB.get('files', fileId); if (f2) full.data = f2.data; }
+    } catch (e) { /* non-fatal */ }
+  }
   // Extract raw buffer safely FIRST before any DB updates to prevent detachment
   let rawBuffer = await window.DB.normalizeBuffer(full.data);
 
