@@ -2046,6 +2046,13 @@ async function renderPageNow(num, pe, token){
         ocrBtn.onclick = ()=>runOCROnPage(num, canvas, ocrBtn);
         pe.wrap.appendChild(ocrBtn);
         pe.ocrBtn = ocrBtn;
+        const allBtn = document.createElement('button');
+        allBtn.className = 'btn';
+        allBtn.style.cssText = 'position:absolute; top:52px; right:10px; z-index:4; background:var(--surface-3); color:var(--text-dim); font-size:11px; font-weight:600; padding:6px 10px; border:1px solid var(--border);';
+        allBtn.textContent = 'Saare pages scan →';
+        allBtn.onclick = () => window.openOcrBatch && window.openOcrBatch(num);
+        pe.wrap.appendChild(allBtn);
+        pe.ocrBtn2 = allBtn;
       }
     }
   }catch(err){

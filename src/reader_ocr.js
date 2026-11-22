@@ -79,6 +79,7 @@ export function applyOcrTextLayer(pe, words){
   }
   pe.spanRects = null;
   if(pe.ocrBtn){ pe.ocrBtn.remove(); pe.ocrBtn = null; }
+  if(pe.ocrBtn2){ pe.ocrBtn2.remove(); pe.ocrBtn2 = null; }
   return true;
 }
 
@@ -131,3 +132,102 @@ export function showOCRResult(pageNum, text){
   document.getElementById('ocr-copy').onclick = async ()=>{ const ok = await window.copyToClipboard(text); window.toast(ok ? 'Copied' : 'Couldn\u2019t copy — try again'); };
   document.getElementById('ocr-ai').onclick = ()=>{ window.pendingSelection = sel; window.openAIMenu(); };
 }
+
+
+// ---------- One-tap batch scan: reads many scanned pages in a row, in the background ----------
+let batch = null;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const fmtEta = (sec) => sec < 60 ? Math.max(5, Math.round(sec / 5) * 5) + ' sec' : Math.round(sec / 60) + ' min';
+
+function pillEl() {
+  let el = document.getElementById('ocr-batch-pill');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'ocr-batch-pill';
+    el.innerHTML = `<div class="obp-bar"><i></i></div><span class="obp-t"></span><button type="button" id="obp-pause" aria-label="Pause">⏸</button><button type="button" id="obp-stop" aria-label="Stop">✕</button>`;
+    document.body.appendChild(el);
+    el.querySelector('#obp-pause').onclick = () => { if (!batch) return; batch.paused = !batch.paused; paintPill(); };
+    el.querySelector('#obp-stop').onclick = () => { if (batch) batch.cancel = true; };
+  }
+  return el;
+}
+function paintPill() {
+  if (!batch) { const e = document.getElementById('ocr-batch-pill'); if (e) e.remove(); return; }
+  const el = pillEl(), pct = batch.total ? (batch.done / batch.total) * 100 : 0;
+  el.querySelector('.obp-bar i').style.width = pct.toFixed(1) + '%';
+  let eta = '';
+  if (batch.done >= 1 && !batch.paused) { const per = (Date.now() - batch.t0) / batch.done; eta = ' · ~' + fmtEta(per * (batch.total - batch.done) / 1000); }
+  el.querySelector('.obp-t').textContent = batch.paused ? `Paused ${batch.done}/${batch.total}` : `Scanning ${batch.done}/${batch.total}${eta}`;
+  el.querySelector('#obp-pause').textContent = batch.paused ? '▶' : '⏸';
+}
+
+async function ocrPageToCache(doc, p, fid, worker) {
+  const page = await doc.getPage(p);
+  const src = await ocrCanvasFor({ pageProxy: page }, null);
+  if (!src) throw new Error('render failed');
+  const { data } = await worker.recognize(src);
+  const text = (data.text || '').trim();
+  const words = ocrWordsFrom(data, src.width, src.height);
+  src.width = 0; src.height = 0;   // free the bitmap right away
+  await window.DB.put('ocrcache', { id: fid + '_' + p, fileId: fid, page: p, text, words });
+  try {
+    const idx = window.State.searchIndex[fid];
+    const list = idx && (Array.isArray(idx) ? idx : idx.pages);
+    const e = list && list.find(x => x.page === p);
+    if (e) e.text = text.normalize('NFC').replace(/\s+/g, ' ').toLowerCase();
+  } catch (e) {}
+  const pe = pageEls[p];
+  if (pe && pe.textLayerDiv && window.State.currentFile && window.State.currentFile.id === fid && words.length) {
+    if (applyOcrTextLayer(pe, words)) { if (pe.ocrBtn2) { pe.ocrBtn2.remove(); pe.ocrBtn2 = null; } }
+  }
+}
+
+async function runBatch(list, doc, fid) {
+  batch = { cancel: false, paused: false, done: 0, failed: 0, total: list.length, t0: Date.now() };
+  paintPill();
+  let lock = null; try { lock = navigator.wakeLock && await navigator.wakeLock.request('screen'); } catch (e) {}
+  try {
+    const worker = await getTesseractWorker();
+    for (const p of list) {
+      while (batch.paused && !batch.cancel) await sleep(300);
+      if (batch.cancel || !window.State.currentFile || window.State.currentFile.id !== fid) break;
+      try { await ocrPageToCache(doc, p, fid, worker); } catch (e) { batch.failed++; console.warn('Batch OCR page failed', p, e); }
+      batch.done++; paintPill();
+      await sleep(30);
+    }
+  } catch (e) {
+    window.toast('OCR shuru nahi ho paaya — pehli baar internet chahiye (language data)');
+  }
+  const b = batch; batch = null; paintPill();
+  try { lock && lock.release(); } catch (e) {}
+  if (b.done) window.toast(b.cancel ? `${b.done} pages scan hue, baaki ruk gaye` : `${b.done - b.failed} pages ready — select, highlight aur search ab chalega`);
+}
+
+export async function openOcrBatch(startPage) {
+  const doc = window.State.currentDoc, file = window.State.currentFile;
+  if (!doc || !file) return;
+  if (batch) { window.toast('Scan pehle se chal raha hai'); return; }
+  const fid = file.id, n = doc.numPages;
+  window.Sheet.open(`<div id="ocrb-body" style="padding:6px 2px 14px;"><div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:6px;">Saare scanned pages</div><div style="font-size:12.5px;color:var(--text-dim);">Scanned pages dhundh raha hu…</div></div>`);
+  const todo = [];
+  for (let p = 1; p <= n; p++) {
+    try {
+      const c = await window.DB.get('ocrcache', fid + '_' + p);
+      if (c && c.words && c.words.length) continue;
+      const tc = await (await doc.getPage(p)).getTextContent();
+      if (!tc.items.length) todo.push(p);
+    } catch (e) {}
+  }
+  const body = document.getElementById('ocrb-body'); if (!body) return;
+  const fromHere = todo.filter(p => p >= startPage);
+  if (!todo.length) { body.innerHTML = `<div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:6px;">Sab ho chuka</div><div style="font-size:13px;color:var(--text-dim);">Is book me koi scanned page baaki nahi — sab ya to text wale hain ya pehle hi scan ho chuke.</div>`; return; }
+  const btn = (id, t, sub) => `<button type="button" id="${id}" class="btn ocrb-opt"><b>${t}</b><small>${sub}</small></button>`;
+  body.innerHTML = `<div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:4px;">Saare scanned pages</div>
+    <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px;line-height:1.5;">${todo.length} scanned page mile (book me ${n}). Text wale pages chhod diye jaate hain. Har page me kuch second lagte hain — app khuli aur screen on rakho, scan background me chalta rahega aur tum padhte reh sakte ho.</div>
+    ${fromHere.length && fromHere.length < todo.length ? btn('ocrb-here', `Is page se aage (${fromHere.length} pages)`, 'Page ' + startPage + ' se aakhir tak') : ''}
+    ${btn('ocrb-all', `Poori book (${todo.length} pages)`, 'Har scanned page, ek ke baad ek')}
+    <div style="font-size:11px;color:var(--text-faint);margin-top:10px;">Pehli baar OCR data ke liye internet chahiye. Rokna ho to upar ✕ dabao.</div>`;
+  const go = (list) => { window.Sheet.close(); setTimeout(() => runBatch(list, doc, fid), 250); };
+  const h = document.getElementById('ocrb-here'); if (h) h.onclick = () => go(fromHere);
+  document.getElementById('ocrb-all').onclick = () => go(todo);
+}
+window.openOcrBatch = openOcrBatch;
