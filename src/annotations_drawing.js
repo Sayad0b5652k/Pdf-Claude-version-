@@ -1265,11 +1265,11 @@ function openTextDialog(initial, onDone) {
   box.id = 'mk-textdlg';
   box.innerHTML = `
     <div class="mk-td-box">
-      <div class="mk-td-title">Add Text / Sticky Note</div>
+      <div class="mk-td-title">${initial ? 'Edit Text' : 'Add Text / Sticky Note'}</div>
       <textarea class="mk-td-in" rows="3" placeholder="Type your note or label here..." maxlength="500"></textarea>
       <div class="mk-td-row">
         <button class="mk-td-btn mk-td-x" type="button">Cancel</button>
-        <button class="mk-td-btn ok mk-td-ok" type="button">Place on Page ✓</button>
+        <button class="mk-td-btn ok mk-td-ok" type="button">${initial ? 'Save ✓' : 'Place on Page ✓'}</button>
       </div>
     </div>`;
   document.body.appendChild(box);
@@ -1607,7 +1607,7 @@ function bindFabricCanvasEvents(fCanvas, pageNum) {
       if (lastTextTapObj === targetObj && (now - lastTextTapTime) < 420) {
         lastTextTapTime = 0;
         lastTextTapObj = null;
-        downTargetObj = null;
+        // keep downTargetObj set: with the Text tool, mouse:up would otherwise open an empty "new text" dialog over this edit dialog
         openTextDialog(targetObj.text, (str) => {
           targetObj.set({ text: str, dirty: true });
           if (typeof targetObj.initDimensions === 'function') targetObj.initDimensions();
