@@ -432,27 +432,31 @@ export async function renderSettings(){
       const chosen = b.dataset.setProTheme;
       if (window.State.proTheme === chosen) return;
       window.State.proTheme = chosen;
-      window.themeTransition(() => { document.documentElement.dataset.proTheme = chosen; }, b, chosen);
+      window.themeTransition(() => {
+        document.documentElement.dataset.proTheme = chosen;
+        updateProThemeButtonsDOM(chosen);
+      }, b, chosen);
       try { localStorage.setItem('sayad_pro_theme', chosen); } catch(e){}
       if (window.DB && window.DB.setting) {
         await window.DB.setting('proTheme', chosen);
       }
       const label = chosen === 'editorial' ? '📖 Editorial Luxe' : chosen === 'notebook' ? '📓 Notebook' : '🏛️ Classic';
       window.toast(`Pro Theme set: ${label}`);
-      updateProThemeButtonsDOM(chosen);
     };
   });
 
   document.querySelectorAll('[data-theme-btn]').forEach(b=>{
     b.onclick = async ()=>{
       const chosen = b.dataset.themeBtn;
+      if (window.State.theme === chosen && !window.State.autoTheme) return;
       window.State.theme = chosen;
       window.State.autoTheme = false;
+      const fxKind = chosen === 'sepia' ? 'sepia' : /dark|night|black|amoled|oled/i.test(chosen) ? 'dark' : 'light';
       window.themeTransition(() => {
         document.documentElement.dataset.theme = chosen;
         if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
         updateThemeButtonsDOM(chosen);
-      }, b, /dark|night|black|amoled/i.test(chosen) ? 'dark' : 'light');
+      }, b, fxKind);
       try { localStorage.setItem('sayad_theme', chosen); } catch(e){}
       await window.DB.setting('theme', chosen);
       await window.DB.setting('autoTheme', false);
@@ -483,7 +487,15 @@ export async function renderSettings(){
         else window.releaseWakeLock();
       }
       if(key==='autoTheme'){
-        if(window.State.autoTheme) window.applyAutoTheme();
+        if(window.State.autoTheme){
+          const targetKind = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          window.themeTransition(() => {
+            window.applyAutoTheme();
+            updateThemeButtonsDOM(window.State.theme);
+            const autoRow = document.querySelector('[data-opt="autoTheme"] .tgl');
+            if (autoRow) autoRow.classList.add('on');
+          }, row, targetKind);
+        }
       }
       if(key==='showPageNumber'){
         const el = document.getElementById('page-indicator');

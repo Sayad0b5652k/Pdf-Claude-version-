@@ -53,16 +53,26 @@
       });
 
       if ('serviceWorker' in navigator) {
-        if ('caches' in window && navigator.onLine !== false) {
-          caches.keys().then(function(keys) {
-            keys.forEach(function(k) {
-              if (k !== 'sayad-v43-sharp-zoom-ocr') caches.delete(k);
-            });
+        var isDevPreview = false;
+        try { isDevPreview = /^ais-dev-/.test(location.hostname); } catch(e) {}
+        if (isDevPreview) {
+          navigator.serviceWorker.getRegistrations().then(function(regs) {
+            regs.forEach(function(r) { r.unregister().catch(function(){}); });
+          }).catch(function(){});
+        } else {
+          if ('caches' in window && navigator.onLine !== false) {
+            caches.keys().then(function(keys) {
+              keys.forEach(function(k) {
+                if (k !== 'sayad-v43-sharp-zoom-ocr') caches.delete(k);
+              });
+            }).catch(function(){});
+          }
+          navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).then(function(reg) {
+            if (reg && typeof reg.update === 'function') {
+              return Promise.resolve(reg.update()).catch(function(){});
+            }
           }).catch(function(){});
         }
-        navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(function(reg) {
-          try { reg.update(); } catch (e) {}
-        }).catch(function(){});
       }
     })();
   </script>

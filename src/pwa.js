@@ -45,7 +45,15 @@ let swRegistration = null;
 
 export function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' })
+    let isDevPreview = false;
+    try { isDevPreview = /^ais-dev-/.test(location.hostname); } catch (e) {}
+    if (isDevPreview) {
+      navigator.serviceWorker.getRegistrations()
+        .then((regs) => Promise.all(regs.map((r) => r.unregister().catch(() => {}))))
+        .catch(() => {});
+      return;
+    }
+    navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' })
       .then((reg) => {
         swRegistration = reg;
         console.log('[SAYAD PWA] Service Worker Active with scope:', reg.scope);
@@ -155,7 +163,9 @@ export async function forceAppUpdateAndRefresh(isPull = false) {
         if (reg.waiting) {
           reg.waiting.postMessage({ type: 'SKIP_WAITING' });
         }
-        await reg.update().catch(() => {});
+        if (typeof reg.update === 'function') {
+          await Promise.resolve(reg.update()).catch(() => {});
+        }
       }
     }
   } catch (err) {

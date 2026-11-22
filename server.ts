@@ -14,9 +14,13 @@ import { MICROSOFT_NEURAL_VOICES, synthesizeMicrosoftTTS } from "./server/micros
 
 
 // Per-request user-supplied keys (BYOK for Groq / OpenRouter). Falls back to server env keys.
-const userKeyCtx = new AsyncLocalStorage<{ groq?: string; openrouter?: string }>();
+type AuxOutcome = { provider: "groq" | "openrouter"; status: "used" | "limit" | "bad" | "fallback"; note?: string };
+type ByokOutcome = { status: "used" | "limit" | "bad" | "fallback"; note?: string };
+const userKeyCtx = new AsyncLocalStorage<{ groq?: string; openrouter?: string; auxOutcome?: AuxOutcome }>();
 const groqKey = (): string | undefined => userKeyCtx.getStore()?.groq || process.env.GROQ_API_KEY || undefined;
 const orKey = (): string | undefined => userKeyCtx.getStore()?.openrouter || process.env.OPENROUTER_API_KEY || process.env.OPENROUTER_AI || undefined;
+const hasUserGroq = (): boolean => Boolean(userKeyCtx.getStore()?.groq);
+const hasUserOr = (): boolean => Boolean(userKeyCtx.getStore()?.openrouter);
 
 function cleanKeyInput(raw: string): string {
   let s = String(raw || "").replace(/[\u200B-\u200D\uFEFF]/g, "").trim();
@@ -145,7 +149,7 @@ class GeminiKeyPool {
   }
 
   public getClient(key: string, direct = false, vertexai?: boolean): GoogleGenAI {
-    const isVertex = vertexai ?? key.startsWith("AQ.");
+    const isVertex = vertexai ?? false;
     const cacheKey = `${direct ? "direct" : "pool"}:${isVertex ? "v" : "m"}:${key}`;
     if (!this.clientCache.has(cacheKey)) {
       this.clientCache.set(cacheKey, new GoogleGenAI({
@@ -249,6 +253,72 @@ const keyPool = new GeminiKeyPool();
 // Track model-level temporary spikes (e.g. 503 High Demand / UNAVAILABLE)
 const modelOverloadCooldowns = new Map<string, number>();
 
+// Hashed BYOK caches (never store raw user keys in diagnostic/cache maps)
+const byokCooldowns = new Map<string, { until: number; status: "bad" | "limit" | "fallback"; note?: string }>();
+const byokClientModeCache = new Map<string, { direct: boolean; vertex: boolean; ts: number }>();
+const endpointModel404Cache = new Map<string, number>();
+let cachedOpenRouterFreeModels: { list: string[]; ts: number } = { list: [], ts: 0 };
+
+function hashKeyId(prefix: string, key: string): string {
+  return `${prefix}:${crypto.createHash("sha256").update(key).digest("hex").slice(0, 16)}`;
+}
+
+function getByokCooldown(prefix: string, key: string): { status: "bad" | "limit" | "fallback"; note?: string } | null {
+  const id = hashKeyId(prefix, key);
+  const entry = byokCooldowns.get(id);
+  if (!entry) return null;
+  if (Date.now() >= entry.until) {
+    byokCooldowns.delete(id);
+    return null;
+  }
+  return { status: entry.status, note: entry.note };
+}
+
+function setByokCooldown(prefix: string, key: string, status: "bad" | "limit" | "fallback", durationMs: number, note?: string) {
+  byokCooldowns.set(hashKeyId(prefix, key), { until: Date.now() + durationMs, status, note: note ? String(note).slice(0, 120) : undefined });
+}
+
+function clearByokCooldown(prefix: string, key: string) {
+  byokCooldowns.delete(hashKeyId(prefix, key));
+}
+
+function isEndpointModel404(endpointTag: string, modelName: string): boolean {
+  const k = `${endpointTag}:${modelName}`;
+  const until = endpointModel404Cache.get(k) || 0;
+  if (!until) return false;
+  if (Date.now() >= until) {
+    endpointModel404Cache.delete(k);
+    return false;
+  }
+  return true;
+}
+
+function markEndpointModel404(endpointTag: string, modelName: string, ttlMs = 10 * 60 * 1000) {
+  endpointModel404Cache.set(`${endpointTag}:${modelName}`, Date.now() + ttlMs);
+}
+
+function sanitizeHeaderVal(v?: string): string {
+  return String(v || "").replace(/[\r\n]+/g, " ").replace(/[^\x20-\x7E]/g, "").trim().slice(0, 100);
+}
+
+function attachOutcomeHeaders(
+  res: express.Response,
+  opts: { slotTag?: string; byokOutcome?: ByokOutcome | null; auxOutcome?: AuxOutcome | null }
+) {
+  if (res.headersSent) return;
+  if (opts.slotTag) res.setHeader("X-Sayad-Key-Slot", sanitizeHeaderVal(opts.slotTag));
+  if (opts.byokOutcome) {
+    res.setHeader("X-Sayad-Byok-Status", opts.byokOutcome.status);
+    if (opts.byokOutcome.note) res.setHeader("X-Sayad-Byok-Note", sanitizeHeaderVal(opts.byokOutcome.note));
+  }
+  const aux = opts.auxOutcome || userKeyCtx.getStore()?.auxOutcome;
+  if (aux) {
+    res.setHeader("X-Sayad-Aux-Provider", aux.provider);
+    res.setHeader("X-Sayad-Aux-Status", aux.status);
+    if (aux.note) res.setHeader("X-Sayad-Aux-Note", sanitizeHeaderVal(aux.note));
+  }
+}
+
 function isModelOverloaded(modelName: string): boolean {
   const until = modelOverloadCooldowns.get(modelName) || 0;
   return Date.now() < until;
@@ -257,6 +327,93 @@ function isModelOverloaded(modelName: string): boolean {
 function markModelOverloaded(modelName: string, durationMs = 120000) {
   modelOverloadCooldowns.set(modelName, Date.now() + durationMs);
   console.warn(`[GeminiKeyPool] Model [${modelName}] marked on temporary high-demand cooldown for ${durationMs / 1000}s`);
+}
+
+function buildModelConfig(modelName: string, baseConfig: Record<string, any>): Record<string, any> {
+  const cfg: Record<string, any> = { ...baseConfig };
+  if (/^gemini-4-/i.test(modelName)) {
+    delete cfg.temperature;
+    delete cfg.topP;
+    delete cfg.topK;
+    delete cfg.candidateCount;
+  }
+  return cfg;
+}
+
+function getSlotClientModes(key: string, isPersonal: boolean): { direct: boolean; vertex: boolean; endpointTag: string }[] {
+  const isAq = key.startsWith("AQ.");
+  const baseModes: { direct: boolean; vertex: boolean; endpointTag: string }[] = isAq
+    ? [
+        { direct: isPersonal, vertex: false, endpointTag: isPersonal ? "direct-aq" : "pool" },
+        { direct: isPersonal, vertex: true, endpointTag: "vertex-aq" },
+        ...(isPersonal && process.env.GEMINI_BASE_URL ? [{ direct: false, vertex: false, endpointTag: "pool" }] : []),
+      ]
+    : [
+        { direct: isPersonal, vertex: false, endpointTag: isPersonal ? "direct-aiza" : "pool" },
+        ...(isPersonal && process.env.GEMINI_BASE_URL ? [{ direct: false, vertex: false, endpointTag: "pool" }] : []),
+      ];
+
+  if (!isPersonal) return baseModes;
+  const cached = byokClientModeCache.get(hashKeyId("gmode", key));
+  if (cached && Date.now() - cached.ts < 30 * 60 * 1000) {
+    const idx = baseModes.findIndex(m => m.direct === cached.direct && m.vertex === cached.vertex);
+    if (idx > 0) {
+      const [hit] = baseModes.splice(idx, 1);
+      baseModes.unshift(hit);
+    }
+  }
+  return baseModes;
+}
+
+function getModelQueueForSlot(
+  requested: string | undefined,
+  isCustomByok: boolean,
+  isPersonal: boolean,
+  key: string,
+  endpointTag: string
+): string[] {
+  let reqModel = requested;
+  if (!reqModel || reqModel.includes("3.8") || reqModel.includes("2.0") || reqModel.includes("1.5") || (!isPersonal && reqModel.includes("2.5"))) {
+    reqModel = "gemini-3.1-flash-lite";
+  }
+
+  // Public generativelanguage.googleapis.com (direct AIza key) works best on public aliases first.
+  const isDirectPublicAiza = isPersonal && !key.startsWith("AQ.") && endpointTag === "direct-aiza";
+  const candidateModels = isDirectPublicAiza
+    ? [
+        ...(reqModel !== "gemini-3.1-flash-lite" ? [reqModel] : []),
+        "gemini-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-4-hydrogen",
+      ]
+    : [
+        reqModel,
+        "gemini-4-hydrogen",
+        "gemini-3.1-flash-lite",
+        "gemini-flash-latest",
+        "gemini-3.1-pro-preview",
+        ...(isCustomByok ? ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"] : []),
+      ];
+
+  const healthyModels: string[] = [];
+  const overloadedModels: string[] = [];
+
+  for (const m of candidateModels) {
+    if (!m) continue;
+    if (!isPersonal && (m.includes("1.5") || m.includes("2.0") || m.includes("2.5"))) continue;
+    if (isEndpointModel404(endpointTag, m)) continue;
+    if (isModelOverloaded(m)) {
+      overloadedModels.push(m);
+    } else {
+      healthyModels.push(m);
+    }
+  }
+
+  const combined = Array.from(new Set([...healthyModels, ...overloadedModels]));
+  return combined.length ? combined : ["gemini-flash-latest", "gemini-3.1-flash-lite"];
 }
 
 // Execute Gemini prompt across the key pool with powerful models
@@ -270,158 +427,177 @@ async function executeWithGeminiPool(
     responseMimeType?: string;
     customKey?: string;
     tools?: any[];
+    onByokOutcome?: (o: ByokOutcome) => void;
   } = {}
-): Promise<{ text: string; model: string; keyTag: string; sources?: { title: string; url: string }[] } | null> {
-  // If user provided custom key (BYOK), prioritize it as top slot
+): Promise<{ text: string; model: string; keyTag: string; sources?: { title: string; url: string }[]; byokStatus?: ByokOutcome["status"]; byokNote?: string } | null> {
   let slots = keyPool.getOrderedKeysForTool(category);
-  if (options.customKey && typeof options.customKey === 'string' && options.customKey.trim().length > 10) {
-    const customSlot: KeySlot = {
-      key: options.customKey.trim(),
-      tag: 'User Personal Custom Key',
-      cooldownUntil: 0,
-    };
-    slots = [customSlot, ...slots];
+  const cleanedCustomKey = (options.customKey && typeof options.customKey === 'string') ? cleanKeyInput(options.customKey) : '';
+  const isCustomByok = cleanedCustomKey.length > 10;
+  let cachedByokSkip: ByokOutcome | null = null;
+
+  if (isCustomByok) {
+    const cd = getByokCooldown("gemini", cleanedCustomKey);
+    if (cd) {
+      cachedByokSkip = cd;
+      options.onByokOutcome?.(cd);
+    } else {
+      const customSlot: KeySlot = {
+        key: cleanedCustomKey,
+        tag: 'User Personal Custom Key',
+        cooldownUntil: 0,
+      };
+      slots = [customSlot, ...slots];
+    }
   }
   if (!slots.length) return null;
 
-  // Ultra-resilient, high-availability model queue using active canonical models:
-  // 1. gemini-3.1-flash-lite (fast, low latency, active canonical model)
-  // 2. gemini-3.8-flash (standard text model from gemini-api skill)
-  // 3. gemini-flash-latest (canonical alias for gemini flash)
-  // 4. gemini-3.1-pro-preview (high capability reasoning model)
-  let requested = options.targetModel;
-  if (!requested || requested.includes("2.5") || requested.includes("2.0") || requested.includes("1.5")) {
-    requested = "gemini-3.1-flash-lite";
-  }
-
-  const isCustomByok = !!(options.customKey && typeof options.customKey === "string" && options.customKey.trim().length > 10);
-  const candidateModels = [
-    requested,
-    "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-flash-latest",
-    "gemini-3.1-pro-preview",
-    ...(isCustomByok ? ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"] : []),
-  ];
-
-  const healthyModels: string[] = [];
-  const overloadedModels: string[] = [];
-
-  for (const m of candidateModels) {
-    if (!m) continue;
-    if (!isCustomByok && (m.includes("1.5") || m.includes("2.0") || m.includes("2.5"))) continue;
-    if (isModelOverloaded(m)) {
-      overloadedModels.push(m);
-    } else {
-      healthyModels.push(m);
-    }
-  }
-
-  const modelQueue = Array.from(new Set([...healthyModels, ...overloadedModels]));
-
-  const config: any = {
+  const baseConfig: Record<string, any> = {
     temperature: typeof options.temperature === "number" ? options.temperature : 0.22,
     maxOutputTokens: 8192,
   };
   if (options.systemInstruction) {
-    config.systemInstruction = options.systemInstruction;
+    baseConfig.systemInstruction = options.systemInstruction;
   }
   if (options.responseMimeType) {
-    config.responseMimeType = options.responseMimeType;
+    baseConfig.responseMimeType = options.responseMimeType;
   }
   if (options.tools && Array.isArray(options.tools) && options.tools.length > 0) {
-    config.tools = options.tools;
+    baseConfig.tools = options.tools;
   }
 
-  // Iterate over healthy slots
+  let personalFailureOutcome: ByokOutcome | null = cachedByokSkip;
+
   for (const slot of slots) {
-    const ai = keyPool.getClient(slot.key, slot.tag === 'User Personal Custom Key');
+    const isPersonal = slot.tag === 'User Personal Custom Key';
+    const clientModes = getSlotClientModes(slot.key, isPersonal);
     let anyModelSucceededOnSlot = false;
+    let keyExplicitlyInvalid = false;
+    let sawRateLimitOnSlot = false;
+    let lastErrNote = "";
 
-    for (const modelName of modelQueue) {
-      try {
-        const timeoutMs = 30000;
-        const timeoutPromise = new Promise<{ text?: string; isTimeout: boolean }>((_, reject) =>
-          setTimeout(() => reject(new Error(`Timeout ${timeoutMs}ms for ${modelName}`)), timeoutMs)
-        );
+    for (const mode of clientModes) {
+      if (keyExplicitlyInvalid) break;
+      const ai = keyPool.getClient(slot.key, mode.direct, mode.vertex);
+      const modelQueue = getModelQueueForSlot(options.targetModel, isCustomByok, isPersonal, slot.key, mode.endpointTag);
 
-        const generatePromise = (async () => {
-          try {
-            const resp = await ai.models.generateContent({
-              model: modelName,
-              contents: prompt,
-              config,
-            });
-            return { text: resp.text, isTimeout: false, grounding: (resp as any)?.candidates?.[0]?.groundingMetadata } as any;
-          } catch (modelCallErr: any) {
-            // If tool call fails on a specific model, retry immediately without tools
-            if (config.tools) {
-              try {
-                const cleanCfg = { ...config };
-                delete cleanCfg.tools;
-                const resp2 = await ai.models.generateContent({
-                  model: modelName,
-                  contents: prompt,
-                  config: cleanCfg,
-                });
-                return { text: resp2.text, isTimeout: false };
-              } catch (retryErr) {
-                throw modelCallErr;
+      for (const modelName of modelQueue) {
+        const modelConfig = buildModelConfig(modelName, baseConfig);
+        try {
+          const timeoutMs = isPersonal ? 22000 : 30000;
+          const timeoutPromise = new Promise<{ text?: string; isTimeout: boolean }>((_, reject) =>
+            setTimeout(() => reject(new Error(`Timeout ${timeoutMs}ms for ${modelName}`)), timeoutMs)
+          );
+
+          const generatePromise = (async () => {
+            try {
+              const resp = await ai.models.generateContent({
+                model: modelName,
+                contents: prompt,
+                config: modelConfig,
+              });
+              return { text: resp.text, isTimeout: false, grounding: (resp as any)?.candidates?.[0]?.groundingMetadata } as any;
+            } catch (modelCallErr: any) {
+              if (modelConfig.tools) {
+                try {
+                  const cleanCfg = { ...modelConfig };
+                  delete cleanCfg.tools;
+                  const resp2 = await ai.models.generateContent({
+                    model: modelName,
+                    contents: prompt,
+                    config: cleanCfg,
+                  });
+                  return { text: resp2.text, isTimeout: false };
+                } catch {
+                  throw modelCallErr;
+                }
               }
+              throw modelCallErr;
             }
-            throw modelCallErr;
+          })();
+
+          const response: any = await Promise.race([generatePromise, timeoutPromise]);
+          const text = response.text || "";
+          if (text && text.trim()) {
+            anyModelSucceededOnSlot = true;
+            if (isPersonal) {
+              clearByokCooldown("gemini", slot.key);
+              byokClientModeCache.set(hashKeyId("gmode", slot.key), { direct: mode.direct, vertex: mode.vertex, ts: Date.now() });
+              options.onByokOutcome?.({ status: "used" });
+            }
+            const srcs = ((response as any).grounding?.groundingChunks || [])
+              .map((c: any) => c?.web).filter((w: any) => w?.uri)
+              .map((w: any) => ({ title: String(w.title || w.uri), url: String(w.uri) }));
+            const resolvedByokStatus: ByokOutcome["status"] | undefined = isPersonal
+              ? "used"
+              : (personalFailureOutcome?.status);
+            return {
+              text: text.trim(),
+              model: modelName,
+              keyTag: slot.tag,
+              sources: srcs.length ? srcs : undefined,
+              byokStatus: resolvedByokStatus,
+              byokNote: isPersonal ? undefined : personalFailureOutcome?.note,
+            };
           }
-        })();
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          lastErrNote = msg.slice(0, 120);
 
-        const response: any = await Promise.race([generatePromise, timeoutPromise]);
-        const text = response.text || "";
-        if (text && text.trim()) {
-          anyModelSucceededOnSlot = true;
-          const srcs = ((response as any).grounding?.groundingChunks || [])
-            .map((c: any) => c?.web).filter((w: any) => w?.uri)
-            .map((w: any) => ({ title: String(w.title || w.uri), url: String(w.uri) }));
-          return {
-            text: text.trim(),
-            model: modelName,
-            keyTag: slot.tag,
-            sources: srcs.length ? srcs : undefined,
-          };
-        }
-      } catch (err: any) {
-        const msg = err?.message || String(err);
-        
-        // If model is deprecated / 404 (e.g. no longer available), silently continue to next active model in queue
-        if (msg.includes("404") || msg.includes("no longer available") || msg.includes("not found")) {
+          if (msg.includes("404") || msg.includes("no longer available") || msg.includes("not found")) {
+            markEndpointModel404(mode.endpointTag, modelName);
+            continue;
+          }
+
+          if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("overloaded") || msg.includes("500") || msg.includes("504")) {
+            markModelOverloaded(modelName, 60000);
+            console.info(`[Gemini Failover] Model [${modelName}] experiencing temporary load on slot [${slot.tag}], switching to next candidate.`);
+            continue;
+          }
+
+          if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid") || msg.includes("CREDENTIAL_MISCONFIGURED")) {
+            if (mode !== clientModes[clientModes.length - 1]) {
+              break; // Try next client mode (e.g. Vertex / proxy) before marking invalid
+            }
+            keyExplicitlyInvalid = true;
+            if (!isPersonal) keyPool.markCooldown(slot.key, 120000);
+            break;
+          }
+
+          if (msg.includes("403") || msg.includes("PERMISSION_DENIED") || msg.includes("401") || msg.includes("UNAUTHENTICATED")) {
+            console.info(`[Gemini Auth Notice] Key: [${slot.tag}] Mode: [${mode.endpointTag}] Model: [${modelName}] Note: ${msg.slice(0, 80)}`);
+            if (mode === clientModes[clientModes.length - 1]) keyExplicitlyInvalid = true;
+            break; // Switch client mode or next key immediately instead of retrying every model with 403
+          }
+
+          if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota")) {
+            sawRateLimitOnSlot = true;
+            console.info(`[Gemini Quota] Slot [${slot.tag}] model [${modelName}] quota reached, trying next model.`);
+            continue;
+          }
+
+          console.info(`[Gemini Attempt Notice] Key: [${slot.tag}] Model: [${modelName}] Note: ${msg.slice(0, 80)}`);
           continue;
         }
-
-        // High demand / temporary overload (503 / 500 / 504 / UNAVAILABLE / overloaded) -> model-specific spike:
-        if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("overloaded") || msg.includes("500") || msg.includes("504")) {
-          markModelOverloaded(modelName, 60000);
-          console.info(`[Gemini Failover] Model [${modelName}] experiencing temporary load on slot [${slot.tag}], switching to next candidate.`);
-          continue;
-        }
-
-        // If the key itself is explicitly invalid or credential bad:
-        if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid") || msg.includes("CREDENTIAL_MISCONFIGURED")) {
-          keyPool.markCooldown(slot.key, 120000);
-          break; // Switch to next key
-        }
-        
-        // Quota exhaustion (429 / RESOURCE_EXHAUSTED):
-        if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota")) {
-          console.info(`[Gemini Quota] Slot [${slot.tag}] model [${modelName}] quota reached, trying next model.`);
-          continue;
-        }
-
-        console.info(`[Gemini Attempt Notice] Key: [${slot.tag}] Model: [${modelName}] Note: ${msg.slice(0, 80)}`);
-        continue;
       }
     }
 
-    // If all models in the queue failed on this slot, place key on short cooldown and try next key
     if (!anyModelSucceededOnSlot) {
-      keyPool.markCooldown(slot.key, 30000);
+      if (isPersonal) {
+        const failStatus: ByokOutcome["status"] = keyExplicitlyInvalid
+          ? "bad"
+          : (sawRateLimitOnSlot ? "limit" : "fallback");
+        const cdMs = failStatus === "bad" ? 180000 : failStatus === "limit" ? 60000 : 15000;
+        const friendlyNote = failStatus === "bad"
+          ? "Gemini key invalid or permission denied"
+          : failStatus === "limit"
+          ? "Gemini key rate limit reached"
+          : (lastErrNote || "Gemini key temporarily unavailable");
+        setByokCooldown("gemini", slot.key, failStatus, cdMs, friendlyNote);
+        personalFailureOutcome = { status: failStatus, note: friendlyNote };
+        options.onByokOutcome?.(personalFailureOutcome);
+      } else if (!keyExplicitlyInvalid) {
+        keyPool.markCooldown(slot.key, sawRateLimitOnSlot ? 45000 : 15000);
+      }
     }
   }
   return null;
@@ -437,116 +613,152 @@ async function executeWithGeminiPoolStream(
     targetModel?: string;
     temperature?: number;
     customKey?: string;
+    onByokOutcome?: (o: ByokOutcome) => void;
+    onSlotStart?: (info: { keyTag: string; model: string; byokOutcome?: ByokOutcome | null }) => void;
   } = {}
-): Promise<{ text: string; model: string; keyTag: string } | null> {
+): Promise<{ text: string; model: string; keyTag: string; byokStatus?: ByokOutcome["status"]; byokNote?: string } | null> {
   let slots = keyPool.getOrderedKeysForTool(category);
-  if (options.customKey && typeof options.customKey === 'string' && options.customKey.trim().length > 10) {
-    const customSlot: KeySlot = {
-      key: options.customKey.trim(),
-      tag: 'User Personal Custom Key',
-      cooldownUntil: 0,
-    };
-    slots = [customSlot, ...slots];
+  const cleanedCustomKey = (options.customKey && typeof options.customKey === 'string') ? cleanKeyInput(options.customKey) : '';
+  const isCustomByok = cleanedCustomKey.length > 10;
+  let cachedByokSkip: ByokOutcome | null = null;
+
+  if (isCustomByok) {
+    const cd = getByokCooldown("gemini", cleanedCustomKey);
+    if (cd) {
+      cachedByokSkip = cd;
+      options.onByokOutcome?.(cd);
+    } else {
+      const customSlot: KeySlot = {
+        key: cleanedCustomKey,
+        tag: 'User Personal Custom Key',
+        cooldownUntil: 0,
+      };
+      slots = [customSlot, ...slots];
+    }
   }
   if (!slots.length) return null;
 
-  let requested = options.targetModel;
-  if (!requested || requested.includes("2.5") || requested.includes("2.0") || requested.includes("1.5")) {
-    requested = "gemini-3.1-flash-lite";
-  }
-
-  const isCustomByok = !!(options.customKey && typeof options.customKey === "string" && options.customKey.trim().length > 10);
-  const candidateModels = [
-    requested,
-    "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-flash-latest",
-    "gemini-3.1-pro-preview",
-    ...(isCustomByok ? ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash"] : []),
-  ];
-
-  const healthyModels: string[] = [];
-  const overloadedModels: string[] = [];
-
-  for (const m of candidateModels) {
-    if (!m) continue;
-    if (!isCustomByok && (m.includes("1.5") || m.includes("2.0") || m.includes("2.5"))) continue;
-    if (isModelOverloaded(m)) {
-      overloadedModels.push(m);
-    } else {
-      healthyModels.push(m);
-    }
-  }
-
-  const modelQueue = Array.from(new Set([...healthyModels, ...overloadedModels]));
-
-  const config: any = {
+  const baseConfig: Record<string, any> = {
     temperature: typeof options.temperature === "number" ? options.temperature : 0.22,
     maxOutputTokens: 8192,
   };
   if (options.systemInstruction) {
-    config.systemInstruction = options.systemInstruction;
+    baseConfig.systemInstruction = options.systemInstruction;
   }
 
+  let personalFailureOutcome: ByokOutcome | null = cachedByokSkip;
+
   for (const slot of slots) {
-    const ai = keyPool.getClient(slot.key, slot.tag === 'User Personal Custom Key');
+    const isPersonal = slot.tag === 'User Personal Custom Key';
+    const clientModes = getSlotClientModes(slot.key, isPersonal);
     let anyModelSucceededOnSlot = false;
+    let keyExplicitlyInvalid = false;
+    let sawRateLimitOnSlot = false;
+    let lastErrNote = "";
 
-    for (const modelName of modelQueue) {
-      try {
-        const stream = await ai.models.generateContentStream({
-          model: modelName,
-          contents: prompt,
-          config,
-        });
+    for (const mode of clientModes) {
+      if (keyExplicitlyInvalid) break;
+      const ai = keyPool.getClient(slot.key, mode.direct, mode.vertex);
+      const modelQueue = getModelQueueForSlot(options.targetModel, isCustomByok, isPersonal, slot.key, mode.endpointTag);
 
-        let accumulated = "";
-        for await (const chunk of stream) {
-          const piece = chunk.text || "";
-          if (piece) {
-            accumulated += piece;
-            onChunk(piece);
-          }
-        }
-
-        if (accumulated && accumulated.trim()) {
-          anyModelSucceededOnSlot = true;
-          return {
-            text: accumulated.trim(),
+      for (const modelName of modelQueue) {
+        const modelConfig = buildModelConfig(modelName, baseConfig);
+        try {
+          const stream = await ai.models.generateContentStream({
             model: modelName,
-            keyTag: slot.tag,
-          };
-        }
-      } catch (err: any) {
-        const msg = err?.message || String(err);
-        if (msg.includes("404") || msg.includes("no longer available") || msg.includes("not found")) {
+            contents: prompt,
+            config: modelConfig,
+          });
+
+          let accumulated = "";
+          let notifiedSlot = false;
+          for await (const chunk of stream) {
+            const piece = chunk.text || "";
+            if (piece) {
+              if (!notifiedSlot) {
+                notifiedSlot = true;
+                const byokMeta: ByokOutcome | null = isPersonal ? { status: "used" } : personalFailureOutcome;
+                if (isPersonal) {
+                  clearByokCooldown("gemini", slot.key);
+                  byokClientModeCache.set(hashKeyId("gmode", slot.key), { direct: mode.direct, vertex: mode.vertex, ts: Date.now() });
+                  options.onByokOutcome?.({ status: "used" });
+                }
+                options.onSlotStart?.({ keyTag: slot.tag, model: modelName, byokOutcome: byokMeta });
+              }
+              accumulated += piece;
+              onChunk(piece);
+            }
+          }
+
+          if (accumulated && accumulated.trim()) {
+            anyModelSucceededOnSlot = true;
+            return {
+              text: accumulated.trim(),
+              model: modelName,
+              keyTag: slot.tag,
+              byokStatus: isPersonal ? "used" : personalFailureOutcome?.status,
+              byokNote: isPersonal ? undefined : personalFailureOutcome?.note,
+            };
+          }
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          lastErrNote = msg.slice(0, 120);
+
+          if (msg.includes("404") || msg.includes("no longer available") || msg.includes("not found")) {
+            markEndpointModel404(mode.endpointTag, modelName);
+            continue;
+          }
+
+          if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("overloaded") || msg.includes("500") || msg.includes("504")) {
+            markModelOverloaded(modelName, 60000);
+            console.info(`[Gemini Stream Failover] Model [${modelName}] experiencing temporary load on slot [${slot.tag}], switching to next candidate.`);
+            continue;
+          }
+
+          if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid") || msg.includes("CREDENTIAL_MISCONFIGURED")) {
+            if (mode !== clientModes[clientModes.length - 1]) {
+              break;
+            }
+            keyExplicitlyInvalid = true;
+            if (!isPersonal) keyPool.markCooldown(slot.key, 120000);
+            break;
+          }
+
+          if (msg.includes("403") || msg.includes("PERMISSION_DENIED") || msg.includes("401") || msg.includes("UNAUTHENTICATED")) {
+            console.info(`[Gemini Stream Auth Notice] Key: [${slot.tag}] Mode: [${mode.endpointTag}] Model: [${modelName}] Note: ${msg.slice(0, 80)}`);
+            if (mode === clientModes[clientModes.length - 1]) keyExplicitlyInvalid = true;
+            break;
+          }
+
+          if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota")) {
+            sawRateLimitOnSlot = true;
+            console.info(`[Gemini Stream Quota] Slot [${slot.tag}] model [${modelName}] quota reached, trying next model.`);
+            continue;
+          }
+
+          console.info(`[Gemini Stream Attempt Notice] Key: [${slot.tag}] Model: [${modelName}] Note: ${msg.slice(0, 80)}`);
           continue;
         }
-
-        // High demand / temporary overload (503 / 500 / 504 / UNAVAILABLE / overloaded) -> model-specific spike:
-        if (msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("high demand") || msg.includes("overloaded") || msg.includes("500") || msg.includes("504")) {
-          markModelOverloaded(modelName, 60000);
-          console.info(`[Gemini Stream Failover] Model [${modelName}] experiencing temporary load on slot [${slot.tag}], switching to next candidate.`);
-          continue;
-        }
-
-        if (msg.includes("API_KEY_INVALID") || msg.includes("API key not valid") || msg.includes("CREDENTIAL_MISCONFIGURED")) {
-          keyPool.markCooldown(slot.key, 120000);
-          break;
-        }
-
-        if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota")) {
-          console.info(`[Gemini Stream Quota] Slot [${slot.tag}] model [${modelName}] quota reached, trying next model.`);
-          continue;
-        }
-
-        console.info(`[Gemini Stream Attempt Notice] Key: [${slot.tag}] Model: [${modelName}] Note: ${msg.slice(0, 80)}`);
-        continue;
       }
     }
 
     if (!anyModelSucceededOnSlot) {
-      keyPool.markCooldown(slot.key, 30000);
+      if (isPersonal) {
+        const failStatus: ByokOutcome["status"] = keyExplicitlyInvalid
+          ? "bad"
+          : (sawRateLimitOnSlot ? "limit" : "fallback");
+        const cdMs = failStatus === "bad" ? 180000 : failStatus === "limit" ? 60000 : 15000;
+        const friendlyNote = failStatus === "bad"
+          ? "Gemini key invalid or permission denied"
+          : failStatus === "limit"
+          ? "Gemini key rate limit reached"
+          : (lastErrNote || "Gemini key temporarily unavailable");
+        setByokCooldown("gemini", slot.key, failStatus, cdMs, friendlyNote);
+        personalFailureOutcome = { status: failStatus, note: friendlyNote };
+        options.onByokOutcome?.(personalFailureOutcome);
+      } else if (!keyExplicitlyInvalid) {
+        keyPool.markCooldown(slot.key, sawRateLimitOnSlot ? 45000 : 15000);
+      }
     }
   }
   return null;
@@ -555,9 +767,22 @@ async function executeWithGeminiPoolStream(
 async function executeWithGroq(prompt: string, systemInstruction?: string, temperature = 0.3): Promise<string | null> {
   const apiKey = groqKey();
   if (!apiKey) return null;
+  const store = userKeyCtx.getStore();
+  const isPersonalAux = Boolean(store?.groq && store.groq === apiKey);
+  if (isPersonalAux) {
+    const cd = getByokCooldown("groq", apiKey);
+    if (cd) {
+      store!.auxOutcome = { provider: "groq", status: cd.status, note: cd.note };
+      return null;
+    }
+  }
 
-  let models = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "qwen/qwen3.6-27b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
+  let models = ["llama-3.3-70b-versatile", "openai/gpt-oss-120b", "qwen/qwen3-32b", "openai/gpt-oss-20b", "llama-3.1-8b-instant"];
   let triedDynamic = false;
+  let sawLimit = false;
+  let sawAuthErr = false;
+  let lastNote = "";
+
   for (let i = 0; i < models.length; i++) {
     const model = models[i];
     try {
@@ -581,25 +806,73 @@ async function executeWithGroq(prompt: string, systemInstruction?: string, tempe
       if (resp.ok) {
         const data: any = await resp.json();
         const text = data?.choices?.[0]?.message?.content;
-        if (text && text.trim()) return text.trim();
-      } else if (!triedDynamic && (resp.status === 400 || resp.status === 404)) {
-        triedDynamic = true;
-        try {
-          const mr = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
-          if (mr.ok) {
-            const md: any = await mr.json().catch(() => null);
-            const extras = (md?.data || [])
-              .map((x: any) => String(x?.id || ""))
-              .filter((id: string) => id && !/whisper|guard|tts|playai|orpheus/i.test(id) && !models.includes(id));
-            models = models.concat(extras.slice(0, 4));
+        if (text && text.trim()) {
+          if (isPersonalAux) {
+            clearByokCooldown("groq", apiKey);
+            store!.auxOutcome = { provider: "groq", status: "used" };
           }
-        } catch {}
+          return text.trim();
+        }
+      } else {
+        if (resp.status === 401 || resp.status === 403) {
+          sawAuthErr = true;
+          lastNote = "Groq key rejected";
+          break; // Never loop remaining models with an invalid key
+        }
+        if (resp.status === 429) {
+          sawLimit = true;
+          lastNote = "Groq rate limit reached";
+          continue;
+        }
+        if (!triedDynamic && (resp.status === 400 || resp.status === 404)) {
+          triedDynamic = true;
+          try {
+            const mr = await fetch("https://api.groq.com/openai/v1/models", { headers: { Authorization: `Bearer ${apiKey}` } });
+            if (mr.ok) {
+              const md: any = await mr.json().catch(() => null);
+              const extras = (md?.data || [])
+                .map((x: any) => String(x?.id || ""))
+                .filter((id: string) => id && !/whisper|guard|tts|playai|orpheus|safeguard/i.test(id) && !models.includes(id));
+              models = models.concat(extras.slice(0, 4));
+            }
+          } catch {}
+        }
       }
     } catch (err: any) {
+      lastNote = err?.message || "Groq request failed";
       console.warn(`[Groq Failover] Model ${model} error:`, err?.message);
     }
   }
+
+  if (isPersonalAux) {
+    const status: AuxOutcome["status"] = sawAuthErr ? "bad" : sawLimit ? "limit" : "fallback";
+    setByokCooldown("groq", apiKey, status, status === "bad" ? 180000 : status === "limit" ? 60000 : 15000, lastNote);
+    store!.auxOutcome = { provider: "groq", status, note: lastNote };
+  }
   return null;
+}
+
+async function getDynamicOpenRouterFreeModels(apiKey: string): Promise<string[]> {
+  if (Date.now() - cachedOpenRouterFreeModels.ts < 10 * 60 * 1000 && cachedOpenRouterFreeModels.list.length) {
+    return cachedOpenRouterFreeModels.list;
+  }
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (r.ok) {
+      const d: any = await r.json().catch(() => null);
+      const frees = (d?.data || [])
+        .map((m: any) => String(m?.id || ""))
+        .filter((id: string) => id.endsWith(":free") && !/vision|vl-|audio|tts|embed|image/i.test(id))
+        .slice(0, 8);
+      if (frees.length) {
+        cachedOpenRouterFreeModels = { list: frees, ts: Date.now() };
+        return frees;
+      }
+    }
+  } catch {}
+  return [];
 }
 
 async function executeWithOpenRouter(
@@ -610,16 +883,37 @@ async function executeWithOpenRouter(
 ): Promise<{ text: string; model: string } | null> {
   const apiKey = orKey();
   if (!apiKey) return null;
+  const store = userKeyCtx.getStore();
+  const isPersonalAux = Boolean(store?.openrouter && store.openrouter === apiKey);
+  if (isPersonalAux) {
+    const cd = getByokCooldown("or", apiKey);
+    if (cd) {
+      if (!store!.auxOutcome) store!.auxOutcome = { provider: "openrouter", status: cd.status, note: cd.note };
+      return null;
+    }
+  }
 
-  const models = Array.from(new Set([
+  let models = Array.from(new Set([
     preferredModel,
     "deepseek/deepseek-chat",
     "meta-llama/llama-3.3-70b-instruct",
     "qwen/qwen-2.5-72b-instruct",
-    "mistralai/mistral-small-24b-instruct-2501:free"
+    "openrouter/free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "deepseek/deepseek-chat-v3-0324:free",
+    "google/gemma-3-27b-it:free",
+    "mistralai/mistral-small-24b-instruct-2501:free",
   ].filter(Boolean) as string[]));
 
-  for (const model of models) {
+  let skipPaidModels = false;
+  let triedDynamicFree = false;
+  let sawAuthErr = false;
+  let sawCreditOrLimit = false;
+  let lastNote = "";
+
+  for (let i = 0; i < models.length; i++) {
+    const model = models[i];
+    if (skipPaidModels && !model.endsWith(":free") && model !== "openrouter/free") continue;
     try {
       const resp = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
@@ -642,11 +936,45 @@ async function executeWithOpenRouter(
       if (resp.ok) {
         const data: any = await resp.json();
         const text = data?.choices?.[0]?.message?.content;
-        if (text && text.trim()) return { text: text.trim(), model };
+        if (text && text.trim()) {
+          if (isPersonalAux) {
+            clearByokCooldown("or", apiKey);
+            store!.auxOutcome = { provider: "openrouter", status: "used" };
+          }
+          return { text: text.trim(), model };
+        }
+      } else {
+        if (resp.status === 401 || resp.status === 403) {
+          sawAuthErr = true;
+          lastNote = "OpenRouter key rejected";
+          break;
+        }
+        if (resp.status === 402) {
+          skipPaidModels = true;
+          sawCreditOrLimit = true;
+          lastNote = "OpenRouter free-tier fallback";
+        } else if (resp.status === 429) {
+          sawCreditOrLimit = true;
+          lastNote = "OpenRouter rate limit reached";
+        }
+        if (!triedDynamicFree && (resp.status === 402 || resp.status === 404)) {
+          triedDynamicFree = true;
+          const dyn = await getDynamicOpenRouterFreeModels(apiKey);
+          for (const f of dyn) {
+            if (!models.includes(f)) models.push(f);
+          }
+        }
       }
     } catch (err: any) {
+      lastNote = err?.message || "OpenRouter request failed";
       console.warn(`[OpenRouter Failover] Model ${model} error:`, err?.message);
     }
+  }
+
+  if (isPersonalAux) {
+    const status: AuxOutcome["status"] = sawAuthErr ? "bad" : sawCreditOrLimit ? "limit" : "fallback";
+    setByokCooldown("or", apiKey, status, status === "bad" ? 180000 : status === "limit" ? 60000 : 15000, lastNote);
+    store!.auxOutcome = { provider: "openrouter", status, note: lastNote };
   }
   return null;
 }
@@ -1547,14 +1875,17 @@ async function startServer() {
   // BYOK: client may send its own Groq / OpenRouter keys in a header; scoped to this request only.
   app.use((req, _res, next) => {
     const raw = req.headers["x-sayad-aux"];
-    if (typeof raw !== "string" || !raw) return next();
-    try {
-      const o = JSON.parse(decodeURIComponent(raw));
-      const store: { groq?: string; openrouter?: string } = {};
-      if (typeof o.groq === "string" && detectProvider(o.groq.trim()) === "groq") store.groq = o.groq.trim();
-      if (typeof o.openrouter === "string" && detectProvider(o.openrouter.trim()) === "openrouter") store.openrouter = o.openrouter.trim();
-      return userKeyCtx.run(store, next);
-    } catch { return next(); }
+    const store: { groq?: string; openrouter?: string; auxOutcome?: AuxOutcome } = {};
+    if (typeof raw === "string" && raw) {
+      try {
+        const o = JSON.parse(decodeURIComponent(raw));
+        const g = typeof o.groq === "string" ? cleanKeyInput(o.groq) : "";
+        const r = typeof o.openrouter === "string" ? cleanKeyInput(o.openrouter) : "";
+        if (g && detectProvider(g) === "groq") store.groq = g;
+        if (r && detectProvider(r) === "openrouter") store.openrouter = r;
+      } catch {}
+    }
+    return userKeyCtx.run(store, next);
   });
 
   // Health check & Key Pool Diagnostics
@@ -1625,18 +1956,24 @@ async function startServer() {
 
         if (item.varName.startsWith("GEMINI_")) {
           const t0 = Date.now();
-          try {
-            const ai = keyPool.getClient(val);
-            const resp = await ai.models.generateContent({
-              model: "gemini-3.1-flash-lite",
-              contents: "ping",
-            });
-            latencyMs = Date.now() - t0;
-            isResponsive = !!(resp && resp.text);
-          } catch (err: any) {
-            latencyMs = Date.now() - t0;
-            errorMessage = err.message || "Failed to respond";
+          const diagModels = ["gemini-3.1-flash-lite", "gemini-4-hydrogen", "gemini-flash-latest"];
+          const diagModes = val.startsWith("AQ.") ? [false, true] : [false];
+          outerDiag: for (const useV of diagModes) {
+            const ai = keyPool.getClient(val, false, useV);
+            for (const m of diagModels) {
+              try {
+                const resp = await ai.models.generateContent({ model: m, contents: "ping" });
+                if (resp && resp.text) {
+                  isResponsive = true;
+                  errorMessage = "";
+                  break outerDiag;
+                }
+              } catch (err: any) {
+                errorMessage = err?.message || "Failed to respond";
+              }
+            }
           }
+          latencyMs = Date.now() - t0;
         } else if (item.varName === "GROQ_API_KEY") {
           const t0 = Date.now();
           try {
@@ -1859,15 +2196,47 @@ async function startServer() {
         studySysInstruction = "You are an elite Board Examination Paper Setter (CBSE & NIOS standard). Return ONLY a valid JSON array of question objects. Do NOT output markdown backticks (```), commentary, or explanations outside the JSON.";
       }
 
+      const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
+      const hasByokGemini = cleanCustomKey.length > 10;
+      const preferUserAuxFirst = !hasByokGemini && json !== true && (hasUserGroq() || hasUserOr());
+
+      const tryUserAuxStudy = async () => {
+        if (hasUserGroq()) {
+          const g = await executeWithGroq(queryPrompt, studySysInstruction, typeof temperature === "number" ? temperature : 0.25);
+          if (g) return { text: g, provider: "groq" as const, model: "llama-3.3-70b-versatile", slot: "user-groq" };
+        }
+        if (hasUserOr()) {
+          const orRes = await executeWithOpenRouter(queryPrompt, studySysInstruction, typeof temperature === "number" ? temperature : 0.25);
+          if (orRes && orRes.text) return { text: orRes.text, provider: "openrouter" as const, model: orRes.model, slot: "user-openrouter" };
+        }
+        return null;
+      };
+
       // Real-Time SSE Streaming Delivery if requested
       if (stream) {
         res.setHeader("Content-Type", "text/event-stream");
         res.setHeader("Cache-Control", "no-cache, no-transform");
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
-        if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+        const startSse = (slotTag?: string, byokOutcome?: ByokOutcome | null) => {
+          attachOutcomeHeaders(res, { slotTag, byokOutcome });
+          if (typeof res.flushHeaders === "function") res.flushHeaders();
+        };
+
+        if (preferUserAuxFirst) {
+          const auxHit = await tryUserAuxStudy();
+          if (auxHit) {
+            startSse(auxHit.slot);
+            res.write(`data: ${JSON.stringify({ chunk: auxHit.text })}\n\n`);
+            res.write(`data: ${JSON.stringify({ done: true, fullText: auxHit.text, model: auxHit.model, keySlot: auxHit.slot, auxOutcome: userKeyCtx.getStore()?.auxOutcome })}\n\n`);
+            return res.end();
+          }
+        }
 
         let accumulatedStreamText = "";
+        let lastByokOutcome: ByokOutcome | null = null;
+        let sseStarted = false;
         const streamResult = await executeWithGeminiPoolStream(
           'study',
           queryPrompt,
@@ -1879,12 +2248,19 @@ async function startServer() {
             targetModel,
             temperature: typeof temperature === "number" ? temperature : 0.22,
             systemInstruction: studySysInstruction,
-            customKey,
+            customKey: cleanCustomKey || undefined,
+            onByokOutcome: (o) => { lastByokOutcome = o; },
+            onSlotStart: ({ keyTag, byokOutcome }) => {
+              if (!sseStarted) {
+                sseStarted = true;
+                startSse(keyTag, byokOutcome || lastByokOutcome);
+              }
+            },
           }
         );
 
         if (streamResult && accumulatedStreamText.trim().length > 0) {
-          res.write(`data: ${JSON.stringify({ done: true, fullText: accumulatedStreamText.trim(), model: streamResult.model })}\n\n`);
+          res.write(`data: ${JSON.stringify({ done: true, fullText: accumulatedStreamText.trim(), model: streamResult.model, keySlot: streamResult.keyTag, byokStatus: streamResult.byokStatus })}\n\n`);
           return res.end();
         }
 
@@ -1893,62 +2269,89 @@ async function startServer() {
           targetModel,
           temperature: typeof temperature === "number" ? temperature : 0.22,
           systemInstruction: studySysInstruction,
-          customKey,
+          customKey: cleanCustomKey || undefined,
+          onByokOutcome: (o) => { lastByokOutcome = o; },
         });
 
         const fallbackText = fallbackRes?.text || "";
         if (fallbackText) {
+          if (!sseStarted) {
+            sseStarted = true;
+            startSse(fallbackRes?.keyTag, lastByokOutcome);
+          }
           res.write(`data: ${JSON.stringify({ chunk: fallbackText })}\n\n`);
-          res.write(`data: ${JSON.stringify({ done: true, fullText: fallbackText, model: fallbackRes?.model })}\n\n`);
+          res.write(`data: ${JSON.stringify({ done: true, fullText: fallbackText, model: fallbackRes?.model, keySlot: fallbackRes?.keyTag, byokStatus: fallbackRes?.byokStatus })}\n\n`);
           return res.end();
         }
 
         // Groq Fallback for study tool
-        if (groqKey()) {
+        if (groqKey() && !preferUserAuxFirst) {
           try {
             const groqRes = await executeWithGroq(queryPrompt, studySysInstruction, 0.22);
             if (groqRes) {
+              if (!sseStarted) { sseStarted = true; startSse("groq", lastByokOutcome); }
               res.write(`data: ${JSON.stringify({ chunk: groqRes })}\n\n`);
-              res.write(`data: ${JSON.stringify({ done: true, fullText: groqRes, model: "groq-llama-3.3-70b" })}\n\n`);
+              res.write(`data: ${JSON.stringify({ done: true, fullText: groqRes, model: "groq-llama-3.3-70b", auxOutcome: userKeyCtx.getStore()?.auxOutcome })}\n\n`);
               return res.end();
             }
           } catch(e) {}
         }
 
         // OpenRouter Fallback for study tool
-        if (orKey()) {
+        if (orKey() && !preferUserAuxFirst) {
           try {
             const orRes = await executeWithOpenRouter(queryPrompt, studySysInstruction, 0.22);
             if (orRes && orRes.text) {
+              if (!sseStarted) { sseStarted = true; startSse("openrouter", lastByokOutcome); }
               res.write(`data: ${JSON.stringify({ chunk: orRes.text })}\n\n`);
-              res.write(`data: ${JSON.stringify({ done: true, fullText: orRes.text, model: "openrouter" })}\n\n`);
+              res.write(`data: ${JSON.stringify({ done: true, fullText: orRes.text, model: orRes.model, auxOutcome: userKeyCtx.getStore()?.auxOutcome })}\n\n`);
               return res.end();
             }
           } catch(e) {}
         }
 
+        if (!sseStarted) startSse(undefined, lastByokOutcome);
         res.write(`data: ${JSON.stringify({ error: "Generation failed" })}\n\n`);
         return res.end();
       }
 
+      if (preferUserAuxFirst) {
+        const auxHit = await tryUserAuxStudy();
+        if (auxHit) {
+          attachOutcomeHeaders(res, { slotTag: auxHit.slot });
+          return res.json({
+            text: auxHit.text,
+            status: "success",
+            provider: auxHit.provider,
+            model: auxHit.model,
+            keySlot: auxHit.slot,
+            toolKey: toolKey || "study-tool",
+          });
+        }
+      }
+
       // 1. Execute with dedicated Gemini Study Key Pool (or user BYOK custom key)
-      if (keyPool.hasAnyKey() || customKey) {
+      let byokOutcome: ByokOutcome | null = null;
+      if (keyPool.hasAnyKey() || hasByokGemini) {
         try {
           const result = await executeWithGeminiPool('study', queryPrompt, {
             targetModel,
             temperature: typeof temperature === "number" ? temperature : 0.22,
             systemInstruction: studySysInstruction,
-            customKey,
+            customKey: cleanCustomKey || undefined,
             responseMimeType: json === true ? "application/json" : undefined,
+            onByokOutcome: (o) => { byokOutcome = o; },
           });
 
           if (result && result.text) {
+            attachOutcomeHeaders(res, { slotTag: result.keyTag, byokOutcome });
             return res.json({
               text: result.text,
               status: "success",
               provider: "gemini",
               model: result.model,
               keySlot: result.keyTag,
+              byokStatus: result.byokStatus,
               toolKey: toolKey || "study-tool",
             });
           }
@@ -1958,23 +2361,25 @@ async function startServer() {
       }
 
       // 2. High-speed Groq Inference (Sub-second fallback)
-      if (groqKey()) {
+      if (groqKey() && !preferUserAuxFirst) {
         const groqText = await executeWithGroq(queryPrompt, studySysInstruction, 0.25);
         if (groqText) {
+          attachOutcomeHeaders(res, { slotTag: hasUserGroq() ? "user-groq" : "groq", byokOutcome });
           return res.json({
             text: groqText,
             status: "success",
             provider: "groq",
-            model: "gpt-oss-120b",
+            model: "llama-3.3-70b-versatile",
             toolKey: toolKey || "study-tool"
           });
         }
       }
 
       // 3. OpenRouter (DeepSeek V3 / LLaMA 3.3 70B) Fallback
-      if (orKey()) {
+      if (orKey() && !preferUserAuxFirst) {
         const orResult = await executeWithOpenRouter(queryPrompt, studySysInstruction, 0.25);
         if (orResult && orResult.text) {
+          attachOutcomeHeaders(res, { slotTag: hasUserOr() ? "user-openrouter" : "openrouter", byokOutcome });
           return res.json({
             text: orResult.text,
             status: "success",
@@ -1985,6 +2390,7 @@ async function startServer() {
         }
       }
 
+      attachOutcomeHeaders(res, { byokOutcome });
       return res.status(503).json({
         error: "All AI study inference services temporarily busy. Please check keys in Settings.",
         status: "error"
@@ -1998,7 +2404,8 @@ async function startServer() {
   // Dedicated Oxford-Grade Academic Dictionary & Lexicon Endpoint
   app.post("/api/dictionary", async (req, res) => {
     try {
-      const { word, context, subjectDomain } = req.body;
+      const { word, context, subjectDomain, customKey } = req.body;
+      const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
       if (!word || typeof word !== "string") {
         return res.status(400).json({ error: "Missing or invalid 'word' field in request body." });
       }
@@ -2087,25 +2494,30 @@ Return ONLY a valid raw JSON object with this exact structure:
   "antonyms": ["antonym_1", "antonym_2"]
 }`;
 
-      // 1. Try Gemini Key Pool with ultra-fast 'gemini-3.1-flash-lite'
-      if (keyPool.hasAnyKey()) {
+      // 1. Try Gemini Key Pool (or user BYOK custom key)
+      let dictByokOutcome: ByokOutcome | null = null;
+      if (keyPool.hasAnyKey() || cleanCustomKey) {
         try {
           const result = await executeWithGeminiPool('study', lexiconPrompt, {
             targetModel: "gemini-3.1-flash-lite",
             temperature: 0.05,
             systemInstruction: lexiconSysInstruction,
             responseMimeType: "application/json",
+            customKey: cleanCustomKey || undefined,
+            onByokOutcome: (o) => { dictByokOutcome = o; },
           });
 
           if (result && result.text) {
             try {
               const cleaned = result.text.replace(/```json/gi, '').replace(/```/g, '').trim();
               const parsed = JSON.parse(cleaned);
+              attachOutcomeHeaders(res, { slotTag: result.keyTag, byokOutcome: dictByokOutcome });
               return res.json({
                 data: parsed,
                 status: "success",
                 provider: "gemini",
                 model: result.model,
+                keySlot: result.keyTag,
               });
             } catch (pErr) {
               console.warn("Gemini JSON parse fallback for dictionary:", pErr);
@@ -2123,11 +2535,12 @@ Return ONLY a valid raw JSON object with this exact structure:
           try {
             const cleaned = groqText.replace(/```json/gi, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(cleaned);
+            attachOutcomeHeaders(res, { slotTag: hasUserGroq() ? "user-groq" : "groq", byokOutcome: dictByokOutcome });
             return res.json({
               data: parsed,
               status: "success",
               provider: "groq",
-              model: "gpt-oss-120b",
+              model: "llama-3.3-70b-versatile",
             });
           } catch (pErr) {}
         }
@@ -2140,6 +2553,7 @@ Return ONLY a valid raw JSON object with this exact structure:
           try {
             const cleaned = orResult.text.replace(/```json/gi, '').replace(/```/g, '').trim();
             const parsed = JSON.parse(cleaned);
+            attachOutcomeHeaders(res, { slotTag: hasUserOr() ? "user-openrouter" : "openrouter", byokOutcome: dictByokOutcome });
             return res.json({
               data: parsed,
               status: "success",
@@ -2150,6 +2564,7 @@ Return ONLY a valid raw JSON object with this exact structure:
         }
       }
 
+      attachOutcomeHeaders(res, { byokOutcome: dictByokOutcome });
       return res.status(503).json({
         error: "Dictionary inference service temporarily unavailable.",
         status: "error",
@@ -2180,12 +2595,14 @@ Return ONLY a valid raw JSON object with this exact structure:
     };
     try {
       if (provider === "gemini") {
+        clearByokCooldown("gemini", key);
         let publicErrMsg = "";
         const isAq = key.startsWith("AQ.");
         if (!isAq) {
           try {
             const mr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1&key=${encodeURIComponent(key)}`);
             if (mr.ok) {
+              byokClientModeCache.set(hashKeyId("gmode", key), { direct: true, vertex: false, ts: Date.now() });
               return res.json({ valid: true, provider, quota: null, note: "Google quota nahi batata; app apna count rakhta hai" });
             }
             if (mr.status === 429) {
@@ -2203,18 +2620,25 @@ Return ONLY a valid raw JSON object with this exact structure:
           } catch {}
         }
 
-        const clientsToTry = isAq
-          ? [keyPool.getClient(key, true, true), keyPool.getClient(key, true, false)]
+        const clientsToTry: { client: GoogleGenAI; direct: boolean; vertex: boolean; models: string[] }[] = isAq
+          ? [
+              { client: keyPool.getClient(key, true, false), direct: true, vertex: false, models: ["gemini-3.1-flash-lite", "gemini-4-hydrogen", "gemini-flash-latest", "gemini-2.5-flash"] },
+              { client: keyPool.getClient(key, true, true), direct: true, vertex: true, models: ["gemini-2.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"] },
+              ...(process.env.GEMINI_BASE_URL ? [{ client: keyPool.getClient(key, false, false), direct: false, vertex: false, models: ["gemini-3.1-flash-lite", "gemini-4-hydrogen", "gemini-flash-latest"] }] : []),
+            ]
           : (process.env.GEMINI_BASE_URL
-              ? [keyPool.getClient(key, false, false), keyPool.getClient(key, true, false)]
-              : [keyPool.getClient(key, true, false)]);
-        const testModels = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-3.1-flash-lite-preview", "gemini-3.1-flash-lite"];
+              ? [
+                  { client: keyPool.getClient(key, true, false), direct: true, vertex: false, models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.1-flash-lite-preview"] },
+                  { client: keyPool.getClient(key, false, false), direct: false, vertex: false, models: ["gemini-3.1-flash-lite", "gemini-4-hydrogen", "gemini-flash-latest"] },
+                ]
+              : [{ client: keyPool.getClient(key, true, false), direct: true, vertex: false, models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.1-flash-lite-preview"] }]);
         let lastErr = publicErrMsg;
-        for (const client of clientsToTry) {
-          for (const m of testModels) {
+        for (const item of clientsToTry) {
+          for (const m of item.models) {
             try {
-              const r = await client.models.generateContent({ model: m, contents: "Reply OK" });
+              const r = await item.client.models.generateContent({ model: m, contents: "Reply OK" });
               if (r && r.text) {
+                byokClientModeCache.set(hashKeyId("gmode", key), { direct: item.direct, vertex: item.vertex, ts: Date.now() });
                 return res.json({ valid: true, provider, quota: null, note: "Google quota nahi batata; app apna count rakhta hai" });
               }
             } catch (gErr: any) {
@@ -2223,7 +2647,7 @@ Return ONLY a valid raw JSON object with this exact structure:
               if (status === 429 || /429|RESOURCE_EXHAUSTED|quota|rate.?limit/i.test(msg)) {
                 return res.json({ valid: true, exhausted: true, provider, quota: null, note: "Key valid hai, abhi rate limit par hai" });
               }
-              if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED|UNAUTHENTICATED|401/i.test(msg)) {
+              if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED|UNAUTHENTICATED|401|403/i.test(msg)) {
                 lastErr = msg;
                 break;
               }
@@ -2232,6 +2656,12 @@ Return ONLY a valid raw JSON object with this exact structure:
           }
         }
         return res.json({ valid: false, provider, error: friendlyErr(lastErr, "Gemini key verify nahi ho saki") });
+      }
+      if (provider === "groq") {
+        clearByokCooldown("groq", key);
+      }
+      if (provider === "openrouter") {
+        clearByokCooldown("or", key);
       }
       if (provider === "groq") {
         // Step 1: Verify key & fetch actual models enabled for this key
@@ -2316,10 +2746,21 @@ Return ONLY a valid raw JSON object with this exact structure:
         const mErr: any = await mr.json().catch(() => ({}));
         return res.status(400).json({ valid: false, error: mErr?.error?.message || "Failed to validate key with Google Gemini." });
       }
-      const client = keyPool.getClient(apiKey, true, true);
-      const r = await client.models.generateContent({ model: "gemini-2.5-flash", contents: "Reply OK" });
-      if (r && r.text) return res.json({ valid: true, message: "Key verified successfully!" });
-      return res.status(400).json({ valid: false, error: "Invalid response from Gemini" });
+      const clients = [keyPool.getClient(apiKey, true, false), keyPool.getClient(apiKey, true, true)];
+      const models = ["gemini-3.1-flash-lite", "gemini-4-hydrogen", "gemini-flash-latest", "gemini-2.5-flash"];
+      let lastValidateErr = "Invalid response from Gemini";
+      for (const client of clients) {
+        for (const m of models) {
+          try {
+            const r = await client.models.generateContent({ model: m, contents: "Reply OK" });
+            if (r && r.text) return res.json({ valid: true, message: "Key verified successfully!" });
+          } catch (e: any) {
+            lastValidateErr = e?.message || lastValidateErr;
+            if (/API_KEY_INVALID|API key not valid|PERMISSION_DENIED|UNAUTHENTICATED|401|403/i.test(lastValidateErr)) break;
+          }
+        }
+      }
+      return res.status(400).json({ valid: false, error: lastValidateErr });
     } catch (err: any) {
       console.warn("Key validation failed:", err.message);
       return res.status(400).json({ valid: false, error: err.message || "Failed to validate key with Google Gemini." });
@@ -2334,23 +2775,48 @@ Return ONLY a valid raw JSON object with this exact structure:
         return res.status(400).json({ error: "Missing or invalid 'prompt' field in request body." });
       }
 
+      const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
+      const hasByokGemini = cleanCustomKey.length > 10;
+      const preferUserAuxFirst = !hasByokGemini && (hasUserGroq() || hasUserOr());
+
+      if (preferUserAuxFirst) {
+        if (hasUserGroq()) {
+          const groqText = await executeWithGroq(prompt, systemInstruction, typeof temperature === "number" ? temperature : 0.3);
+          if (groqText) {
+            attachOutcomeHeaders(res, { slotTag: "user-groq" });
+            return res.json({ text: groqText, status: "success", provider: "groq", model: "llama-3.3-70b-versatile", keySlot: "user-groq" });
+          }
+        }
+        if (hasUserOr()) {
+          const orResult = await executeWithOpenRouter(prompt, systemInstruction, typeof temperature === "number" ? temperature : 0.3);
+          if (orResult && orResult.text) {
+            attachOutcomeHeaders(res, { slotTag: "user-openrouter" });
+            return res.json({ text: orResult.text, status: "success", provider: "openrouter", model: orResult.model, keySlot: "user-openrouter" });
+          }
+        }
+      }
+
       // Tier 1: Google Gemini Models via Multi-Key Pool (or user BYOK custom key)
-      if (keyPool.hasAnyKey() || customKey) {
+      let byokOutcome: ByokOutcome | null = null;
+      if (keyPool.hasAnyKey() || hasByokGemini) {
         try {
           const result = await executeWithGeminiPool('general', prompt, {
             systemInstruction,
             targetModel: model || "gemini-3.1-flash-lite",
             temperature,
-            customKey,
+            customKey: cleanCustomKey || undefined,
+            onByokOutcome: (o) => { byokOutcome = o; },
           });
 
           if (result && result.text) {
+            attachOutcomeHeaders(res, { slotTag: result.keyTag, byokOutcome });
             return res.json({
               text: result.text,
               status: "success",
               provider: "gemini",
               model: result.model,
               keySlot: result.keyTag,
+              byokStatus: result.byokStatus,
             });
           }
         } catch (gErr: any) {
@@ -2359,21 +2825,24 @@ Return ONLY a valid raw JSON object with this exact structure:
       }
 
       // Tier 2: Groq API (if configured)
-      if (groqKey()) {
+      if (groqKey() && !preferUserAuxFirst) {
         const groqText = await executeWithGroq(prompt, systemInstruction, typeof temperature === "number" ? temperature : 0.3);
         if (groqText) {
-          return res.json({ text: groqText, status: "success", provider: "groq", model: "gpt-oss-120b" });
+          attachOutcomeHeaders(res, { slotTag: hasUserGroq() ? "user-groq" : "groq", byokOutcome });
+          return res.json({ text: groqText, status: "success", provider: "groq", model: "llama-3.3-70b-versatile" });
         }
       }
 
       // Tier 3: OpenRouter API (if configured in environment)
-      if (orKey()) {
+      if (orKey() && !preferUserAuxFirst) {
         const orResult = await executeWithOpenRouter(prompt, systemInstruction, typeof temperature === "number" ? temperature : 0.3);
         if (orResult && orResult.text) {
+          attachOutcomeHeaders(res, { slotTag: hasUserOr() ? "user-openrouter" : "openrouter", byokOutcome });
           return res.json({ text: orResult.text, status: "success", provider: "openrouter", model: orResult.model });
         }
       }
 
+      attachOutcomeHeaders(res, { byokOutcome });
       return res.status(503).json({
         error: "No AI provider configured. Please provide GEMINI_API_KEY in Settings.",
         status: "error"
@@ -2914,18 +3383,62 @@ LAST LINE RULE (machine-read, never mention it): after your answer, on a new fin
 
 Now reply in ${userLang}, in a natural conversational voice, with only as much depth as the question deserves:`;
 
+      const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
+      const hasByokGemini = cleanCustomKey.length > 10;
+      const preferUserAuxFirst = !hasByokGemini && !webResultsBlock && (hasUserGroq() || hasUserOr());
+
+      const sendSseReply = (text: string, engine: string, keySlot?: string, byokOutcome?: ByokOutcome | null) => {
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Accel-Buffering", "no");
+        attachOutcomeHeaders(res, { slotTag: keySlot, byokOutcome });
+        if (typeof res.flushHeaders === "function") res.flushHeaders();
+        res.write(`data: ${JSON.stringify({ chunk: text })}\n\n`);
+        res.write(`data: ${JSON.stringify({ done: true, fullText: text, engine, keySlot, auxOutcome: userKeyCtx.getStore()?.auxOutcome })}\n\n`);
+        return res.end();
+      };
+
       // Specific user engine preference handling
       if ((preferredEngine === 'deepseek' || preferredEngine === 'openrouter-deepseek') && orKey()) {
         const orResult = await executeWithOpenRouter(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.25, "deepseek/deepseek-chat");
         if (orResult && orResult.text) {
-          return res.json({ text: finishReply(orResult.text), status: "success", engine: "deepseek-v3", provider: "openrouter" });
+          const finalTxt = finishReply(orResult.text);
+          if (stream) return sendSseReply(finalTxt, "deepseek-v3", hasUserOr() ? "user-openrouter" : "openrouter");
+          attachOutcomeHeaders(res, { slotTag: hasUserOr() ? "user-openrouter" : "openrouter" });
+          return res.json({ text: finalTxt, status: "success", engine: "deepseek-v3", provider: "openrouter" });
         }
       }
 
       if ((preferredEngine === 'llama' || preferredEngine === 'openrouter-llama') && orKey()) {
         const orResult = await executeWithOpenRouter(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.25, "meta-llama/llama-3.3-70b-instruct");
         if (orResult && orResult.text) {
-          return res.json({ text: finishReply(orResult.text), status: "success", engine: "openrouter-llama-3.3-70b", provider: "openrouter" });
+          const finalTxt = finishReply(orResult.text);
+          if (stream) return sendSseReply(finalTxt, "openrouter-llama-3.3-70b", hasUserOr() ? "user-openrouter" : "openrouter");
+          attachOutcomeHeaders(res, { slotTag: hasUserOr() ? "user-openrouter" : "openrouter" });
+          return res.json({ text: finalTxt, status: "success", engine: "openrouter-llama-3.3-70b", provider: "openrouter" });
+        }
+      }
+
+      // If user explicitly added BYOK Groq/OpenRouter (without personal Gemini key), try their BYOK key first with seamless Gemini fallback
+      if (preferUserAuxFirst) {
+        if (hasUserGroq()) {
+          const groqReply = await executeWithGroq(hybridPrompt, "You are an elite academic professor. Strictly match the student's language.", 0.25);
+          if (groqReply) {
+            const cleanGroq = finishReply(groqReply);
+            if (stream) return sendSseReply(cleanGroq, "groq-llama-3.3-70b", "user-groq");
+            attachOutcomeHeaders(res, { slotTag: "user-groq" });
+            return res.json({ text: cleanGroq, status: "success", engine: "groq-llama-3.3-70b", provider: "groq", keySlot: "user-groq" });
+          }
+        }
+        if (hasUserOr()) {
+          const orResult = await executeWithOpenRouter(hybridPrompt, "You are an elite academic professor. Strictly match the student's language.", 0.25, "deepseek/deepseek-chat");
+          if (orResult && orResult.text) {
+            const cleanOr = finishReply(orResult.text);
+            if (stream) return sendSseReply(cleanOr, `openrouter-${orResult.model.split('/').pop()}`, "user-openrouter");
+            attachOutcomeHeaders(res, { slotTag: "user-openrouter" });
+            return res.json({ text: cleanOr, status: "success", engine: `openrouter-${orResult.model.split('/').pop()}`, provider: "openrouter", keySlot: "user-openrouter" });
+          }
         }
       }
 
@@ -2935,11 +3448,20 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
         res.setHeader("Cache-Control", "no-cache, no-transform");
         res.setHeader("Connection", "keep-alive");
         res.setHeader("X-Accel-Buffering", "no");
-        if (typeof res.flushHeaders === "function") res.flushHeaders();
 
         let streamedHybridText = "";
         let holdTail = false;
         let pendingTail = "";
+        let lastByokOutcome: ByokOutcome | null = null;
+        let sseStarted = false;
+
+        const startSse = (slotTag?: string, byokOutcome?: ByokOutcome | null) => {
+          if (sseStarted) return;
+          sseStarted = true;
+          attachOutcomeHeaders(res, { slotTag, byokOutcome });
+          if (typeof res.flushHeaders === "function") res.flushHeaders();
+        };
+
         const streamResult = await executeWithGeminiPoolStream(
           'chat',
           hybridPrompt,
@@ -2959,13 +3481,16 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
             systemInstruction: `You are an elite, state-of-the-art AI Super-Intelligence operating with the exact intelligence, sharp intuition, and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Strictly match the student's language: Hinglish if they talk in Hinglish, Hindi if in Hindi, and English if in English.`,
             targetModel: "gemini-3.1-flash-lite",
             temperature: 0.25,
-            customKey,
+            customKey: cleanCustomKey || undefined,
+            onByokOutcome: (o) => { lastByokOutcome = o; },
+            onSlotStart: ({ keyTag, byokOutcome }) => startSse(keyTag, byokOutcome || lastByokOutcome),
           }
         );
 
         if (!holdTail && pendingTail) res.write(`data: ${JSON.stringify({ chunk: pendingTail })}\n\n`);
         if (streamResult && streamedHybridText.trim().length > 0) {
-          res.write(`data: ${JSON.stringify({ done: true, fullText: finishReply(streamedHybridText.trim()), engine: streamResult.model })}\n\n`);
+          startSse(streamResult.keyTag, lastByokOutcome);
+          res.write(`data: ${JSON.stringify({ done: true, fullText: finishReply(streamedHybridText.trim()), engine: streamResult.model, keySlot: streamResult.keyTag, byokStatus: streamResult.byokStatus })}\n\n`);
           return res.end();
         }
 
@@ -2974,62 +3499,71 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
           systemInstruction: `You are an elite AI Super-Intelligence. Strictly match student language.`,
           targetModel: "gemini-3.1-flash-lite",
           temperature: 0.25,
-          customKey,
+          customKey: cleanCustomKey || undefined,
+          onByokOutcome: (o) => { lastByokOutcome = o; },
         });
 
         const fallbackText = finishReply(fallbackRes?.text || "");
         if (fallbackText) {
+          startSse(fallbackRes?.keyTag, lastByokOutcome);
           res.write(`data: ${JSON.stringify({ chunk: fallbackText })}\n\n`);
-          res.write(`data: ${JSON.stringify({ done: true, fullText: fallbackText, engine: fallbackRes?.model })}\n\n`);
+          res.write(`data: ${JSON.stringify({ done: true, fullText: fallbackText, engine: fallbackRes?.model, keySlot: fallbackRes?.keyTag, byokStatus: fallbackRes?.byokStatus })}\n\n`);
           return res.end();
         }
 
         // Tier 2 Fallback: Groq Ultra-Fast Llama 3.3 70B
-        if (groqKey()) {
+        if (groqKey() && !preferUserAuxFirst) {
           try {
             const groqReply = await executeWithGroq(hybridPrompt, "You are an elite academic professor.", 0.25);
             if (groqReply) {
               const cleanGroq = finishReply(groqReply);
+              startSse("groq", lastByokOutcome);
               res.write(`data: ${JSON.stringify({ chunk: cleanGroq })}\n\n`);
-              res.write(`data: ${JSON.stringify({ done: true, fullText: cleanGroq, engine: "groq-llama-3.3-70b" })}\n\n`);
+              res.write(`data: ${JSON.stringify({ done: true, fullText: cleanGroq, engine: "groq-llama-3.3-70b", auxOutcome: userKeyCtx.getStore()?.auxOutcome })}\n\n`);
               return res.end();
             }
           } catch(e) {}
         }
 
         // Tier 3 Fallback: OpenRouter
-        if (orKey()) {
+        if (orKey() && !preferUserAuxFirst) {
           try {
             const orResult = await executeWithOpenRouter(hybridPrompt, "You are an elite academic professor.", 0.25);
             if (orResult && orResult.text) {
               const cleanOr = finishReply(orResult.text);
+              startSse("openrouter", lastByokOutcome);
               res.write(`data: ${JSON.stringify({ chunk: cleanOr })}\n\n`);
-              res.write(`data: ${JSON.stringify({ done: true, fullText: cleanOr, engine: "openrouter" })}\n\n`);
+              res.write(`data: ${JSON.stringify({ done: true, fullText: cleanOr, engine: orResult.model, auxOutcome: userKeyCtx.getStore()?.auxOutcome })}\n\n`);
               return res.end();
             }
           } catch(e) {}
         }
 
+        startSse(undefined, lastByokOutcome);
         res.write(`data: ${JSON.stringify({ error: "Generation failed" })}\n\n`);
         return res.end();
       }
 
       // Tier 1: Try Gemini Key Pool with powerful models (Dedicated Chat Pool with 5 keys or user customKey)
-      if (keyPool.hasAnyKey() || customKey) {
+      let hybridByokOutcome: ByokOutcome | null = null;
+      if (keyPool.hasAnyKey() || hasByokGemini) {
         try {
           const result = await executeWithGeminiPool('chat', hybridPrompt, {
             systemInstruction: `You are an elite, state-of-the-art AI Super-Intelligence operating with the exact intelligence, sharp intuition, and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Strictly match the student's language: Hinglish if they talk in Hinglish, Hindi if in Hindi, and English if in English.`,
             targetModel: "gemini-3.1-flash-lite",
             temperature: 0.25,
-            customKey,
+            customKey: cleanCustomKey || undefined,
+            onByokOutcome: (o) => { hybridByokOutcome = o; },
           });
 
           if (result && result.text) {
+            attachOutcomeHeaders(res, { slotTag: result.keyTag, byokOutcome: hybridByokOutcome });
             return res.json({
               text: finishReply(result.text),
               status: "success",
               engine: result.model.startsWith("gemini-") ? result.model : `gemini-${result.model}`,
               keySlot: result.keyTag,
+              byokStatus: result.byokStatus,
             });
           }
         } catch (geminiInitErr: any) {
@@ -3038,7 +3572,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
       }
 
       // Tier 2: OpenRouter DeepSeek V3 / LLaMA 3.3 70B (State of the art reasoning & fast responses)
-      if (orKey()) {
+      if (orKey() && !preferUserAuxFirst) {
         const orResult = await executeWithOpenRouter(
           hybridPrompt,
           "You are an elite AI Super-Intelligence operating with the exact intelligence and natural conversational mastery of ChatGPT (GPT-4o) and Claude (Sonnet 3.5). Strictly match the user's language (Hinglish/Hindi/English).",
@@ -3046,6 +3580,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
           "deepseek/deepseek-chat"
         );
         if (orResult && orResult.text) {
+          attachOutcomeHeaders(res, { slotTag: hasUserOr() ? "user-openrouter" : "openrouter", byokOutcome: hybridByokOutcome });
           return res.json({
             text: finishReply(orResult.text),
             status: "success",
@@ -3056,13 +3591,15 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
       }
 
       // Tier 3: Open-Source LLaMA / GPT on Groq (High speed, instant responses)
-      if (groqKey()) {
+      if (groqKey() && !preferUserAuxFirst) {
         const groqText = await executeWithGroq(hybridPrompt, "You are the S.A.Y.A.D. Super-Tutor Lead Academic Professor.", 0.3);
         if (groqText) {
-          return res.json({ text: finishReply(groqText), status: "success", engine: "groq-gpt-oss-120b" });
+          attachOutcomeHeaders(res, { slotTag: hasUserGroq() ? "user-groq" : "groq", byokOutcome: hybridByokOutcome });
+          return res.json({ text: finishReply(groqText), status: "success", engine: "groq-llama-3.3-70b" });
         }
       }
 
+      attachOutcomeHeaders(res, { byokOutcome: hybridByokOutcome });
       return res.status(500).json({ error: "All AI inference engines temporarily unavailable." });
     } catch (err: any) {
       console.error("Hybrid Tutor Server Error:", err);

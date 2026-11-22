@@ -1163,27 +1163,27 @@ export function openReadingThemesModal() {
   document.querySelectorAll('.theme-pick-btn').forEach(btn => {
     btn.onclick = async () => {
       const th = btn.dataset.theme;
+      if (window.State.theme === th && !window.State.autoTheme) return;
       window.State.theme = th;
       window.State.autoTheme = false;
+      const fxKind = th === 'sepia' ? 'sepia' : /dark|night|black|amoled|oled/i.test(th) ? 'dark' : 'light';
       window.themeTransition(() => {
         document.documentElement.dataset.theme = th;
         if (typeof window.syncThemeColorMeta === 'function') window.syncThemeColorMeta();
-      }, btn, /dark|night|black|amoled/i.test(th) ? 'dark' : 'light');
+        document.querySelectorAll('.theme-pick-btn').forEach(b => {
+          const isMatch = b.dataset.theme === th;
+          b.classList.toggle('active', isMatch);
+          b.style.background = isMatch ? 'var(--accent-soft)' : 'var(--surface-2)';
+          b.style.color = isMatch ? 'var(--accent)' : 'var(--text)';
+          b.style.borderColor = isMatch ? 'var(--accent)' : 'var(--border)';
+        });
+      }, btn, fxKind);
       try { localStorage.setItem('sayad_theme', th); } catch(e){}
       if (window.DB) {
         await window.DB.setting('theme', th);
         await window.DB.setting('autoTheme', false);
       }
       window.toast(`Theme set to ${th.toUpperCase()}`);
-
-      // In-place UI update
-      document.querySelectorAll('.theme-pick-btn').forEach(b => {
-        const isMatch = b.dataset.theme === th;
-        b.classList.toggle('active', isMatch);
-        b.style.background = isMatch ? 'var(--accent-soft)' : 'var(--surface-2)';
-        b.style.color = isMatch ? 'var(--accent)' : 'var(--text)';
-        b.style.borderColor = isMatch ? 'var(--accent)' : 'var(--border)';
-      });
     };
   });
 

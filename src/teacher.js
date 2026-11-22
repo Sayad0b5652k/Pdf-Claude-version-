@@ -149,7 +149,7 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
       webBtn.style.boxShadow = webSearchOn ? '0 0 0 1.5px var(--accent) inset' : 'none';
     };
     fetch('/api/web/status').then(r => r.ok ? r.json() : null).then(d => {
-      let byok = ''; try { byok = window.State?.customGeminiKey || localStorage.getItem('sayad_custom_gemini_key') || ''; } catch (e) {}
+      let byok = false; try { byok = Boolean(window.KeyVault?.hasGemini?.() || localStorage.getItem('sayad_custom_gemini_key')); } catch (e) {}
       if (d && (d.enabled || byok)) { webBtn.style.display = 'flex'; paintWeb(); }
     }).catch(() => {});
     webBtn.onclick = () => {
@@ -370,10 +370,11 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
           };
 
           // Try ElevenLabs first if key is configured, otherwise immediate Web Speech
-          const hasElevenKey = (typeof localStorage !== 'undefined' && localStorage.getItem('sayad_eleven_labs_key'));
+          const hasElevenKey = (typeof localStorage !== 'undefined' && localStorage.getItem('sayad_elevenlabs_key'));
           if (hasElevenKey && typeof speakWithElevenLabs === 'function') {
             try {
-              await speakWithElevenLabs(cleanSpeechText.slice(0, 1000), {
+              const elevenVoiceId = window.getTTSSettings?.()?.elevenVoiceId || undefined;
+              await speakWithElevenLabs(cleanSpeechText.slice(0, 1000), elevenVoiceId, {
                 onEnd: resetBtn,
                 onError: fallbackWebSpeech
               });

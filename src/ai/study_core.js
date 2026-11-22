@@ -212,14 +212,25 @@ export async function callAI(prompt, toolKey = null, sourceText = '', isFullPage
   return generateOfflineSmartSummary(toolKey || 'explain', sourceText || prompt, isFullPage, pageNum);
 }
 
+export function cleanStudyMarkdownOutput(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  // Strip single/stacked placeholder blocks like blockquote or heading followed only by "Not covered on this page."
+  s = s.replace(/(?:^|\n)(?:#{1,6}[^\n]*\n+|>\s*[^\n]*\n+)*>\s*\*?Not covered on this page\.?\*?\s*(?=\n|$)/gi, '\n');
+  s = s.replace(/(?:^|\n)#{1,6}[^\n]*\n+(?:[-*•]\s*)?\*?Not covered on this page\.?\*?\s*(?=\n|$)/gi, '\n');
+  s = s.replace(/^[ \t]*(?:>\s*)?\*?Not covered on this page\.?\*?[ \t]*$/gmi, '');
+  s = s.replace(/\n{3,}/g, '\n\n').trim();
+  return s;
+}
+
 const GROUNDING_RULES = `
 
-STRICT ACCURACY RULES (these override everything above):
+STRICT ACCURACY & FORMATTING RULES (these override everything above):
 - Use ONLY facts that appear in the Source Text. Never invent dates, numbers, names, formulas, examples, definitions or "facts" from memory.
-- If the Source Text has nothing for a heading (for example no dates, no formulas, no comparison to make), write "Not covered on this page." under it, or leave that table or flowchart out. Never pad.
-- Explain in your own words. Do not paste long runs of the source; a short quoted term or phrase is fine.
+- NEVER write "Not covered on this page.", "Not mentioned", "None found", or empty placeholder sections/tables. If the Source Text lacks dates, formulas, or comparison items for a suggested section, completely OMIT that heading/table and replace it with structured key facts, mechanisms, or principles actually present in the Source Text.
+- Explain in your own words with rich exam clarity. Do not paste long runs of the source; short quoted terms are great.
 - Do not repeat the same point under different headings.
-- Keep the language of the Source Text for terms, and keep every Mermaid label short, plain text without brackets or quotes inside the label.
+- Keep technical terms accurate to the Source Text, and keep every Mermaid label short, plain text without brackets or quotes inside the label.
 - Exam questions you write must be answerable from the Source Text, and the model answer must match it.`;
 
 export function getAIToolPromptForPage(...args) {
@@ -240,7 +251,7 @@ YOUR GOAL FOR PAGE 1: Thoroughly cover the **FIRST SET OF TOPICS & CORE FOUNDATI
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE (Rich markdown, clear bold keywords, bullet points, callout boxes):
+RECOMMENDED STRUCTURE (include only sections supported by the Source Text; omit any unsupported section):
 # 📄 PAGE 1 OF 4: Core Foundations & First Principles
 
 > 💡 **Executive Thesis**: (2-3 detailed sentences establishing the primary overarching concept and academic significance of these first topics)
@@ -265,7 +276,7 @@ Source Text:
 """${text}"""
 ${previousPagesContext ? `\n[Context of Page 1 already covered]:\n${previousPagesContext.slice(0, 500)}` : ''}
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 2 OF 4: Operational Mechanisms & Process Dynamics
 
 ## ⚙️ Step-by-Step Mechanisms & Intermediate Topics
@@ -294,7 +305,7 @@ Source Text:
 """${text}"""
 ${previousPagesContext ? `\n[Summary of Topics already covered in Pages 1-2]:\n${previousPagesContext.slice(0, 600)}` : ''}
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 3 OF 4: Advanced Applications, Comparisons & Nuances
 
 ## 🔬 Advanced Topics & Practical Implementations
@@ -322,7 +333,7 @@ Source Text:
 """${text}"""
 ${previousPagesContext ? `\n[Prior Pages Content Overview]:\n${previousPagesContext.slice(0, 800)}` : ''}
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 4 OF 4: Master Synthesis & High-Yield Things to Remember
 
 > 🎯 **Master Executive Recap**: (Crisp 3-sentence synthesis tying together Page 1's Foundations, Page 2's Mechanisms, and Page 3's Advanced Applications)
@@ -352,7 +363,7 @@ YOUR GOAL FOR PAGE 1: Explain the **CORE INTUITION, EVERYDAY ANALOGIES & FIRST T
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 1 OF 4: Core Intuition, Analogies & Mental Models
 
 > 💡 **1-Minute Real-World Analogy**: (Vivid, memorable everyday analogy breaking down the central concept so anyone grasps it immediately)
@@ -382,7 +393,7 @@ YOUR GOAL FOR PAGE 2: Explain the **DEEP WORKING MECHANICS & INTERMEDIATE PROCES
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 2 OF 4: Step-by-Step Mechanisms & Working Principles
 
 ## ⚙️ How the System Actually Works (Step-by-Step)
@@ -404,7 +415,7 @@ YOUR GOAL FOR PAGE 3: Explain the **ADVANCED APPLICATIONS, COMPARISONS & REAL-WO
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 3 OF 4: Advanced Scenarios, Comparisons & Applications
 
 ## 🔬 Real-World Application & Nuances
@@ -429,7 +440,7 @@ YOUR GOAL FOR PAGE 4: Provide a **COMPLETE INTUITIVE SUMMARY of Pages 1-3** + **
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 4 OF 4: Complete Recap, Memory Mnemonics & Exam Secrets
 
 > 🎯 **Master Intuitive Summary**: (3-sentence simple summary wrapping up all concepts covered across Pages 1, 2, and 3)
@@ -451,23 +462,24 @@ OUTPUT IN THIS EXACT STRUCTURE:
       return `You are an elite academic researcher and archivist.
 Generate **PAGE 1 OF 4** of the Master Catalog for ${scopeDesc}.
 
-YOUR GOAL FOR PAGE 1: Extract all **STARTING HISTORICAL DATES, FOUNDATIONAL TIMELINES & MILESTONES**.
+YOUR GOAL FOR PAGE 1: Extract all **KEY FACTS, DATES, HISTORICAL TIMELINES OR CORE SEQUENTIAL MILESTONES** directly present in the text.
+- If the text includes historical dates, years, or researchers, build a chronological milestone breakdown.
+- If the text describes a scientific/conceptual topic without historical dates, extract the **Core Factual Anchors, Process Stages & Key Elements** in structured points/tables instead of empty timeline headings.
 
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
-# 📄 PAGE 1 OF 4: Historical Timelines & Chronological Milestones
+RECOMMENDED STRUCTURE:
+# 📄 PAGE 1 OF 4: Key Facts, Dates & Core Milestones
 
-> 💡 **Chronological Foundation**: (Detailed overview of historical or sequence progression)
+> 💡 **Core Factual Overview**: (Concise synthesis of the primary verified facts, milestones, or dates present on this page)
 
-## 📊 Chronological Milestones & Discoveries
-| Era / Stage / Date | Event / Discovery | Key Figures | Academic Significance |
-| :--- | :--- | :--- | :--- |
-| **Phase / Year 1** | (Detailed milestone with **bold terms**) | (Names/Theorists) | (Significance) |
-| **Phase / Year 2** | (Detailed milestone with **bold terms**) | (Names/Theorists) | (Significance) |
+## 📊 Key Milestones & Essential Facts
+- **Fact / Milestone 1**: (Concrete grounded fact, year, figure, or core process stage with **bold key terms**)
+- **Fact / Milestone 2**: (Concrete grounded fact, year, figure, or core process stage with **bold key terms**)
+(Add a clean 2–4 row markdown table ONLY if dates, stages, or multi-attribute facts exist to compare.)
 
-> 📌 **Milestone Anchor**: (Why these historical or chronological steps laid the groundwork)`;
+> 📌 **Factual Anchor**: (Why these starting facts or stages form the backbone of this topic)`;
     }
 
     if (targetPageNum === 2) {
@@ -479,36 +491,36 @@ YOUR GOAL FOR PAGE 2: Extract all **ESSENTIAL ACADEMIC DEFINITIONS & TECHNICAL L
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 2 OF 4: Academic Lexicon & Precise Definitions
 
 ## 🏷️ Exhaustive Academic Terminology
-(Extract and explain every specialized term and definition in rigorous detail)
+(Extract and explain every specialized term and definition present in the Source Text)
 1. **Primary Technical Term**: (Precise academic definition, contextual role, and **bold keywords**)
 2. **Secondary Technical Term**: (Precise academic definition, contextual role, and **bold keywords**)
 3. **Operational Term**: (Definition and specific function in this chapter)
 
-> 💡 **Lexicon Note**: (Key distinctions between technical definitions)`;
+> 💡 **Lexicon Note**: (Key distinctions between technical definitions found in the text)`;
     }
 
     if (targetPageNum === 3) {
       return `You are an elite academic researcher and archivist.
 Generate **PAGE 3 OF 4** of the Master Catalog for ${scopeDesc}.
 
-YOUR GOAL FOR PAGE 3: Extract all **GOVERNING LAWS, FORMULAS, NUMERICAL DATA & CONSTANTS**.
+YOUR GOAL FOR PAGE 3: Extract all **GOVERNING LAWS, EQUATIONS, REACTIONS, NUMERICAL DATA & CORE CONDITIONS** directly mentioned in the text (omit any missing category without placeholder text).
 
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
-# 📄 PAGE 3 OF 4: Governing Laws, Formulas & Numerical Constants
+RECOMMENDED STRUCTURE:
+# 📄 PAGE 3 OF 4: Governing Laws, Equations & Key Conditions
 
-## ⚡ Mathematical & Scientific Formulations
-- **Governing Law / Principle**: (Exact rule statement and operating conditions)
-- **Formula / Equation**: (Clean plain-text formula with unit breakdown: e.g., $E = mc^2$ where $E$ = Energy in Joules)
-- **Numerical Figures & Constants**: (Specific percentages, constants, values, or ratios)
+## ⚡ Key Principles, Formulations & Specifics
+- **Governing Principle / Mechanism**: (Exact rule statement and operating conditions from the text)
+- **Reaction / Formula / Relationship**: (Include equations, chemical reactions, ratios, or numerical figures mentioned in the text)
+- **Specific Quantities, Inputs & Conditions**: (Concrete inputs, outputs, locations, or percentages present in the text)
 
-> 🔬 **Formula Insight**: (Unit conversions, sign conventions, and variable constraints)`;
+> 🔬 **Precision Insight**: (Critical distinction, constraint, or detail examiners focus on)`;
     }
 
     if (targetPageNum === 4) {
@@ -520,7 +532,7 @@ YOUR GOAL FOR PAGE 4: Provide a **COMPLETE FACTUAL RECAP of Pages 1-3** + **GUAR
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 4 OF 4: Complete Factual Summary & High-Yield Exam Traps
 
 > 🎯 **Master Factual Digest**: (3-sentence summary synthesizing all dates from Page 1, definitions from Page 2, and formulas from Page 3)
@@ -547,7 +559,7 @@ YOUR GOAL FOR PAGE 1: Rapidly summarize the **FIRST SET OF PRINCIPLES & INITIAL 
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 1 OF 4: Rapid Concept Progression & Foundation Flow
 
 > 💡 **30-Second Revision Anchor**: (Crisp 2-sentence foundation takeaway)
@@ -576,7 +588,7 @@ YOUR GOAL FOR PAGE 2: Rapidly summarize the **OPERATIONAL MECHANICS & INTERMEDIA
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 2 OF 4: Operational Mechanics & Rapid Rules
 
 ## ⚙️ Fast-Track Mechanism Breakdown
@@ -596,7 +608,7 @@ YOUR GOAL FOR PAGE 3: Provide a **QUICK-REFERENCE COMPARISON MATRIX & HIGH-YIELD
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 3 OF 4: Quick-Reference Comparison Matrix & Formulas
 
 ## ⚡ Master Quick-Reference Matrix
@@ -621,7 +633,7 @@ YOUR GOAL FOR PAGE 4: Provide a **COMPLETE REVISION RECAP of Pages 1-3** + **60-
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 4 OF 4: Complete Revision Summary & 60-Second Active Recall
 
 > 🎯 **Master 60-Second Digest**: (3-sentence summary tying together Page 1's Foundations, Page 2's Mechanics, and Page 3's Matrix)
@@ -648,7 +660,7 @@ YOUR GOAL FOR PAGE 1: Architect the **CHAPTER FOUNDATIONS, CORE HIERARCHY & CONC
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 1 OF 4: Chapter Architecture & Core Foundations
 
 > 💡 **Core Overview**: (Authoritative 2-3 sentence overview defining the foundational scope)
@@ -679,7 +691,7 @@ YOUR GOAL FOR PAGE 2: Cover the **INTERMEDIATE MECHANISMS & STEP-BY-STEP PROCESS
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 2 OF 4: Process Dynamics & Intermediate Mechanisms
 
 ## ⚙️ Detailed Process Walkthrough
@@ -699,7 +711,7 @@ YOUR GOAL FOR PAGE 3: Provide a **CONCEPT COMPARISON MATRIX & ADVANCED APPLICATI
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 3 OF 4: Concept Matrix & Advanced Applications
 
 ## ⚡ Master Comparison Matrix
@@ -724,7 +736,7 @@ YOUR GOAL FOR PAGE 4: Provide a **MASTER SYNTHESIS & HIGH-YIELD EXAM BLUEPRINT**
 Source Text:
 """${text}"""
 
-OUTPUT IN THIS EXACT STRUCTURE:
+RECOMMENDED STRUCTURE (omit any optional section or table not supported by the Source Text):
 # 📄 PAGE 4 OF 4: Master Synthesis & High-Yield Exam Blueprint
 
 > 🎯 **Master Synthesis**: (3-sentence comprehensive wrap-up across all 3 prior pages)
@@ -834,9 +846,9 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
       kind: 'Key Facts & Dates',
       btnLabel: 'Extract Key Facts & Dates',
       pageTitles: [
-        'Historical Milestones & Chronological Timeline',
-        'Definitive Constants, Figures & Technical Terms',
-        'Governing Laws, Equations & Formula Catalog',
+        'Key Facts, Dates & Core Milestones',
+        'Academic Lexicon & Technical Terms',
+        'Governing Laws, Equations & Conditions',
         'Complete Factual Summary & High-Yield Exam Traps'
       ]
     },
@@ -1144,7 +1156,7 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
                 <span class="study-page-title-label font-display">${window.escapeHtml(p.title || `Section ${p.pageNum}`)}</span>
               </div>
               <div class="selectable-text" style="line-height:1.68; font-size:14.2px;">
-                ${renderMd(p.content)}
+                ${renderMd(cleanStudyMarkdownOutput(p.content))}
               </div>
             </div>
             ${idx < studyPages.length - 1 ? `
@@ -1767,6 +1779,15 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
           try {
             const customKey = window.State?.customGeminiKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('sayad_custom_gemini_key') : '');
             let streamer = typeof window.createWordByWordStreamer === 'function' ? window.createWordByWordStreamer(contentEl, { scrollContainer: liveContainer }) : null;
+            let pushedCleanLen = 0;
+            const stripLeadingPageHeader = (txt) => {
+              const str = String(txt || '');
+              const hdrMatch = str.match(/^#+\s*📄?\s*PAGE\s+\d+[^\n]*(?:\n+|$)/i);
+              if (hdrMatch) return str.slice(hdrMatch[0].length);
+              // Hold back incomplete first line while it still looks like `# 📄 PAGE ...`
+              if (!str.includes('\n') && /^#+\s*(?:📄?\s*P(?:A(?:G(?:E)?)?)?)?/i.test(str.trim())) return '';
+              return str;
+            };
 
             chunkText = await window.fetchSSEStream(
               '/api/ai/study-tool',
@@ -1779,13 +1800,15 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
                 model: 'gemini-3.1-flash-lite',
                 customKey: customKey || undefined
               },
-              (chunk, accumulated) => {
+              (_chunk, accumulated) => {
+                const bodySoFar = stripLeadingPageHeader(accumulated);
                 if (streamer) {
-                  const cleanChunk = chunk.replace(/^#+\s*📄?\s*PAGE[\s\S]*?\n/i, '');
-                  streamer.pushText(cleanChunk);
+                  if (bodySoFar.length > pushedCleanLen) {
+                    streamer.pushText(bodySoFar.slice(pushedCleanLen));
+                    pushedCleanLen = bodySoFar.length;
+                  }
                 } else {
-                  const cleaned = accumulated.replace(/^#+\s*📄?\s*PAGE[\s\S]*?\n/i, '').trim();
-                  contentEl.innerHTML = renderMd(cleaned) + '<span class="ai-typing-cursor">▌</span>';
+                  contentEl.innerHTML = renderMd(cleanStudyMarkdownOutput(bodySoFar)) + '<span class="ai-typing-cursor">▌</span>';
                 }
 
                 const tm = accumulated.match(/PAGE\s+\d+\s*(?:OF|\/)\s*\d+\s*[:•\-]?\s*([^\n]*)/i);
@@ -1796,7 +1819,7 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
             );
 
             if (streamer) {
-              const cleaned = (chunkText || '').replace(/^#+\s*📄?\s*PAGE[\s\S]*?\n/i, '').trim();
+              const cleaned = cleanStudyMarkdownOutput((chunkText || '').replace(/^#+\s*📄?\s*PAGE[\s\S]*?\n/i, ''));
               await streamer.finish(cleaned);
             }
           } catch (streamErr) {
@@ -1823,7 +1846,7 @@ export async function runAcademicStudyModal(initialTool, sel, isDetailed = true,
 
         const titleMatch = chunkText.match(/PAGE\s+\d+\s*(?:OF|\/)\s*\d+\s*[:•\-]?\s*([^\n]*)/i);
         const cardTitle = titleMatch ? titleMatch[1].trim() : (pageDescriptions[pIndex - 1] || `Page ${pIndex}`);
-        const cleanedBody = chunkText.replace(/^#+\s*📄?\s*PAGE[\s\S]*?\n/i, '').trim();
+        const cleanedBody = cleanStudyMarkdownOutput(chunkText.replace(/^#+\s*📄?\s*PAGE[\s\S]*?\n/i, ''));
 
         if (titleLabel) titleLabel.textContent = cardTitle;
 

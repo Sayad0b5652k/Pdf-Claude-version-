@@ -181,7 +181,14 @@ GUIDELINES:
 3. If the user asked for a concept, give a 1-sentence definition, key breakdown, and an intuitive example.
 4. Support clean Hinglish or English naturally according to the student's question.`;
 
-      const aiReply = await callAI(targetedPrompt, "You are an expert precision topic tutor. Be concise, direct, and pedagogically crisp.");
+      const aiReply = await callAI(
+        targetedPrompt,
+        'explain',
+        pageText || activeSnippet || '',
+        Boolean(pageText),
+        pageNum,
+        "You are an expert precision topic tutor. Be concise, direct, and pedagogically crisp."
+      );
 
       topicChatHistory[topicChatHistory.length - 1] = {
         role: 'assistant',

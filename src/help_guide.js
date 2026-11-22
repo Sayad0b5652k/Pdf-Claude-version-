@@ -9,7 +9,7 @@ export const GUIDE = [
     a: 'PIN recover nahi ho sakta. Lock screen par "PIN bhool gaye?" dabao, ye app ka sara data erase karke unlock karta hai. Isliye pehle Backup lena achha hai.',
     go: [{ l: 'Backup kholo', t: 'set', id: 'btn-export' }] },
   { id: 'keys', title: 'Apni API key daalna', keys: 'api key daalna add gemini groq openrouter byok apni key personal custom provider',
-    a: 'Settings → Advanced → AI Engine me key paste karo. App khud pehchan leti hai ki Gemini (AIza…), Groq (gsk_…) ya OpenRouter (sk-or-…) hai. Kai keys daal sakte ho, ek ki limit khatam ho to agli use hoti hai.',
+    a: 'Settings → Advanced → AI Engine me key paste karo. App khud pehchan leti hai ki Gemini (AIza… / AQ.…), Groq (gsk_…) ya OpenRouter (sk-or-…) hai. Kai keys daal sakte ho, ek ki limit khatam ho to agli use hoti hai.',
     go: [{ l: 'AI Engine kholo', t: 'adv', id: 'adv-keys-card' }] },
   { id: 'ring', title: 'Key ka circle (quota)', keys: 'circle ring quota limit bacha kitna khatam percent status key',
     a: 'Har key ke bagal ka circle bacha hua quota dikhata hai. Groq aur OpenRouter ka asli quota milta hai. Gemini ka quota Google batata nahi, isliye wo app ke apne count ka estimate hai. Lal "!" = key reject hui.',

@@ -354,13 +354,15 @@ export async function fetchAIDictionaryVerification(word, context = '', subjectD
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
+    const customKey = window.State?.customGeminiKey || (typeof localStorage !== 'undefined' ? localStorage.getItem('sayad_custom_gemini_key') : '');
     const resp = await fetch('/api/dictionary', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         word,
         context: context || '',
-        subjectDomain: subjectDomain || window.State?.currentFile?.title || ''
+        subjectDomain: subjectDomain || window.State?.currentFile?.title || '',
+        customKey: customKey || undefined
       }),
       signal: controller.signal
     });
@@ -1441,7 +1443,7 @@ export async function runDictionaryLookup(sel){
       </div>
       <div style="display:flex; align-items:center; gap:6px;">
         <span style="font-size:10.5px; font-weight:700; background:rgba(47, 198, 188, 0.15); color:var(--teal); border:1px solid rgba(47, 198, 188, 0.35); padding:2px 7px; border-radius:6px; text-transform:uppercase; letter-spacing:0.04em;">
-          Oxford • Gemini 3.7
+          Oxford • Academic AI
         </span>
       </div>
     </div>

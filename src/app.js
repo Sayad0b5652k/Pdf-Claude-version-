@@ -20,7 +20,7 @@ import './teacher.js';
 {
   let lastToast = 0;
   const calm = (msg, gap = 20000) => { const n = Date.now(); if (n - lastToast < gap) return; lastToast = n; try { window.toast && window.toast(msg); } catch (_) {} };
-  const harmless = (m) => /ResizeObserver loop|AbortError|RenderingCancelled|Worker was destroyed|Transport destroyed|Loading aborted|cancelled|Script error/i.test(m || '');
+  const harmless = (m) => /ResizeObserver loop|AbortError|RenderingCancelled|Worker was destroyed|Transport destroyed|Loading aborted|cancelled|Script error|Failed to update a ServiceWorker/i.test(m || '');
   let lastFull = 0;
   window.onStorageFull = () => { const n = Date.now(); if (n - lastFull < 60000) return; lastFull = n; try { window.toast && window.toast('Phone ki storage bhar gayi hai — kuch purani book ya cache hata do, warna naya data save nahi hoga'); } catch (_) {} };
   window.addEventListener('unhandledrejection', (e) => {
@@ -504,10 +504,14 @@ export async function boot(){
   window.State.streamingMode = (await window.DB.getSetting('streamingMode', 'sse')) || (typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_streaming_mode') || 'sse') : 'sse');
   try {
     const _k = await window.DB.getSetting('aiKeys', null);
-    if (_k && _k.length && !window.KeyVault.count()) { window.KeyVault.restore(_k); }
-    else if (!window.KeyVault.count()) {
+    if (Array.isArray(_k) && _k.length && !window.KeyVault.count()) { window.KeyVault.restore(_k); }
+    else if (_k === null && !window.KeyVault.count()) {
       const _old = await window.DB.getSetting('customGeminiKey', '');
-      if (_old && String(_old).trim().length > 10) window.KeyVault.add(_old, 'Gemini key').catch(() => {});
+      if (_old && String(_old).trim().length > 10) {
+        window.KeyVault.add(_old, 'Gemini key').catch(() => {}).finally(() => {
+          window.DB.setting('customGeminiKey', '').catch(() => {});
+        });
+      }
     }
   } catch(e){}
   window.State.activeIconTheme = typeof localStorage !== 'undefined' ? (localStorage.getItem('sayad_active_icon_theme') || 'crest-dark') : 'crest-dark';

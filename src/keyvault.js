@@ -53,30 +53,59 @@ function mk(key, label) {
   return { id: 'k' + Math.random().toString(36).slice(2, 9), provider, key, label: label || PROV[provider].short + ' key',
     addedAt: Date.now(), day: today(), n: 0, cooldownUntil: 0, quota: null, state: 'new', checkedAt: 0 };
 }
-function save() {
+function save(emit = true) {
   try { localStorage.setItem(LS, JSON.stringify(keys)); } catch (e) {}
   try { const g = keys.find(k => k.provider === 'gemini' && k.state !== 'bad'); localStorage.setItem('sayad_custom_gemini_key', g ? g.key : ''); } catch (e) {}
   try { window.DB && window.DB.setting && window.DB.setting('aiKeys', keys); } catch (e) {}
-  try { window.dispatchEvent(new CustomEvent('sayad-keys-changed')); } catch (e) {}
+  if (emit) {
+    try { window.dispatchEvent(new CustomEvent('sayad-keys-changed')); } catch (e) {}
+  }
 }
 load();
 
 let rr = 0;
 function nextGemini() {
   const now = Date.now();
-  const pool = keys.filter(k => k.provider === 'gemini' && k.state !== 'bad');
-  if (!pool.length) return '';
-  const ready = pool.filter(k => k.cooldownUntil < now);
-  const list = ready.length ? ready : pool;
-  const k = list[rr++ % list.length];
+  const ready = keys.filter(k => k.provider === 'gemini' && k.state !== 'bad' && (k.cooldownUntil || 0) <= now);
+  if (!ready.length) return '';
+  const k = ready[rr++ % ready.length];
   return k.key;
 }
-function firstOf(p) { return keys.find(k => k.provider === p && k.state !== 'bad' && k.cooldownUntil < Date.now()) || keys.find(k => k.provider === p && k.state !== 'bad'); }
+function firstOf(p) {
+  const now = Date.now();
+  return keys.find(k => k.provider === p && k.state !== 'bad' && (k.cooldownUntil || 0) <= now) || null;
+}
+
+function applyKeyOutcome(keyObj, status, note) {
+  if (!keyObj || !status) return false;
+  let stateChanged = false;
+  const prevState = keyObj.state;
+  if (status === 'used') {
+    if (keyObj.day !== today()) { keyObj.day = today(); keyObj.n = 0; }
+    keyObj.n++;
+    keyObj.cooldownUntil = 0;
+    keyObj.note = '';
+    if (prevState !== 'ok') { keyObj.state = 'ok'; stateChanged = true; }
+  } else if (status === 'limit') {
+    keyObj.cooldownUntil = Date.now() + 60000;
+    keyObj.note = note || keyObj.note || 'Rate limit hit';
+    if (prevState !== 'limit') { keyObj.state = 'limit'; stateChanged = true; }
+  } else if (status === 'bad') {
+    keyObj.cooldownUntil = Date.now() + 180000;
+    keyObj.note = note || keyObj.note || 'Key reject hui';
+    if (prevState !== 'bad') { keyObj.state = 'bad'; stateChanged = true; }
+  } else if (status === 'fallback') {
+    keyObj.cooldownUntil = Date.now() + 15000;
+    if (note) keyObj.note = note;
+  }
+  return stateChanged;
+}
 
 const Vault = {
   PROV, detect, detectHint, clean: cleanKey,
   list: () => keys.slice(),
   count: () => keys.length,
+  hasGemini: () => keys.some(k => k.provider === 'gemini' && k.state !== 'bad'),
   async add(key, label) {
     key = cleanKey(key);
     if (key.length < 12) throw new Error('Key bahut chhoti hai');
@@ -107,7 +136,7 @@ const Vault = {
     k.checkedAt = Date.now();
     if (d.provider && PROV[d.provider]) k.provider = d.provider;
     k.state = d.valid ? (d.exhausted ? 'limit' : 'ok') : 'bad';
-    if (d.exhausted) k.cooldownUntil = Date.now() + 60000;
+    k.cooldownUntil = d.exhausted ? (Date.now() + 60000) : 0;
     k.quota = d.quota || null; k.note = d.note || d.error || '';
     if (d.supported === false) k.state = 'unsupported';
     save();
@@ -137,8 +166,9 @@ try {
   Object.defineProperty(window.State, 'customGeminiKey', { configurable: true, enumerable: true, get: nextGemini, set() {} });
 } catch (e) {}
 
-// Count usage per key and learn from 429s; attach Groq/OpenRouter keys to our own /api calls.
+// Count usage per key and learn from server BYOK status headers / 429s; attach Groq/OpenRouter keys to our own /api calls.
 const _fetch = window.fetch.bind(window);
+let _lastUiEmitAt = 0;
 const wrappedFetch = function (input, init) {
   try {
     const url = typeof input === 'string' ? input : (input && input.url) || '';
@@ -146,15 +176,69 @@ const wrappedFetch = function (input, init) {
     const isKeys = url.startsWith('/api/keys/') || (typeof location !== 'undefined' && url.startsWith(location.origin + '/api/keys/'));
     if (isApi && !isKeys) {
       init = init || {};
-      const aux = Vault.auxHeader();
+      const sentGroq = firstOf('groq');
+      const sentOr = firstOf('openrouter');
+      const o = {};
+      if (sentGroq) o.groq = sentGroq.key;
+      if (sentOr) o.openrouter = sentOr.key;
+      const aux = Object.keys(o).length ? encodeURIComponent(JSON.stringify(o)) : '';
+
       let used = null;
       if (typeof init.body === 'string' && init.body.includes('customKey')) {
-        try { const ck = JSON.parse(init.body).customKey; used = keys.find(k => k.key === ck) || null; } catch (e) {}
+        try { const ck = cleanKey(JSON.parse(init.body).customKey); used = keys.find(k => k.key === ck) || null; } catch (e) {}
       }
-      if (used) { if (used.day !== today()) { used.day = today(); used.n = 0; } used.n++; }
-      if (aux) { const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {}); h.set('x-sayad-aux', aux); init = { ...init, headers: h }; }
+      if (aux) {
+        const h = new Headers(init.headers || (typeof input !== 'string' && input.headers) || {});
+        h.set('x-sayad-aux', aux);
+        init = { ...init, headers: h };
+      }
+
       const p = _fetch(input, init);
-      if (used) p.then(r => { if (r.status === 429) { used.cooldownUntil = Date.now() + 60000; used.state = 'limit'; } else if (used.state === 'limit' && r.ok) used.state = 'ok'; save(); }).catch(() => {});
+      if (used || sentGroq || sentOr) {
+        p.then(r => {
+          let stateChanged = false;
+          let countChanged = false;
+          const byokStatus = (r.headers.get('x-sayad-byok-status') || '').toLowerCase();
+          const byokNote = r.headers.get('x-sayad-byok-note') || '';
+          const keySlot = r.headers.get('x-sayad-key-slot') || '';
+          const auxProv = (r.headers.get('x-sayad-aux-provider') || '').toLowerCase();
+          const auxStatus = (r.headers.get('x-sayad-aux-status') || '').toLowerCase();
+          const auxNote = r.headers.get('x-sayad-aux-note') || '';
+
+          if (used) {
+            if (byokStatus) {
+              stateChanged = applyKeyOutcome(used, byokStatus, byokNote) || stateChanged;
+              if (byokStatus === 'used') countChanged = true;
+            } else if (r.status === 429) {
+              stateChanged = applyKeyOutcome(used, 'limit', 'Rate limit hit') || stateChanged;
+            } else if (r.ok && keySlot === 'User Personal Custom Key') {
+              stateChanged = applyKeyOutcome(used, 'used') || stateChanged;
+              countChanged = true;
+            }
+          }
+
+          if (auxProv && auxStatus) {
+            const targetAux = auxProv === 'groq' ? sentGroq : (auxProv === 'openrouter' ? sentOr : null);
+            if (targetAux) {
+              stateChanged = applyKeyOutcome(targetAux, auxStatus, auxNote) || stateChanged;
+              if (auxStatus === 'used') countChanged = true;
+            }
+          } else if (keySlot === 'user-groq' && sentGroq) {
+            stateChanged = applyKeyOutcome(sentGroq, 'used') || stateChanged;
+            countChanged = true;
+          } else if (keySlot === 'user-openrouter' && sentOr) {
+            stateChanged = applyKeyOutcome(sentOr, 'used') || stateChanged;
+            countChanged = true;
+          }
+
+          if (stateChanged || countChanged) {
+            const now = Date.now();
+            const emit = stateChanged || (now - _lastUiEmitAt > 3000);
+            if (emit) _lastUiEmitAt = now;
+            save(emit);
+          }
+        }).catch(() => {});
+      }
       return p;
     }
   } catch (e) {}
