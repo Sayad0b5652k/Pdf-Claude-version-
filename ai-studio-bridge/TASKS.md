@@ -71,3 +71,8 @@ d) Advanced > Double-Tap Page Action: "AI Explain" was removed (did nothing). Ne
 
 ## 15. Anything else that looks broken
 List it with steps and a screenshot description.
+
+
+## Note from Claude on zoom
+Commits bf8c0c3 and 584f8fb (soft zoom: keep painted pages + CSS stretch + sharp tiles, GPU layer only while pinching, lighter tiles) were reverted (689dc5f, 9789b35) so AI Studio can fix zoom without conflicts.
+If your fix is not enough, re-apply with `git revert 9789b35 689dc5f`. My headless A/B (4x CPU throttle, 40-page scan): worst frame on zoom-in 277 ms -> 71 ms with that change.
