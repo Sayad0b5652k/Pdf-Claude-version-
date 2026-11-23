@@ -8603,3 +8603,12 @@ html[data-pro-theme="notebook"] .lk-badge{border:2px solid var(--border);box-sha
 /* Notebook: the chat input already lives inside a bordered pill, so the textarea itself stays borderless */
 html[data-pro-theme="notebook"] #teacher-input,
 html[data-pro-theme="notebook"] #teacher-input:focus{border:none!important;box-shadow:none!important;background:transparent!important;border-radius:0}
+
+/* ===== Sheet open/close: softer slide (open ~0.4s with a long settle, close a little quicker) ===== */
+.sheet { transition: transform .26s cubic-bezier(0.4, 0, 0.8, 0.4); }
+.sheet.open { transition: transform .42s cubic-bezier(0.22, 1, 0.36, 1); }
+.sheet.peek, .sheet.peek.open { transition: transform .32s cubic-bezier(0.22, 1, 0.36, 1); }
+.sheet-backdrop { transition: opacity .26s ease-out; }
+.sheet-backdrop.open { transition: opacity .38s ease-out; }
+html.lite-motion .sheet, html.lite-motion .sheet.open { transition-duration: .14s !important; }
+html.lite-motion .sheet-backdrop, html.lite-motion .sheet-backdrop.open { transition-duration: .12s !important; }
