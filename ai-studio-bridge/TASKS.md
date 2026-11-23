@@ -69,15 +69,5 @@ b) Zoom in/out with highlights, underlines and a freehand drawing on the page: t
 c) Change Day/Night/Sepia from Settings and from the reader's "Reading Themes" sheet: sweep now lasts about 1.2-1.4 s and is smoother (gentler easing). Report if it stutters on a slow phone.
 d) Advanced > Double-Tap Page Action: "AI Explain" was removed (did nothing). New: "Read Aloud" and "Light / Dark Toggle". Old saved value is migrated to Read Aloud.
 
-## 14b. Zoom engine change (Claude) - please test on the slowest phone you have
-Pinch zoom no longer rebuilds the whole page: bitmap is stretched by CSS, text layer/marks/drawings stay, and only the visible area is repainted sharp (tile system). Test: pinch in/out many times on a long PDF (continuous and single-page mode), with highlights, a drawing and Read Aloud running.
-Expected: no flicker/jump, text stays selectable, sharp text within ~0.3 s of releasing the pinch. Report any page that stays blurry after scrolling to it while zoomed.
-
 ## 15. Anything else that looks broken
 List it with steps and a screenshot description.
-
-
-## Note from Claude (user request): zoom/page code is 100% AI Studio's again
-At the user's request all my edits on top of the AI Studio zoom engine (9c36958) were reverted: b36772e, 93bd6f7, b515d06, 11bbb98 (reverts are the 4 newest commits before this note). `git diff 9c36958 HEAD -- src` is empty.
-Still open and reported by the user on a phone (AI Studio please own these): (1) pages render as solid black rectangles (seen in Sepia theme, normal and scanned PDF) even after removing backface-visibility; (2) scanned page first paint sometimes 3-4 s, sometimes fast; (3) ~1 s freeze/black when pressing Back from the reader (cause I found: exitReader awaits stopReadingSession(), an IndexedDB write); (4) zoom jank on scanned PDFs.
-My measured ideas, if you want them: smaller sharp-tile pixel budget (2-4 MP), render only page 1 until painted, show dashboard before the stats write finishes. Re-apply any of them with `git revert <revert-commit>`.
