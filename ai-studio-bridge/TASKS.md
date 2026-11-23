@@ -75,3 +75,23 @@ Expected: no flicker/jump, text stays selectable, sharp text within ~0.3 s of re
 
 ## 15. Anything else that looks broken
 List it with steps and a screenshot description.
+
+## Note from Claude: scan-zoom tuning on top of the AI Studio zoom engine (separate commit, revert with `git revert <hash>`)
+Changes only in src/reader.js: (1) sharp tile pixel budget 2/3/4 MP by tier (was MAX_CANVAS_PIXELS 4/6/8 MP), (2) tile overscan pads [0.2,0.1,0], (3) removed permanent `will-change:transform` on the page container (translate3d during pinch/animation promotes it anyway).
+Headless A/B (4x CPU throttle): 40-page scan zoom-in worst frame 246 -> 155 ms, slow frames 5 -> 2; 80-page text zoom-in 164 -> 86 ms. Markup-on case unchanged. Please check on a phone: scanned PDF, pinch to 3x, scroll while zoomed; tell me if text looks softer or tiles pop late while scrolling.
+
+## Note from Claude: faster first page on big scans (own commit, revert with `git revert <hash>`)
+src/reader.js: until the first page of a newly opened book is painted, only ONE page renders (`firstPagePainted`); parallel rendering resumes right after. Headless 4x CPU, 12-page scan with 3.8 MB JPEG per page: open -> first painted ~2.1 s -> ~1.5 s. Zoom tile time unchanged once idle.
+OPEN, NOT REPRODUCED: user reports a weird black screen after going back from the PDF (phone). Headless: button back and history.back() both fine, in light and dark, even right after a theme change. AI Studio: please check in the live preview (scanned PDF, zoomed in, then back; also with Privacy Lock / pro themes) and describe what you see.
+Also reported: page render sometimes 3-4 s, sometimes fast (intermittent) on scanned PDFs.
+
+## Note from Claude: back from reader no longer freezes/black (own commit, revert with `git revert <hash>`)
+Cause: exitReader awaited stopReadingSession() (IndexedDB write, ~1 s on phones when the DB queue is busy) while the reader stayed frozen; pages went black. Now: the save runs in the background (`window._statsFlushPromise`; getReadingStats() waits for it, so dashboard numbers stay correct), the dashboard renders first, page canvases are freed in a following task (skipped if a book was reopened meanwhile).
+Headless 4x CPU: view switch 248 ms -> 9 ms, dashboard on screen 310-348 ms -> 133 ms.
+Please test on phone: read ~1 min, press back (button AND phone gesture), check Reading Analytics shows the new time without needing to reopen the app.
+
+## Note from Claude: BLACK PAGES on phone (user screenshots, sepia theme, both a normal and a scanned PDF)
+Pages show as solid black rectangles (page marks still visible on top). Suspect: `.page-wrap canvas { backface-visibility: hidden }` (added with the zoom engine commit 9c36958) + the theme `filter` (sepia/dark) = one GPU layer per page bitmap -> phone GPU memory exhausted -> black canvases. Removed that one line (own commit, revert with `git revert <hash>`). I cannot reproduce black in headless (no real GPU), so AI Studio please check in the live preview on the phone: open a 12+ page scanned PDF in Sepia and in Dark, scroll, zoom, go back. If still black: tell me which theme/PDF; next suspects are `.page-tile` double buffering (2 big canvases per page) and TILE_MAX_DPR 3.5.
+
+
+

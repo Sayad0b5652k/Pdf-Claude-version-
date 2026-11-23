@@ -705,6 +705,8 @@ export async function getReadingStats() {
     totalSessionSeconds: 0,
     dailyLog: {}
   };
+  // the reader saves its reading time in the background when it closes: read the stats only after that finished
+  if (window._statsFlushPromise) { try { await window._statsFlushPromise; } catch (e) {} }
   const stored = await window.DB.getSetting('reading_stats', null);
   const stats = stored ? { ...defaultStats, ...stored, dailyLog: { ...(defaultStats.dailyLog), ...(stored.dailyLog||{}) } } : defaultStats;
 

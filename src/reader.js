@@ -742,27 +742,32 @@ export function renderReaderShell(){
         await window.stopReadingSession();
       }
       window.State.view='dashboard';
-      // Release the document for real: cancel renders, free canvases and tell pdf.js to drop the
-      // parsed PDF. Only nulling the reference used to leave every opened book alive in the
-      // pdf.js worker (plus all its page elements) until the app was reloaded.
+      // Stop any further page renders immediately, wait for the async dashboard view
+      // to mount cleanly into #app, and only then release canvases + PDF worker.
+      // Releasing canvases while #reader-scroll was still painted during async DB reads
+      // caused the PDF pages to flash black before Home appeared.
       const closingDoc = window.State.currentDoc;
       window.State.currentDoc=null;
-      clearPageEls();
+      resetRenderPipeline();
       pageVpCache = {};
       pageVpCacheDoc = null;
       const scrollElOnExit = document.getElementById('reader-scroll');
       if (scrollElOnExit) scrollElOnExit.onscroll = null;
       window.currentPageContainer = null;
-      if (closingDoc && typeof closingDoc.destroy === 'function') {
-        closingDoc.destroy().catch(() => {});
-      }
       window.State.pageList=null;
       window.State.pageListLabel='';
       releaseWakeLock();
       if (window.screen?.orientation?.unlock) {
         try { window.screen.orientation.unlock(); } catch(e) {}
       }
-      window.render();
+      try {
+        await Promise.resolve(window.render());
+      } finally {
+        clearPageEls();
+        if (closingDoc && typeof closingDoc.destroy === 'function') {
+          closingDoc.destroy().catch(() => {});
+        }
+      }
     };
 
     if (goalMins > 0 && !isAlreadyNotified) {
@@ -979,14 +984,26 @@ export function getScrollAnchorPoint() {
 
   if (mode === 'continuous') {
     const centerY = scrollRect.top + vpY;
+    let bestNum = pageNum, bestPe = pe, bestDist = Infinity;
     for (const [numStr, p] of Object.entries(pageEls)) {
       if (!p.wrap) continue;
       const rect = p.wrap.getBoundingClientRect();
       if (centerY >= rect.top && centerY <= rect.bottom) {
         pageNum = Number(numStr);
         pe = p;
+        bestDist = 0;
         break;
       }
+      const dist = centerY < rect.top ? rect.top - centerY : centerY - rect.bottom;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestNum = Number(numStr);
+        bestPe = p;
+      }
+    }
+    if (bestDist > 0 && bestPe) {
+      pageNum = bestNum;
+      pe = bestPe;
     }
   }
 
@@ -1133,12 +1150,18 @@ export function updateReaderZoom(preserveAnchor = true) {
       }
     }
     showSinglePage(window.State.currentPage);
+    if (anchor) {
+      restoreScrollAnchorPoint(anchor);
+    }
   } else {
+    // Restore the post-zoom scroll position BEFORE running virtualisation checks,
+    // otherwise setupVirtualRender measures zoomed page offsets against the stale pre-zoom
+    // scrollTop and unloads the very page the user is looking at (causing a full white flash).
+    if (anchor) {
+      restoreScrollAnchorPoint(anchor);
+    }
     setupVirtualRender();
-  }
-
-  if (anchor) {
-    restoreScrollAnchorPoint(anchor);
+    updateCurrentPageFromScroll();
   }
   // the drawing canvases are sized for the old zoom: re-fit them now instead of waiting for the next scroll
   try { if (window.scheduleDrawSync) window.scheduleDrawSync(); } catch (e) {}
@@ -1171,8 +1194,8 @@ export async function mountReaderContent(){
   scrollEl.classList.toggle('zoomed', mode==='single' && window.State.zoom > 1.02);
   const container = document.createElement('div');
   container.style.cssText = mode==='single'
-    ? 'position:relative; width:100%; height:100%; min-height:100%; display:flex; align-items:center; justify-content:center; will-change:transform;'
-    : 'min-height:100%; will-change:transform;';
+    ? 'position:relative; width:100%; height:100%; min-height:100%; display:flex; align-items:center; justify-content:center;'
+    : 'min-height:100%;';
   scrollEl.appendChild(container);
   window.currentPageContainer = container;
 
@@ -1359,7 +1382,7 @@ export function setupReaderInteractions(scrollEl){
       const fn = pendingZoomCommit;
       pendingZoomCommit = null;
       const c = window.currentPageContainer;
-      if (c) { c.style.transition = ''; c.style.transform = ''; c.style.transformOrigin = ''; }
+      if (c) { c.style.transition = ''; c.style.transform = ''; c.style.transformOrigin = ''; c.style.willChange = ''; }
       window.zoomGestureActive = false;
       if (flush && typeof fn === 'function') fn();
     }
@@ -1403,6 +1426,7 @@ export function setupReaderInteractions(scrollEl){
 
       const container = window.currentPageContainer;
       if (container) {
+        container.style.willChange = 'transform';
         container.style.transition = '';
         const cRect = container.getBoundingClientRect();
         container.style.transformOrigin = `${midX - cRect.left}px ${midY - cRect.top}px`;
@@ -1523,6 +1547,7 @@ export function setupReaderInteractions(scrollEl){
         container.style.transition = '';
         container.style.transform = '';
         container.style.transformOrigin = '';
+        container.style.willChange = '';
         window.State.zoom = finalZoom;
         updateReaderZoom(g);
       };
@@ -1538,6 +1563,7 @@ export function setupReaderInteractions(scrollEl){
       container.style.transition = '';
       container.style.transform = '';
       container.style.transformOrigin = '';
+      container.style.willChange = '';
     }
     if(Math.abs(finalZoom - window.State.zoom) < 0.03 && movedMid < 6){
       if (window.pendingSelection && typeof window.paintPendingOverlay === 'function') {
@@ -1641,6 +1667,7 @@ export function setupReaderInteractions(scrollEl){
         container.style.transition = '';
         container.style.transform = '';
         container.style.transformOrigin = '';
+        container.style.willChange = '';
       }
       window.State.zoom = targetZoom;
       updateReaderZoom({ pageNum, fracX, fracY, vpX, vpY });
@@ -1673,6 +1700,7 @@ export function setupReaderInteractions(scrollEl){
 
     pendingZoomCommit = commit;
     window.zoomGestureActive = true;
+    container.style.willChange = 'transform';
     container.style.transition = 'none';
     container.style.transformOrigin = `${originX}px ${originY}px`;
     container.style.transform = 'translate3d(0,0,0) scale(1)';
@@ -1753,6 +1781,7 @@ export function setupReaderInteractions(scrollEl){
         }
         const c = window.currentPageContainer;
         if (c) {
+          c.style.willChange = 'transform';
           c.style.transition = '';
           const cr = c.getBoundingClientRect();
           c.style.transformOrigin = `${e.clientX - cr.left}px ${e.clientY - cr.top}px`;
@@ -1777,7 +1806,7 @@ export function setupReaderInteractions(scrollEl){
         wheelZoomSession = null;
         window.zoomGestureActive = false;
         const c = window.currentPageContainer;
-        if (c) { c.style.transition = ''; c.style.transform = ''; c.style.transformOrigin = ''; }
+        if (c) { c.style.transition = ''; c.style.transform = ''; c.style.transformOrigin = ''; c.style.willChange = ''; }
         if (sess && Math.abs(sess.liveZoom - window.State.zoom) >= 0.01) {
           window.State.zoom = sess.liveZoom;
           updateReaderZoom(sess);
@@ -1919,8 +1948,8 @@ function releasePageResources(pe){
     pe.renderTask = null;
   }
   if(pe.canvas){
-    // Free the pixel buffer now instead of waiting for the garbage collector.
-    try { pe.canvas.width = 0; pe.canvas.height = 0; } catch(e){}
+    // Hide before zeroing dimensions and free the pixel buffer immediately.
+    try { pe.canvas.style.visibility = 'hidden'; pe.canvas.width = 0; pe.canvas.height = 0; } catch(e){}
   }
   if(pe.pageProxy){
     try { pe.pageProxy.cleanup(); } catch(e){}
@@ -2062,7 +2091,7 @@ function clearTile(pe){
   pe._tileToken = (pe._tileToken || 0) + 1;
   if(pe._tileTask){ try { pe._tileTask.cancel(); } catch(e){} pe._tileTask = null; }
   if(pe.tile){
-    try { pe.tile.width = 0; pe.tile.height = 0; } catch(e){}
+    try { pe.tile.style.visibility = 'hidden'; pe.tile.width = 0; pe.tile.height = 0; } catch(e){}
     if(pe.tile.parentNode) pe.tile.remove();
     pe.tile = null;
   }
@@ -2130,7 +2159,7 @@ async function renderTile(pe, sr, wr){
   cv.className = 'page-tile';
   const cssTileW = cv.width / d, cssTileH = cv.height / d;
   cv.style.cssText = `position:absolute;left:${r.x0}px;top:${r.y0}px;width:${cssTileW}px;height:${cssTileH}px;pointer-events:none;`;
-  const ctx = cv.getContext('2d', { alpha: false }) || cv.getContext('2d');
+  const ctx = cv.getContext('2d');
   if(!ctx) return;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, cv.width, cv.height);
@@ -2203,7 +2232,7 @@ async function renderPageNow(num, pe, token){
     canvas.style.height = viewport.height + 'px';
     canvas.style.display = 'block';
 
-    const ctx = canvas.getContext('2d', { alpha: false }) || canvas.getContext('2d');
+    const ctx = canvas.getContext('2d');
     if (!ctx) {
       console.warn(`Could not acquire 2d context for page ${num}`);
       pe.rendering = false;

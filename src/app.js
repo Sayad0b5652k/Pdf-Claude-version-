@@ -112,7 +112,7 @@ export function render(){
       if(typeof window.hideSelToolbar === 'function') window.hideSelToolbar();
     }
     if(window.State.view==='dashboard') {
-      if(typeof window.renderDashboard === 'function') window.renderDashboard();
+      if(typeof window.renderDashboard === 'function') return window.renderDashboard();
     }
     else if(window.State.view==='reader') {
       if(typeof window.renderReaderShell === 'function') window.renderReaderShell();
