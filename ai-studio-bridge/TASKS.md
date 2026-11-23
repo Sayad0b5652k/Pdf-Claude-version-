@@ -80,3 +80,9 @@ List it with steps and a screenshot description.
 ## Note from Claude: scan-zoom tuning on top of the AI Studio zoom engine (separate commit, revert with `git revert <hash>`)
 Changes only in src/reader.js: (1) sharp tile pixel budget 2/3/4 MP by tier (was MAX_CANVAS_PIXELS 4/6/8 MP), (2) tile overscan pads [0.2,0.1,0], (3) removed permanent `will-change:transform` on the page container (translate3d during pinch/animation promotes it anyway).
 Headless A/B (4x CPU throttle): 40-page scan zoom-in worst frame 246 -> 155 ms, slow frames 5 -> 2; 80-page text zoom-in 164 -> 86 ms. Markup-on case unchanged. Please check on a phone: scanned PDF, pinch to 3x, scroll while zoomed; tell me if text looks softer or tiles pop late while scrolling.
+
+
+## Note from Claude: faster first page on big scans (own commit, revert with `git revert <hash>`)
+src/reader.js: until the first page of a newly opened book is painted, only ONE page renders (`firstPagePainted`); parallel rendering resumes right after. Headless 4x CPU, 12-page scan with 3.8 MB JPEG per page: open -> first painted ~2.1 s -> ~1.5 s. Zoom tile time unchanged once idle.
+OPEN, NOT REPRODUCED: user reports a weird black screen after going back from the PDF (phone). Headless: button back and history.back() both fine, in light and dark, even right after a theme change. AI Studio: please check in the live preview (scanned PDF, zoomed in, then back; also with Privacy Lock / pro themes) and describe what you see.
+Also reported: page render sometimes 3-4 s, sometimes fast (intermittent) on scanned PDFs.
