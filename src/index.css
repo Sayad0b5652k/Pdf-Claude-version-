@@ -1011,8 +1011,7 @@ html[data-theme="dark"] .marker-mark {
   width: 100%;
   height: 100%;
   filter: var(--canvas-filter);
-  /* no backface-visibility:hidden here: it gave every page bitmap its own GPU layer, and together with the theme filter
-     phones ran out of GPU memory and painted the pages solid black */
+  backface-visibility: hidden;
 }
 
 .page-wrap canvas.page-tile {

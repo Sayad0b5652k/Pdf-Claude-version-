@@ -92,7 +92,3 @@ Also reported: page render sometimes 3-4 s, sometimes fast (intermittent) on sca
 Cause: exitReader awaited stopReadingSession() (IndexedDB write, ~1 s on phones when the DB queue is busy) while the reader stayed frozen; pages went black. Now: the save runs in the background (`window._statsFlushPromise`; getReadingStats() waits for it, so dashboard numbers stay correct), the dashboard renders first, page canvases are freed in a following task (skipped if a book was reopened meanwhile).
 Headless 4x CPU: view switch 248 ms -> 9 ms, dashboard on screen 310-348 ms -> 133 ms.
 Please test on phone: read ~1 min, press back (button AND phone gesture), check Reading Analytics shows the new time without needing to reopen the app.
-
-
-## Note from Claude: BLACK PAGES on phone (user screenshots, sepia theme, both a normal and a scanned PDF)
-Pages show as solid black rectangles (page marks still visible on top). Suspect: `.page-wrap canvas { backface-visibility: hidden }` (added with the zoom engine commit 9c36958) + the theme `filter` (sepia/dark) = one GPU layer per page bitmap -> phone GPU memory exhausted -> black canvases. Removed that one line (own commit, revert with `git revert <hash>`). I cannot reproduce black in headless (no real GPU), so AI Studio please check in the live preview on the phone: open a 12+ page scanned PDF in Sepia and in Dark, scroll, zoom, go back. If still black: tell me which theme/PDF; next suspects are `.page-tile` double buffering (2 big canvases per page) and TILE_MAX_DPR 3.5.
