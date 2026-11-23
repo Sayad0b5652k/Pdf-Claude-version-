@@ -1171,8 +1171,8 @@ export async function mountReaderContent(){
   scrollEl.classList.toggle('zoomed', mode==='single' && window.State.zoom > 1.02);
   const container = document.createElement('div');
   container.style.cssText = mode==='single'
-    ? 'position:relative; width:100%; height:100%; min-height:100%; display:flex; align-items:center; justify-content:center; will-change:transform;'
-    : 'min-height:100%; will-change:transform;';
+    ? 'position:relative; width:100%; height:100%; min-height:100%; display:flex; align-items:center; justify-content:center;'
+    : 'min-height:100%;';
   scrollEl.appendChild(container);
   window.currentPageContainer = container;
 
@@ -1901,6 +1901,7 @@ const MAX_CANVAS_PIXELS = { low: 4, mid: 6, high: 8 }[RENDER_TIER] * 1024 * 1024
 // Native sharpness on every phone: budget screens are dpr 2, so nobody is rendered below their screen's resolution.
 // Memory is protected by the pixel cap above, not by blurring normal pages.
 const MAX_DPR = 2.5;
+const TILE_MAX_PIXELS = { low: 2, mid: 3, high: 4 }[RENDER_TIER] * 1024 * 1024;   // pixel budget of one sharp tile (keeps big scans fast)
 const TILE_MAX_DPR = RENDER_TIER === 'low' ? 2.5 : 3.5; // viewport-only tiles render at full phone OLED DPR cleanly
 const MAX_READER_ZOOM = 12;  // 1200% max zoom — tiles keep every zoom level sharp & memory safe
 window.RENDER_TIER = RENDER_TIER;
@@ -2106,15 +2107,15 @@ async function renderTile(pe, sr, wr){
   const dpr = Math.min(window.devicePixelRatio || 2, TILE_MAX_DPR);
   // d = device pixels per CSS pixel for the tile. Keep generous overscan margin around the screen as budget allows;
   // if even the visible part is over budget, lower sharpness safely.
-  const pads = RENDER_TIER === 'low' ? [0.25, 0.12, 0] : [0.45, 0.25, 0.1, 0];
+  const pads = [0.2, 0.1, 0];                           // small overscan: a big tile of a scan is slow to paint
   let r = vis, d = dpr;
   for(const pad of pads){
     const px = (vis.x1 - vis.x0) * pad, py = (vis.y1 - vis.y0) * pad;
     r = { x0: Math.max(0, vis.x0 - px), y0: Math.max(0, vis.y0 - py), x1: Math.min(cssW, vis.x1 + px), y1: Math.min(cssH, vis.y1 + py) };
     d = dpr;
     const area = (r.x1 - r.x0) * (r.y1 - r.y0) * d * d;
-    if(area <= MAX_CANVAS_PIXELS) break;
-    if(pad === 0) d = dpr * Math.sqrt(MAX_CANVAS_PIXELS / area);
+    if(area <= TILE_MAX_PIXELS) break;
+    if(pad === 0) d = dpr * Math.sqrt(TILE_MAX_PIXELS / area);
   }
   const s = d * pe.scale;                                 // PDF units -> tile pixels
   if(s < pe._baseScale * 1.12) return;                    // not noticeably sharper than what is already there
