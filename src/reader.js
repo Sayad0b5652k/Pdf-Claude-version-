@@ -1605,7 +1605,9 @@ export function setupReaderInteractions(scrollEl){
     }
 
     if (action === 'tts' || action === 'ai_summary') {
-      if (typeof window.toggleReadAloud === 'function') window.toggleReadAloud();
+      // The sheet used to open and be closed 16 ms later by the click the browser sends after the 2nd tap
+      // (it lands on the sheet backdrop). Open it once that click is over.
+      if (typeof window.toggleReadAloud === 'function') setTimeout(() => window.toggleReadAloud(), 420);
       return;
     }
 
