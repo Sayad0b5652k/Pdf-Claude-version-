@@ -738,12 +738,8 @@ export function renderReaderShell(){
       if (typeof window.closeOledBlackoutVisualizer === 'function') {
         window.closeOledBlackoutVisualizer();
       }
-      // Saving the reading time is a database write that can take ~1 s on a phone; the old code waited for it
-      // while the reader sat frozen (pages went black). The write now finishes in the background.
       if (typeof window.stopReadingSession === 'function') {
-        // readers of the stats (dashboard) wait for this promise, so they never see half-saved numbers
-        window._statsFlushPromise = Promise.resolve(window.stopReadingSession()).catch(() => {})
-          .then(() => { window._statsFlushPromise = null; });
+        await window.stopReadingSession();
       }
       window.State.view='dashboard';
       // Release the document for real: cancel renders, free canvases and tell pdf.js to drop the
@@ -751,26 +747,22 @@ export function renderReaderShell(){
       // pdf.js worker (plus all its page elements) until the app was reloaded.
       const closingDoc = window.State.currentDoc;
       window.State.currentDoc=null;
+      clearPageEls();
       pageVpCache = {};
       pageVpCacheDoc = null;
       const scrollElOnExit = document.getElementById('reader-scroll');
       if (scrollElOnExit) scrollElOnExit.onscroll = null;
       window.currentPageContainer = null;
+      if (closingDoc && typeof closingDoc.destroy === 'function') {
+        closingDoc.destroy().catch(() => {});
+      }
       window.State.pageList=null;
       window.State.pageListLabel='';
       releaseWakeLock();
       if (window.screen?.orientation?.unlock) {
         try { window.screen.orientation.unlock(); } catch(e) {}
       }
-      // Put the dashboard on screen first, free the heavy page canvases right after (not before).
       window.render();
-      setTimeout(() => {
-        if (window.State.currentDoc) return;   // a book was opened again meanwhile: do not touch its pages
-        clearPageEls();
-        if (closingDoc && typeof closingDoc.destroy === 'function') {
-          closingDoc.destroy().catch(() => {});
-        }
-      }, 0);
     };
 
     if (goalMins > 0 && !isAlreadyNotified) {
