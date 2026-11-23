@@ -5,15 +5,17 @@ import { GUIDE, searchGuide, askHelpAI, logMiss } from './help_guide.js';
 /* ============================================================
    SETTINGS VIEW
    ============================================================ */
-export async function renderSettings(){
+export async function renderSettings(opts = {}){
   if (window.State.view !== 'settings') return;
-  const prevScroll = window.scrollY || document.documentElement.scrollTop || 0;
+  // opening/closing the Advanced page starts at the top: remember no old scroll offset (it was restored AFTER the
+  // swap, so the page jumped top -> old offset = the visible shutter)
+  const prevScroll = opts.resetScroll ? 0 : (window.scrollY || document.documentElement.scrollTop || 0);
   const totalSize = window.State.files.reduce((a,f)=>a+(f.size||0),0);
   const appUrl = 'https://sayadpro.ai.studio';
   const displayUrl = 'https://sayadpro.ai.studio';
 
-  let qrSvg = '';
-  try {
+  let qrSvg = window.__sayadQrSvg || '';
+  if (!qrSvg) try {
     qrSvg = await QRCode.toString(appUrl, {
       type: 'svg',
       margin: 1,
@@ -26,6 +28,7 @@ export async function renderSettings(){
     // Replace black fill with var(--accent) so it directly matches the exact theme accent color (same as S, A, Y, A, D and Athar Labs!)
     qrSvg = qrSvg.replace(/fill="#000000"/g, 'fill="var(--accent)"');
     qrSvg = qrSvg.replace(/<svg /, '<svg style="width:100%; height:100%; display:block;" ');
+    window.__sayadQrSvg = qrSvg;   // the QR never changes: build it once, not on every settings render
   } catch (err) {
     console.warn('QR Code generation error:', err);
     qrSvg = `<div style="font-size:11px; color:var(--text-dim); text-align:center;">${displayUrl}</div>`;
@@ -34,7 +37,7 @@ export async function renderSettings(){
   const isAdv = window.State.settingsPage === 'advanced';
   document.getElementById('app').innerHTML = `
   <div class="view fade-in" style="padding:0 0 100px;">
-    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; backdrop-filter:blur(10px); border-bottom:1px solid var(--border); margin-bottom:18px;">
+    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:12px;">
           ${isAdv ? `<button id="btn-adv-back" aria-label="Back to Settings" style="width:40px; height:40px; border-radius:12px; background:var(--surface-2); color:var(--text); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer;">${window.icon('chevLeft','icon icon-md')}</button>` : `<div style="width:40px; height:40px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
@@ -336,9 +339,9 @@ export async function renderSettings(){
   window.bindBottomNav();
 
   const openAdv = document.getElementById('btn-open-advanced');
-  if (openAdv) openAdv.onclick = () => { window.State.settingsPage = 'advanced'; renderSettings(); window.scrollTo(0, 0); };
+  if (openAdv) openAdv.onclick = () => { window.State.settingsPage = 'advanced'; renderSettings({ resetScroll: true }); };
   const advBack = document.getElementById('btn-adv-back');
-  if (advBack) advBack.onclick = () => { window.State.settingsPage = 'main'; renderSettings(); window.scrollTo(0, 0); };
+  if (advBack) advBack.onclick = () => { window.State.settingsPage = 'main'; renderSettings({ resetScroll: true }); };
 
   const copyLinkBtn = document.getElementById('btn-copy-app-link');
   if (copyLinkBtn) {
@@ -513,7 +516,7 @@ export async function renderSettings(){
         const el = sel ? document.querySelector(sel) : document.getElementById(id);
         if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('help-flash'); setTimeout(() => el.classList.remove('help-flash'), 1600); }
       }, 120);
-      if (g.t === 'adv') { window.State.settingsPage = 'advanced'; renderSettings(); window.scrollTo(0, 0); scroll(g.id); }
+      if (g.t === 'adv') { window.State.settingsPage = 'advanced'; renderSettings({ resetScroll: true }); scroll(g.id); }
       else if (g.t === 'set') { if (window.State.settingsPage !== 'main') { window.State.settingsPage = 'main'; renderSettings(); } scroll(g.id, g.sel || (g.id ? '#' + g.id : null)); }
       else if (g.t === 'nav') { window.State.settingsPage = 'main'; const b = document.querySelector(`[data-nav="${g.n}"]`); if (b) b.click(); }
     };
@@ -762,7 +765,9 @@ export async function renderSettings(){
     inp.click();
   };
 
-  if (prevScroll > 0) {
+  if (opts.resetScroll) {
+    window.scrollTo(0, 0);
+  } else if (prevScroll > 0) {
     requestAnimationFrame(() => {
       window.scrollTo(0, prevScroll);
     });
@@ -814,7 +819,7 @@ export async function renderReviewView(preserveScroll = true){
 
   document.getElementById('app').innerHTML = `
   <div class="view fade-in" style="padding:0 0 100px;">
-    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; backdrop-filter:blur(10px); border-bottom:1px solid var(--border); margin-bottom:18px;">
+    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:12px;">
           <div style="width:40px; height:40px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
@@ -1034,7 +1039,7 @@ export async function renderBookmarksView(preserveScroll = true){
 
   document.getElementById('app').innerHTML = `
   <div class="view fade-in" style="padding:0 0 100px;">
-    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; backdrop-filter:blur(10px); border-bottom:1px solid var(--border); margin-bottom:16px;">
+    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:16px;">
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:12px;">
           <div style="width:40px; height:40px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">

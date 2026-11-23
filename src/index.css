@@ -8612,3 +8612,8 @@ html[data-pro-theme="notebook"] #teacher-input:focus{border:none!important;box-s
 .sheet-backdrop.open { transition: opacity .38s ease-out; }
 html.lite-motion .sheet, html.lite-motion .sheet.open { transition-duration: .14s !important; }
 html.lite-motion .sheet-backdrop, html.lite-motion .sheet-backdrop.open { transition-duration: .12s !important; }
+
+/* Full-screen views fade in with opacity only: moving a tall scrolling layer by 3px forced a re-raster at the end of the
+   animation (visible as a small stutter when opening Advanced settings). */
+@keyframes viewFadeOpacity { from { opacity: 0; } to { opacity: 1; } }
+.view.fade-in { animation-name: viewFadeOpacity; }

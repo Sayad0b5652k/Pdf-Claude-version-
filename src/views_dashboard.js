@@ -71,7 +71,7 @@ export async function renderDashboard(preserveScroll = true){
 
   document.getElementById('app').innerHTML = `
   <div class="view ${isFirstMount ? 'home-enter' : ''}" id="dashboard-drop" style="padding:0 0 100px;">
-    <div style="position:sticky; top:0; z-index:40; background:var(--bg); padding:16px 20px 12px; backdrop-filter:blur(10px); border-bottom:1px solid var(--border);">
+    <div style="position:sticky; top:0; z-index:40; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border);">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
         <div style="display:flex; align-items:center; gap:12px;">
           <div style="width:44px; height:44px; border-radius:12px; background:var(--surface-2); border:1px solid var(--accent-soft); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 10px var(--accent-soft); overflow:hidden;">
