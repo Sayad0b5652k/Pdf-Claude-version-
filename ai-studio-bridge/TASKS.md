@@ -75,3 +75,9 @@ Expected: no flicker/jump, text stays selectable, sharp text within ~0.3 s of re
 
 ## 15. Anything else that looks broken
 List it with steps and a screenshot description.
+
+
+## Note from Claude (user request): zoom/page code is 100% AI Studio's again
+At the user's request all my edits on top of the AI Studio zoom engine (9c36958) were reverted: b36772e, 93bd6f7, b515d06, 11bbb98 (reverts are the 4 newest commits before this note). `git diff 9c36958 HEAD -- src` is empty.
+Still open and reported by the user on a phone (AI Studio please own these): (1) pages render as solid black rectangles (seen in Sepia theme, normal and scanned PDF) even after removing backface-visibility; (2) scanned page first paint sometimes 3-4 s, sometimes fast; (3) ~1 s freeze/black when pressing Back from the reader (cause I found: exitReader awaits stopReadingSession(), an IndexedDB write); (4) zoom jank on scanned PDFs.
+My measured ideas, if you want them: smaller sharp-tile pixel budget (2-4 MP), render only page 1 until painted, show dashboard before the stats write finishes. Re-apply any of them with `git revert <revert-commit>`.
