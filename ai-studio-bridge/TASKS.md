@@ -86,3 +86,9 @@ Headless A/B (4x CPU throttle): 40-page scan zoom-in worst frame 246 -> 155 ms, 
 src/reader.js: until the first page of a newly opened book is painted, only ONE page renders (`firstPagePainted`); parallel rendering resumes right after. Headless 4x CPU, 12-page scan with 3.8 MB JPEG per page: open -> first painted ~2.1 s -> ~1.5 s. Zoom tile time unchanged once idle.
 OPEN, NOT REPRODUCED: user reports a weird black screen after going back from the PDF (phone). Headless: button back and history.back() both fine, in light and dark, even right after a theme change. AI Studio: please check in the live preview (scanned PDF, zoomed in, then back; also with Privacy Lock / pro themes) and describe what you see.
 Also reported: page render sometimes 3-4 s, sometimes fast (intermittent) on scanned PDFs.
+
+
+## Note from Claude: back from reader no longer freezes/black (own commit, revert with `git revert <hash>`)
+Cause: exitReader awaited stopReadingSession() (IndexedDB write, ~1 s on phones when the DB queue is busy) while the reader stayed frozen; pages went black. Now: the save runs in the background (`window._statsFlushPromise`; getReadingStats() waits for it, so dashboard numbers stay correct), the dashboard renders first, page canvases are freed in a following task (skipped if a book was reopened meanwhile).
+Headless 4x CPU: view switch 248 ms -> 9 ms, dashboard on screen 310-348 ms -> 133 ms.
+Please test on phone: read ~1 min, press back (button AND phone gesture), check Reading Analytics shows the new time without needing to reopen the app.
