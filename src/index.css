@@ -8621,8 +8621,8 @@ html.lite-motion .sheet-backdrop, html.lite-motion .sheet-backdrop.open { transi
 /* ===== Motion polish: one soft-spring language for sheets, menus and dialogs (colours/themes untouched) =====
    --spring-soft overshoots only ~3-4% so it reads as a gentle bounce, never a wobble. */
 :root {
-  --spring-soft: cubic-bezier(0.3, 1.14, 0.5, 1);
-  --spring-pop: cubic-bezier(0.34, 1.32, 0.5, 1);
+  --spring-soft: cubic-bezier(0.28, 1.24, 0.5, 1);
+  --spring-pop: cubic-bezier(0.3, 1.5, 0.5, 1);
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-in-soft: cubic-bezier(0.4, 0, 0.8, 0.4);
 }
