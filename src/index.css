@@ -8617,3 +8617,86 @@ html.lite-motion .sheet-backdrop, html.lite-motion .sheet-backdrop.open { transi
    animation (visible as a small stutter when opening Advanced settings). */
 @keyframes viewFadeOpacity { from { opacity: 0; } to { opacity: 1; } }
 .view.fade-in { animation-name: viewFadeOpacity; }
+
+/* ===== Motion polish: one soft-spring language for sheets, menus and dialogs (colours/themes untouched) =====
+   --spring-soft overshoots only ~3-4% so it reads as a gentle bounce, never a wobble. */
+:root {
+  --spring-soft: cubic-bezier(0.3, 1.14, 0.5, 1);
+  --spring-pop: cubic-bezier(0.34, 1.32, 0.5, 1);
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-soft: cubic-bezier(0.4, 0, 0.8, 0.4);
+}
+
+/* Bottom sheets: bounce on open, quick clean slide on close. The ::after filler (already on .sheet) hides the overshoot gap. */
+.sheet.open { transition: transform .46s var(--spring-soft); }
+.sheet.peek, .sheet.peek.open { transition: transform .36s var(--spring-soft), max-height .2s ease; }
+
+/* Select / option menus (mobile bottom panel): the panel extends 24px below the screen so the overshoot never shows a gap */
+.sayad-select-overlay { transition: opacity .18s ease-out; }
+.sayad-select-backdrop { transition: opacity .2s ease-out; }
+.sayad-select-panel {
+  margin-bottom: -24px;
+  padding-bottom: calc(env(safe-area-inset-bottom, 14px) + 24px);
+  transition: transform .2s var(--ease-in-soft);
+}
+.sayad-select-overlay.active .sayad-select-panel { transition: transform .44s var(--spring-soft); }
+.sayad-select-overlay.closing .sayad-select-panel { transition: transform .2s var(--ease-in-soft); }
+@media (min-width: 641px) {
+  .sayad-select-panel { margin-bottom: 0; padding-bottom: 8px; transition: transform .16s var(--ease-in-soft); }
+  .sayad-select-overlay.active .sayad-select-panel { transition: transform .38s var(--spring-pop); }
+  .sayad-select-overlay.closing .sayad-select-panel { transition: transform .16s var(--ease-in-soft); }
+}
+
+/* Option rows: crisp press-in, springy release */
+.sayad-option-item { transition: background .12s ease, border-color .12s ease, transform .32s var(--spring-pop); }
+.sayad-option-item:active { transform: scale(.975); transition-duration: .12s, .12s, .08s; }
+.sayad-custom-select-trigger { transition: border-color .15s ease, background .15s ease, transform .32s var(--spring-pop); }
+.sayad-custom-select-trigger:active { transform: scale(.98); }
+.sayad-custom-select-trigger .sayad-trigger-chevron { transition: transform .38s var(--spring-pop), color .18s ease; }
+
+/* Buttons / chips: same springy release everywhere */
+.btn:not(.no-press) { transition-property: transform, background-color, border-color, color, box-shadow, opacity; transition-timing-function: var(--spring-pop); }
+.btn:not(.no-press):active { transition-duration: .08s; }
+.an-chip, .mk-stamp-chip, .adv-seg-btn, .lk-pad button { transition-timing-function: var(--spring-pop); }
+
+/* Dialog drop-in: one smooth arc (down, tiny overshoot, settle) instead of four hard stops */
+@keyframes sayadScaleUp {
+  0%   { transform: translateY(-28px) scale(.95); opacity: 0; animation-timing-function: var(--ease-out-soft); }
+  55%  { transform: translateY(4px) scale(1.005); opacity: 1; animation-timing-function: ease-in-out; }
+  80%  { transform: translateY(-1.5px) scale(1); }
+  100% { transform: none; opacity: 1; }
+}
+@keyframes mw-modal-zoom {
+  0%   { transform: translateY(-28px) scale(.95); opacity: 0; animation-timing-function: var(--ease-out-soft); }
+  55%  { transform: translateY(4px) scale(1.005); opacity: 1; animation-timing-function: ease-in-out; }
+  80%  { transform: translateY(-1.5px) scale(1); }
+  100% { transform: none; opacity: 1; }
+}
+.mw-studio-card { animation-duration: .5s; animation-timing-function: linear; }
+
+/* Small pop-ins (selection mini bar, help answers, floating pill) */
+#sel-mini.show { animation: smIn .26s var(--spring-pop); }
+.help-ans { animation: helpin .3s var(--ease-out-soft); }
+.mw-dock-pill { animation-timing-function: var(--spring-pop); }
+
+html.lite-motion .sayad-select-overlay.active .sayad-select-panel,
+html.lite-motion .sayad-select-overlay.closing .sayad-select-panel { transition-duration: .12s !important; }
+@media (prefers-reduced-motion: reduce) {
+  .sayad-select-overlay.active .sayad-select-panel { transition-duration: .01s; }
+}
+
+/* ===== Battery: GPU-only liquid animation =====
+   Bubbles used to animate `top` (forces layout every frame = jank + battery drain). Now each bubble is a full-height
+   track with the dot painted at its bottom, and only transform/opacity move, so the compositor does all the work. */
+.battery-wave { will-change: transform; backface-visibility: hidden; }
+.battery-bubble { top: 0; height: 100%; background: radial-gradient(circle at 50% calc(100% - var(--r, 1.5px)), rgba(255,255,255,.75) var(--r, 1.5px), transparent calc(var(--r, 1.5px) + .7px)); border-radius: 0; will-change: transform, opacity; }
+.battery-bubble.bubble-1 { height: 100%; --r: 1.5px; }
+.battery-bubble.bubble-2 { height: 100%; --r: 2px; }
+.battery-bubble.bubble-3 { height: 100%; --r: 1.5px; }
+@keyframes bubbleFloat {
+  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
+  20%  { opacity: .9; }
+  75%  { opacity: .9; }
+  100% { transform: translate3d(0, -92%, 0); opacity: 0; }
+}
+.battery-bubble { animation-fill-mode: backwards; }
