@@ -8700,3 +8700,19 @@ html.lite-motion .sayad-select-overlay.closing .sayad-select-panel { transition-
   100% { transform: translate3d(0, -92%, 0); opacity: 0; }
 }
 .battery-bubble { animation-fill-mode: backwards; }
+
+/* ===== Buttery: no live blur behind full-screen modal backdrops =====
+   A blurred full-screen layer is re-sampled every frame while the panel springs in on top of it, which is what made menus
+   stutter on phones. Same look, slightly deeper dim instead of the blur. */
+.sayad-select-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(0, 0, 0, 0.72); }
+.sayad-installer-backdrop, .mw-studio-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+/* Animated panels get their own compositor layer only while they move */
+.sayad-select-overlay.active .sayad-select-panel, .sheet.open { backface-visibility: hidden; }
+.mw-studio-backdrop { background: rgba(0, 0, 0, 0.66); }
+
+/* Equalizer bars: scaleY instead of height (no layout per frame while audio plays). Same look: 3px -> 12px. */
+.mw-pill-eq.playing span { height: 12px; transform-origin: 50% 100%; will-change: transform; }
+@keyframes mw-eq-bounce {
+  0%   { transform: scaleY(.25); }
+  100% { transform: scaleY(1); }
+}
