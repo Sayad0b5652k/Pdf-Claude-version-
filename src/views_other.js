@@ -7,9 +7,10 @@ import { GUIDE, searchGuide, askHelpAI, logMiss } from './help_guide.js';
    ============================================================ */
 export async function renderSettings(opts = {}){
   if (window.State.view !== 'settings') return;
-  // opening/closing the Advanced page starts at the top: remember no old scroll offset (it was restored AFTER the
-  // swap, so the page jumped top -> old offset = the visible shutter)
-  const prevScroll = opts.resetScroll ? 0 : (window.scrollY || document.documentElement.scrollTop || 0);
+  const tok = window._outerRenderToken;
+  const existingShell = document.querySelector('[data-settings-shell="1"]');
+  const curScrollEl = getViewScrollEl();
+  const prevScroll = opts.resetScroll ? 0 : (curScrollEl ? curScrollEl.scrollTop : 0);
   const totalSize = window.State.files.reduce((a,f)=>a+(f.size||0),0);
   const appUrl = 'https://sayadpro.ai.studio';
   const displayUrl = 'https://sayadpro.ai.studio';
@@ -33,11 +34,10 @@ export async function renderSettings(opts = {}){
     console.warn('QR Code generation error:', err);
     qrSvg = `<div style="font-size:11px; color:var(--text-dim); text-align:center;">${displayUrl}</div>`;
   }
+  if (window.State.view !== 'settings' || (tok && tok !== window._outerRenderToken)) return;
 
   const isAdv = window.State.settingsPage === 'advanced';
-  document.getElementById('app').innerHTML = `
-  <div class="view fade-in" style="padding:0 0 100px;">
-    <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
+  const headerHtml = `
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:12px;">
           ${isAdv ? `<button id="btn-adv-back" aria-label="Back to Settings" style="width:40px; height:40px; border-radius:12px; background:var(--surface-2); color:var(--text); border:1px solid var(--border); display:flex; align-items:center; justify-content:center; cursor:pointer;">${window.icon('chevLeft','icon icon-md')}</button>` : `<div style="width:40px; height:40px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
@@ -55,12 +55,11 @@ export async function renderSettings(opts = {}){
         <div class="font-mono" style="padding:4px 10px; border-radius:12px; background:var(--surface-2); color:var(--text-dim); border:1px solid var(--border); font-size:11px; font-weight:700;">
           ${window.State.files.length} ${window.State.files.length===1?'Book':'Books'}
         </div>
-      </div>
-    </div>
-    <div style="padding:0 20px;">
+      </div>`;
 
+  const bodyDirClass = opts.dir === 'forward' ? ' slide-forward' : opts.dir === 'back' ? ' slide-back' : '';
+  const bodyHtml = `<div id="settings-page-body" class="settings-page-body${bodyDirClass}" style="padding:0 20px;">
     ${!isAdv ? `
-    <!-- Help & Guide -->
     <div class="card help-card" id="help-card">
       <div class="help-head"><div class="help-q">?</div><div><div class="help-title">Help &amp; Guide</div><div class="help-sub">App ke baare me kuch bhi poocho</div></div></div>
       <div class="help-box"><span>🔍</span><input id="help-input" type="search" placeholder="Jaise: PIN lock kaise lagaun?" autocomplete="off" enterkeyhint="search" /></div>
@@ -333,15 +332,49 @@ export async function renderSettings(opts = {}){
 
 
     `}
-  </div>
-  </div>
-  ${window.bottomNavHtml('settings')}`;
-  window.bindBottomNav();
+  </div>`;
+
+  if (existingShell && opts.inPlace !== false) {
+    const hdr = document.getElementById('settings-header-slot');
+    const oldBody = document.getElementById('settings-page-body');
+    if (hdr && oldBody) {
+      if (opts.resetScroll) existingShell.scrollTop = 0;
+      hdr.innerHTML = headerHtml;
+      oldBody.outerHTML = bodyHtml;
+      window.syncBottomNav && window.syncBottomNav('settings');
+    } else {
+      const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
+      document.getElementById('app').innerHTML = `
+      <div class="view fade-in" data-settings-shell="1" style="padding:0 0 100px;">
+        <div id="settings-header-slot" style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
+          ${headerHtml}
+        </div>
+        <div class="outer-stage-body${tabDirCls}">
+          ${bodyHtml}
+        </div>
+      </div>
+      ${window.bottomNavHtml('settings')}`;
+      window.bindBottomNav();
+    }
+  } else {
+    const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
+    document.getElementById('app').innerHTML = `
+    <div class="view fade-in" data-settings-shell="1" style="padding:0 0 100px;">
+      <div id="settings-header-slot" style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
+        ${headerHtml}
+      </div>
+      <div class="outer-stage-body${tabDirCls}">
+        ${bodyHtml}
+      </div>
+    </div>
+    ${window.bottomNavHtml('settings')}`;
+    window.bindBottomNav();
+  }
 
   const openAdv = document.getElementById('btn-open-advanced');
-  if (openAdv) openAdv.onclick = () => { window.State.settingsPage = 'advanced'; renderSettings({ resetScroll: true }); };
+  if (openAdv) openAdv.onclick = () => { window.State.settingsPage = 'advanced'; renderSettings({ resetScroll: true, dir: 'forward' }); };
   const advBack = document.getElementById('btn-adv-back');
-  if (advBack) advBack.onclick = () => { window.State.settingsPage = 'main'; renderSettings({ resetScroll: true }); };
+  if (advBack) advBack.onclick = () => { window.State.settingsPage = 'main'; renderSettings({ resetScroll: true, dir: 'back' }); };
 
   const copyLinkBtn = document.getElementById('btn-copy-app-link');
   if (copyLinkBtn) {
@@ -555,17 +588,51 @@ export async function renderSettings(opts = {}){
   const keyList = document.getElementById('adv-key-list');
   const keyMsg = (t, tone) => {
     const el = document.getElementById('adv-key-msg'); if (!el) return;
+    const wasHidden = el.style.display === 'none' || !el.textContent;
     el.style.display = t ? 'block' : 'none'; el.textContent = t || ''; el.dataset.tone = tone || '';
+    if (t && wasHidden) { el.classList.remove('adv-msg-in'); void el.offsetWidth; el.classList.add('adv-msg-in'); }
   };
-  const paintKeys = () => {
+  const updateKeyBadge = (list) => {
+    const badge = document.getElementById('adv-key-badge');
+    if (badge) {
+      const live = list.filter(k => k.state !== 'bad' && k.state !== 'unsupported').length;
+      badge.textContent = list.length ? `${live} active` : 'App default';
+      badge.dataset.on = list.length ? '1' : '0';
+    }
+  };
+  // Surgically update an existing KeyVault row without rebuilding the whole list (eliminates async jhatka)
+  const updateKeyRowDOM = (keyId) => {
+    if (!keyList || !KV) return false;
+    const list = KV.list();
+    updateKeyBadge(list);
+    const k = list.find(x => String(x.id) === String(keyId));
+    const row = keyList.querySelector(`.kv-row[data-kid="${keyId}"]`);
+    if (!k || !row) return false;
+    const st = KV.statusOf(k);
+    const curRing = row.querySelector('.kv-ring');
+    if (curRing) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = KV.ringSvg(k);
+      if (wrap.firstElementChild) curRing.replaceWith(wrap.firstElementChild);
+    }
+    const stEl = row.querySelector('.kv-status');
+    if (stEl) {
+      stEl.dataset.tone = st.tone || '';
+      stEl.textContent = st.text || '';
+    }
+    const refBtn = row.querySelector('[data-kv-refresh]');
+    if (refBtn) refBtn.classList.remove('spin');
+    return true;
+  };
+  const paintKeys = (animateId) => {
     if (!keyList || !KV) return;
     const list = KV.list();
-    const badge = document.getElementById('adv-key-badge');
-    if (badge) { const live = list.filter(k => k.state !== 'bad' && k.state !== 'unsupported').length; badge.textContent = list.length ? `${live} active` : 'App default'; badge.dataset.on = list.length ? '1' : '0'; }
+    updateKeyBadge(list);
     if (!list.length) { keyList.innerHTML = `<div class="adv-empty">Abhi koi personal key nahi — app apni default key pool use kar rahi hai.</div>`; return; }
     keyList.innerHTML = list.map(k => {
       const P = KV.PROV[k.provider] || KV.PROV.unknown, st = KV.statusOf(k);
-      return `<div class="kv-row" data-kid="${k.id}">
+      const cls = animateId && String(k.id) === String(animateId) ? 'kv-row adv-row-in' : 'kv-row';
+      return `<div class="${cls}" data-kid="${k.id}">
         ${KV.ringSvg(k)}
         <div class="kv-main">
           <div class="kv-top"><span class="kv-chip" style="--pc:${P.color}">${P.short}</span><span class="kv-label">${window.escapeHtml(k.label)}</span></div>
@@ -578,15 +645,30 @@ export async function renderSettings(opts = {}){
         </div></div>`;
     }).join('');
     keyList.querySelectorAll('[data-kv-refresh]').forEach(b => b.onclick = async () => {
-      b.classList.add('spin'); try { await KV.check(b.dataset.kvRefresh); } catch (e) { window.toast('Check fail: ' + e.message); } paintKeys();
+      b.classList.add('spin');
+      const kid = b.dataset.kvRefresh;
+      try { await KV.check(kid); } catch (e) { window.toast('Check fail: ' + e.message); }
+      b.classList.remove('spin');
+      if (!updateKeyRowDOM(kid)) paintKeys();
     });
-    keyList.querySelectorAll('[data-kv-del]').forEach(b => b.onclick = () => { KV.remove(b.dataset.kvDel); window.toast('Key hata di'); paintKeys(); });
+    keyList.querySelectorAll('[data-kv-del]').forEach(b => b.onclick = () => {
+      const kid = b.dataset.kvDel;
+      const row = b.closest('.kv-row');
+      KV.remove(kid);
+      window.toast('Key hata di');
+      if (row && !document.documentElement.classList.contains('lite-motion')) {
+        row.classList.add('outer-item-out');
+        setTimeout(() => paintKeys(), 180);
+      } else {
+        paintKeys();
+      }
+    });
   };
   if (KV && keyList) {
     paintKeys();
-    // quietly refresh real quota for Groq/OpenRouter keys (cheap); Gemini is counted locally
+    // Quietly refresh Groq/OpenRouter quota in background and surgically update each row in-place (no list rebuild!)
     KV.list().filter(k => k.provider !== 'gemini' && k.state !== 'unsupported' && Date.now() - (k.checkedAt || 0) > 120000)
-      .forEach(k => KV.check(k.id).then(paintKeys).catch(() => {}));
+      .forEach(k => KV.check(k.id).then(() => { if (!updateKeyRowDOM(k.id)) paintKeys(); }).catch(() => {}));
     const inp = document.getElementById('adv-key-input'), det = document.getElementById('adv-detect');
     const eye = document.getElementById('adv-key-eye'), add = document.getElementById('adv-key-add');
     const norm = (val) => (KV.clean ? KV.clean(val) : String(val || '').trim());
@@ -613,7 +695,7 @@ export async function renderSettings(opts = {}){
     add.onclick = async () => {
       const v = norm(inp.value); if (!v) return keyMsg('Pehle key paste karo', 'bad');
       add.disabled = true; add.textContent = 'Checking…'; keyMsg('Key verify ho rahi hai…', 'dim');
-      try { const k = await KV.add(v); inp.value = ''; updateDetect(); keyMsg(''); window.toast(`${KV.PROV[k.provider].name} key add ho gayi 🎉`); paintKeys(); }
+      try { const k = await KV.add(v); inp.value = ''; updateDetect(); keyMsg(''); window.toast(`${KV.PROV[k.provider].name} key add ho gayi 🎉`); paintKeys(k.id); }
       catch (e) { keyMsg('❌ ' + e.message, 'bad'); }
       add.disabled = false; add.textContent = 'Add key';
     };
@@ -622,11 +704,26 @@ export async function renderSettings(opts = {}){
       const list = KV.list();
       if (!list.length) { window.toast('Pehle koi API key add karo'); return; }
       const btn = e.currentTarget; btn.textContent = 'Checking…';
-      for (const k of list) { try { await KV.check(k.id); } catch (er) {} paintKeys(); }
+      for (const k of list) {
+        const refBtn = keyList.querySelector(`[data-kv-refresh="${k.id}"]`);
+        if (refBtn) refBtn.classList.add('spin');
+        try { await KV.check(k.id); } catch (er) {}
+        if (!updateKeyRowDOM(k.id)) paintKeys();
+      }
       btn.textContent = 'Sab check karo';
     };
     window._advKeysListener && window.removeEventListener('sayad-keys-changed', window._advKeysListener);
-    window._advKeysListener = () => { if (document.getElementById('adv-key-list')) paintKeys(); };
+    window._advKeysListener = () => {
+      const cur = document.getElementById('adv-key-list');
+      if (!cur || !KV) return;
+      const list = KV.list();
+      const rows = cur.querySelectorAll('.kv-row[data-kid]');
+      if (rows.length === list.length && list.every((k, idx) => rows[idx]?.dataset?.kid === String(k.id))) {
+        list.forEach(k => updateKeyRowDOM(k.id));
+      } else {
+        paintKeys();
+      }
+    };
     window.addEventListener('sayad-keys-changed', window._advKeysListener);
   }
 
@@ -634,11 +731,19 @@ export async function renderSettings(opts = {}){
   const lockCard = document.getElementById('lock-card');
   if (lockCard && window.AppLock) {
     const AL = window.AppLock;
-    const lm = (t, bad) => { const e = lockCard.querySelector('.adv-msg'); if (e) { e.style.display = t ? 'block' : 'none'; e.textContent = t || ''; e.dataset.tone = bad ? 'bad' : ''; } };
-    const paintLock = () => {
+    const lm = (t, bad) => {
+      const e = lockCard.querySelector('.adv-msg');
+      if (e) {
+        const wasHidden = e.style.display === 'none' || !e.textContent;
+        e.style.display = t ? 'block' : 'none'; e.textContent = t || ''; e.dataset.tone = bad ? 'bad' : '';
+        if (t && wasHidden) { e.classList.remove('adv-msg-in'); void e.offsetWidth; e.classList.add('adv-msg-in'); }
+      }
+    };
+    const paintLock = (animate) => {
       const on = AL.enabled();
-      const b = document.getElementById('lock-badge'); b.textContent = on ? 'On' : 'Off'; b.dataset.on = on ? '1' : '0';
+      const b = document.getElementById('lock-badge'); if (b) { b.textContent = on ? 'On' : 'Off'; b.dataset.on = on ? '1' : '0'; }
       const dl = AL.delay();
+      let activeLockAction = '';
       lockCard.innerHTML = on ? `
         <div class="adv-lead">App kholte hi (aur door jaane ke baad) PIN maangega. Ye casual logon se bachne ke liye hai, encryption nahi.</div>
         <div class="adv-lbl">Auto-lock kab?</div>
@@ -648,28 +753,48 @@ export async function renderSettings(opts = {}){
         <div class="adv-lead">4 digit PIN lagao. Fingerprint abhi support nahi hai.</div>
         <div id="lock-form"><div class="adv-pin-row"><input id="pin1" type="password" inputmode="numeric" maxlength="4" placeholder="Naya PIN" /><input id="pin2" type="password" inputmode="numeric" maxlength="4" placeholder="Dobara PIN" /></div>
         <button class="btn btn-primary" id="lock-save" style="width:100%; justify-content:center; padding:11px; font-weight:800; border-radius:12px; margin-top:10px;">Lock lagao</button></div><div class="adv-msg" style="display:none"></div>`;
+      if (animate) {
+        lockCard.classList.remove('adv-card-swap');
+        void lockCard.offsetWidth;
+        lockCard.classList.add('adv-card-swap');
+      }
       const save = lockCard.querySelector('#lock-save');
       if (save) save.onclick = async () => {
         const a = lockCard.querySelector('#pin1').value, c = lockCard.querySelector('#pin2').value;
         if (!/^\d{4}$/.test(a)) return lm('PIN 4 digit ka hona chahiye', 1);
         if (a !== c) return lm('Dono PIN match nahi kar rahe', 1);
-        await AL.setPin(a, 0); window.toast('Privacy Lock on 🔒'); paintLock();
+        await AL.setPin(a, 0); window.toast('Privacy Lock on 🔒'); paintLock(true);
       };
-      lockCard.querySelectorAll('#lock-delay [data-d]').forEach(x => x.onclick = () => { AL.setDelay(+x.dataset.d); paintLock(); });
+      // Toggle delay pill purely in-place — no card teardown/flicker
+      lockCard.querySelectorAll('#lock-delay [data-d]').forEach(x => x.onclick = () => {
+        const val = +x.dataset.d;
+        AL.setDelay(val);
+        lockCard.querySelectorAll('#lock-delay [data-d]').forEach(p => p.classList.toggle('on', +p.dataset.d === val));
+      });
       const now = lockCard.querySelector('#lock-now'); if (now) now.onclick = () => AL.lock();
       const ch = lockCard.querySelector('#lock-change'), off = lockCard.querySelector('#lock-off');
       const askPin = (label, cb) => {
-        lockCard.querySelector('#lock-form').innerHTML = `<div class="adv-pin-row"><input id="pin0" type="password" inputmode="numeric" maxlength="4" placeholder="Abhi ka PIN" />${label === 'change' ? '<input id="pin1" type="password" inputmode="numeric" maxlength="4" placeholder="Naya PIN" />' : ''}</div><button class="btn btn-primary" id="pin-ok" style="width:100%; justify-content:center; padding:11px; font-weight:800; border-radius:12px; margin-top:10px;">Confirm</button>`;
+        const formEl = lockCard.querySelector('#lock-form');
+        if (!formEl) return;
+        if (activeLockAction === label && formEl.innerHTML) {
+          activeLockAction = '';
+          formEl.innerHTML = '';
+          lm('');
+          return;
+        }
+        activeLockAction = label;
+        lm('');
+        formEl.innerHTML = `<div class="adv-form-in"><div class="adv-pin-row"><input id="pin0" type="password" inputmode="numeric" maxlength="4" placeholder="Abhi ka PIN" />${label === 'change' ? '<input id="pin1" type="password" inputmode="numeric" maxlength="4" placeholder="Naya PIN" />' : ''}</div><button class="btn btn-primary" id="pin-ok" style="width:100%; justify-content:center; padding:11px; font-weight:800; border-radius:12px; margin-top:10px;">Confirm</button></div>`;
         lockCard.querySelector('#pin-ok').onclick = async () => {
           if (!(await AL.verify(lockCard.querySelector('#pin0').value))) return lm('Abhi ka PIN galat hai', 1);
           try { await cb(lockCard.querySelector('#pin1') && lockCard.querySelector('#pin1').value); } catch (e) { return lm(e.message, 1); }
-          paintLock();
+          paintLock(true);
         };
       };
       if (ch) ch.onclick = () => askPin('change', async (n) => { await AL.setPin(n); window.toast('PIN badal gaya'); });
       if (off) off.onclick = () => askPin('off', async () => { AL.disable(); window.toast('Privacy Lock band'); });
     };
-    paintLock();
+    paintLock(false);
   }
 
   // ---- Storage Cleaner ----
@@ -685,19 +810,24 @@ export async function renderSettings(opts = {}){
     }
     rows.sort((a, b) => (b.stale - a.stale) || (b.size - a.size));
     const mb = (n) => (n / 1048576).toFixed(n > 10485760 ? 0 : 1) + ' MB';
-    if (!rows.length) { list.innerHTML = '<div class="adv-empty">Koi book nahi mili.</div>'; }
-    else {
+    if (!rows.length) {
+      list.innerHTML = '<div class="adv-empty">Koi book nahi mili.</div>';
+      list.classList.remove('outer-list-swap'); void list.offsetWidth; list.classList.add('outer-list-swap');
+    } else {
       list.innerHTML = rows.map(r => `<label class="cl-row"><input type="checkbox" data-cid="${r.f.id}" data-sz="${r.size}" ${r.stale ? 'checked' : ''} /><span class="cl-main"><b>${window.escapeHtml((r.f.name || 'Book').replace(/\.pdf$/i, ''))}</b><small>${r.days == null ? 'Kabhi nahi khuli' : r.days === 0 ? 'Aaj khuli' : r.days + ' din pehle khuli'}</small></span><span class="cl-size">${mb(r.size)}</span></label>`).join('')
         + `<div class="cl-foot"><span id="cl-sum"></span><button class="btn btn-ghost" id="cl-del" style="color:var(--danger,#ef4444); border-color:var(--danger,#ef4444); font-weight:800; border-radius:10px;">Delete</button></div>`;
+      list.classList.remove('outer-list-swap'); void list.offsetWidth; list.classList.add('outer-list-swap');
       const sum = () => { const cs = [...list.querySelectorAll('[data-cid]:checked')]; document.getElementById('cl-sum').textContent = cs.length ? `${cs.length} selected · ${mb(cs.reduce((a, c) => a + +c.dataset.sz, 0))}` : 'Kuch select nahi'; document.getElementById('cl-del').disabled = !cs.length; };
       list.querySelectorAll('[data-cid]').forEach(c => c.onchange = sum); sum();
       const stale = rows.filter(r => r.stale);
       badge.textContent = stale.length ? `${stale.length} purani · ${mb(stale.reduce((a, r) => a + r.size, 0))}` : 'Sab fresh'; badge.dataset.on = stale.length ? '0' : '1';
       let armed = false; const del = document.getElementById('cl-del');
       del.onclick = async () => {
-        if (!armed) { armed = true; del.textContent = 'Pakka? Dobara tap karo'; setTimeout(() => { armed = false; del.textContent = 'Delete'; }, 3500); return; }
+        if (!armed) { armed = true; del.textContent = 'Pakka? Dobara tap karo'; setTimeout(() => { armed = false; if (del.isConnected) del.textContent = 'Delete'; }, 3500); return; }
         del.disabled = true; del.textContent = 'Delete ho rahi hain…';
-        for (const c of [...list.querySelectorAll('[data-cid]:checked')]) { try { await window.deleteBookAndOrphans(c.dataset.cid); } catch (e) {} }
+        const checked = [...list.querySelectorAll('[data-cid]:checked')];
+        checked.forEach(c => { const rw = c.closest('.cl-row'); if (rw) rw.classList.add('outer-item-out'); });
+        for (const c of checked) { try { await window.deleteBookAndOrphans(c.dataset.cid); } catch (e) {} }
         window.toast('Jagah khali ho gayi 🧹'); cleanBtn.disabled = false; cleanBtn.click();
       };
     }
@@ -715,20 +845,25 @@ export async function renderSettings(opts = {}){
     typewriter: { badge: '● Wave', demo: '<i>▤ Section 1</i> → <i>▤ Key points</i> → <i>📊 Flowchart</i>' },
     instant: { badge: '● Instant', demo: 'Poora jawab ek hi frame me — zero wait' },
   };
-  const paintStyle = (mode) => {
+  const paintStyle = (mode, animate) => {
     const b = document.getElementById('settings-delivery-header-badge'); if (b) b.textContent = (STYLE[mode] || STYLE.sse).badge;
-    const pv = document.getElementById('adv-preview'); if (pv) { pv.dataset.mode = mode; pv.innerHTML = (STYLE[mode] || STYLE.sse).demo; }
+    const pv = document.getElementById('adv-preview');
+    if (pv) {
+      pv.dataset.mode = mode;
+      pv.innerHTML = `<span class="${animate ? 'adv-preview-swap' : ''}">${(STYLE[mode] || STYLE.sse).demo}</span>`;
+    }
     document.querySelectorAll('[data-set-streaming-mode]').forEach(x => x.classList.toggle('on', x.dataset.setStreamingMode === mode));
   };
-  paintStyle(window.State.streamingMode || 'sse');
+  paintStyle(window.State.streamingMode || 'sse', false);
   document.querySelectorAll('[data-set-streaming-mode]').forEach(btn => {
     btn.onclick = async (e) => {
       e.stopPropagation();
       const mode = btn.dataset.setStreamingMode; if (!mode) return;
+      if (window.State.streamingMode === mode) return;
       window.State.streamingMode = mode;
+      paintStyle(mode, true);
       try { localStorage.setItem('sayad_streaming_mode', mode); } catch (e) {}
       if (window.DB && window.DB.setting) await window.DB.setting('streamingMode', mode);
-      paintStyle(mode);
     };
   });
 
@@ -766,10 +901,13 @@ export async function renderSettings(opts = {}){
   };
 
   if (opts.resetScroll) {
+    const vEl = getViewScrollEl();
+    if (vEl) vEl.scrollTop = 0;
     window.scrollTo(0, 0);
   } else if (prevScroll > 0) {
     requestAnimationFrame(() => {
-      window.scrollTo(0, prevScroll);
+      const vEl = getViewScrollEl();
+      if (vEl) vEl.scrollTop = prevScroll;
     });
   }
 }
@@ -810,12 +948,15 @@ function getViewScrollEl() {
 
 export async function renderReviewView(preserveScroll = true){
   if (window.State.view !== 'review') return;
+  const tok = window._outerRenderToken;
   const scrollEl = getViewScrollEl();
   const prevScroll = preserveScroll && scrollEl ? scrollEl.scrollTop : 0;
   const all = await window.DB.all('flashcards');
+  if (window.State.view !== 'review' || (tok && tok !== window._outerRenderToken)) return;
   const now = Date.now();
   const due = all.filter(c=>!c.due || c.due<=now);
   const revised = all.filter(c=>c.reps>0).sort((a,b)=>(a.due||0)-(b.due||0));
+  const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
 
   document.getElementById('app').innerHTML = `
   <div class="view fade-in" style="padding:0 0 100px;">
@@ -840,7 +981,7 @@ export async function renderReviewView(preserveScroll = true){
       </div>
     </div>
 
-    <div style="padding:0 20px;">
+    <div class="outer-stage-body${tabDirCls}" style="padding:0 20px;">
 
     ${due.length? `
       <button class="btn btn-primary" id="start-review" style="width:100%; padding:15px; margin-bottom:24px; font-size:15px;">${window.icon('cards','icon icon-sm')} Study ${due.length} due card${due.length===1?'':'s'}</button>
@@ -870,9 +1011,15 @@ export async function renderReviewView(preserveScroll = true){
   document.querySelectorAll('.del-card').forEach(btn=>{
     btn.onclick = async (e)=>{
       e.stopPropagation();
+      const row = btn.closest('.revise-one');
       await window.DB.del('flashcards', btn.dataset.id);
       window.toast('Card deleted');
-      renderReviewView();
+      if (row && !document.documentElement.classList.contains('lite-motion')) {
+        row.classList.add('outer-item-out');
+        setTimeout(() => renderReviewView(true), 180);
+      } else {
+        renderReviewView(true);
+      }
     };
   });
   document.querySelectorAll('.revise-one').forEach(el=>{
@@ -882,18 +1029,11 @@ export async function renderReviewView(preserveScroll = true){
       if(card) openReviewSession([card], true);
     };
   });
-  document.querySelectorAll('.del-card').forEach(btn=>{
-    btn.onclick = async (e)=>{
-      e.stopPropagation();
-      await window.DB.del('flashcards', btn.dataset.id);
-      window.toast('Card deleted');
-      renderReviewView();
-    };
-  });
 
   if (prevScroll > 0) {
     requestAnimationFrame(() => {
-      window.scrollTo(0, prevScroll);
+      const el = getViewScrollEl();
+      if (el) el.scrollTop = prevScroll;
     });
   }
 }
@@ -956,7 +1096,14 @@ export function openReviewSession(queue, practiceMode){
     bindDeleteBtn(card);
     const flipEl = document.getElementById('flip-card');
     if(flipEl) flipEl.onclick = ()=>{
-      window.Sheet.body.innerHTML = cardHtml(card, true, i, queue.length);
+      const sb = window.Sheet?.body;
+      if (sb) {
+        sb.innerHTML = cardHtml(card, true, i, queue.length);
+        sb.classList.remove('menu-swap-in');
+        void sb.offsetWidth;
+        sb.classList.add('menu-swap-in');
+        window.Sheet?.updateScrollIndicator?.();
+      }
       bindDeleteBtn(card);
       bindGradeButtons(card);
     };
@@ -982,46 +1129,58 @@ export function openReviewSession(queue, practiceMode){
    ============================================================ */
 export async function renderBookmarksView(preserveScroll = true){
   if (window.State.view !== 'bookmarks') return;
+  const tok = window._outerRenderToken;
   const scrollEl = getViewScrollEl();
   const prevScroll = preserveScroll && scrollEl ? scrollEl.scrollTop : 0;
-  const bms = (await window.DB.all('bookmarks')).sort((a,b)=>a.page-b.page);
+  let bms = (await window.DB.all('bookmarks')).sort((a,b)=>a.page-b.page);
+  if (window.State.view !== 'bookmarks' || (tok && tok !== window._outerRenderToken)) return;
   const fileMap = Object.fromEntries(window.State.files.map(f=>[f.id,f]));
-  const categories = [...new Set(bms.map(b=>b.category).filter(Boolean))].sort();
-  const uncategorizedCount = bms.filter(b=>!b.category).length;
-  const isNamedCollection = window.State.bookmarkFilter && window.State.bookmarkFilter!=='all' && window.State.bookmarkFilter!=='uncategorized';
 
-  let shown = bms;
-  if(window.State.bookmarkFilter==='uncategorized') shown = bms.filter(b=>!b.category);
-  else if(isNamedCollection) shown = bms.filter(b=>b.category===window.State.bookmarkFilter);
+  const buildFilterBarHtml = (allBms) => {
+    const categories = [...new Set(allBms.map(b=>b.category).filter(Boolean))].sort();
+    const uncategorizedCount = allBms.filter(b=>!b.category).length;
+    if (!categories.length) return '';
+    return `<div style="display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding-bottom:2px;" class="no-scrollbar">
+      <div class="chip bm-filter ${(!window.State.bookmarkFilter||window.State.bookmarkFilter==='all')?'active':''}" data-filter="all">All (${allBms.length})</div>
+      ${categories.map(c=>`<div class="chip bm-filter ${window.State.bookmarkFilter===c?'active':''}" data-filter="${window.escapeHtml(c)}">${window.icon('folder','icon icon-sm')} ${window.escapeHtml(c)} (${allBms.filter(b=>b.category===c).length})</div>`).join('')}
+      ${uncategorizedCount? `<div class="chip bm-filter ${window.State.bookmarkFilter==='uncategorized'?'active':''}" data-filter="uncategorized">No collection (${uncategorizedCount})</div>`:''}
+    </div>`;
+  };
 
-  let listHtml;
-  if(!shown.length){
-    listHtml = window.emptyState('bookmark','No bookmarks here','Bookmark pages while reading and they\u2019ll show up here.');
-  } else if(isNamedCollection){
-    const byFile = {};
-    for(const b of shown){ (byFile[b.fileId] = byFile[b.fileId]||[]).push(b); }
-    listHtml = Object.entries(byFile).map(([fileId, group])=>{
-      const f = fileMap[fileId];
-      if(!f) return '';
-      const pages = group.map(b=>b.page).sort((a,b)=>a-b);
-      return `<div class="card" style="padding:14px; margin-bottom:12px;">
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
-          <div style="width:40px; height:52px; border-radius:4px; overflow:hidden; flex-shrink:0; background:var(--surface-2);">
-            ${f.thumb? `<img src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">`:''}
+  const buildListHtml = (allBms) => {
+    const isNamedCollection = window.State.bookmarkFilter && window.State.bookmarkFilter!=='all' && window.State.bookmarkFilter!=='uncategorized';
+    let shown = allBms;
+    if(window.State.bookmarkFilter==='uncategorized') shown = allBms.filter(b=>!b.category);
+    else if(isNamedCollection) shown = allBms.filter(b=>b.category===window.State.bookmarkFilter);
+
+    if(!shown.length){
+      return window.emptyState('bookmark','No bookmarks here','Bookmark pages while reading and they\u2019ll show up here.');
+    }
+    if(isNamedCollection){
+      const byFile = {};
+      for(const b of shown){ (byFile[b.fileId] = byFile[b.fileId]||[]).push(b); }
+      return Object.entries(byFile).map(([fileId, group])=>{
+        const f = fileMap[fileId];
+        if(!f) return '';
+        const pages = group.map(b=>b.page).sort((a,b)=>a-b);
+        return `<div class="card" style="padding:14px; margin-bottom:12px;">
+          <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+            <div style="width:40px; height:52px; border-radius:4px; overflow:hidden; flex-shrink:0; background:var(--surface-2);">
+              ${f.thumb? `<img src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">`:''}
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${window.escapeHtml(f.name)}</div>
+              <div class="font-mono" style="font-size:11px; color:var(--text-dim);">${pages.length} page${pages.length===1?'':'s'}: ${pages.join(', ')}</div>
+            </div>
           </div>
-          <div style="flex:1; min-width:0;">
-            <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${window.escapeHtml(f.name)}</div>
-            <div class="font-mono" style="font-size:11px; color:var(--text-dim);">${pages.length} page${pages.length===1?'':'s'}: ${pages.join(', ')}</div>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
+            ${group.sort((a,b)=>a.page-b.page).map(b=>`<span class="chip del-bm-chip" data-id="${b.id}" style="padding:5px 10px; font-size:11.5px;">p.${b.page} ${window.icon('x','icon icon-sm')}</span>`).join('')}
           </div>
-        </div>
-        <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px;">
-          ${group.sort((a,b)=>a.page-b.page).map(b=>`<span class="chip del-bm-chip" data-id="${b.id}" style="padding:5px 10px; font-size:11.5px;">p.${b.page} ${window.icon('x','icon icon-sm')}</span>`).join('')}
-        </div>
-        <button class="btn btn-primary open-collection" data-file="${fileId}" data-pages="${pages.join(',')}" style="width:100%; padding:11px; font-size:13px;">${window.icon('folder','icon icon-sm')} Open collection (${pages.length} pages, rest hidden)</button>
-      </div>`;
-    }).join('');
-  } else {
-    listHtml = shown.map(b=>{
+          <button class="btn btn-primary open-collection" data-file="${fileId}" data-pages="${pages.join(',')}" style="width:100%; padding:11px; font-size:13px;">${window.icon('folder','icon icon-sm')} Open collection (${pages.length} pages, rest hidden)</button>
+        </div>`;
+      }).join('');
+    }
+    return shown.map(b=>{
       const f = fileMap[b.fileId];
       if(!f) return '';
       return `<div class="card bm-jump" data-file="${b.fileId}" data-page="${b.page}" style="display:flex; align-items:center; gap:12px; padding:12px; margin-bottom:10px; cursor:pointer;">
@@ -1035,7 +1194,10 @@ export async function renderBookmarksView(preserveScroll = true){
         <button class="btn del-bm-btn" data-id="${b.id}" style="width:30px; height:30px; background:transparent; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
       </div>`;
     }).join('');
-  }
+  };
+
+  const categories = [...new Set(bms.map(b=>b.category).filter(Boolean))].sort();
+  const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
 
   document.getElementById('app').innerHTML = `
   <div class="view fade-in" style="padding:0 0 100px;">
@@ -1047,59 +1209,103 @@ export async function renderBookmarksView(preserveScroll = true){
           </div>
           <div>
             <div class="font-display" style="font-size:20px; font-weight:800; letter-spacing:.02em; line-height:1.1;">Bookmarks</div>
-            <div style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); margin-top:3px; font-weight:600;">
+            <div id="bm-subtitle" style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-dim); margin-top:3px; font-weight:600;">
               <span>${bms.length} saved ${bms.length===1?'page':'pages'}</span>
               ${categories.length ? `<span style="color:var(--text-faint); font-size:10px;">•</span><span style="color:var(--accent); font-weight:700;">${categories.length} ${categories.length===1?'collection':'collections'}</span>` : ''}
             </div>
           </div>
         </div>
-        <div class="font-mono" style="padding:4px 10px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); font-size:11px; font-weight:700;">
+        <div id="bm-total-badge" class="font-mono" style="padding:4px 10px; border-radius:12px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); font-size:11px; font-weight:700;">
           ${bms.length} Total
         </div>
       </div>
     </div>
-    <div style="padding:0 20px;">
-    ${categories.length? `
-      <div style="display:flex; gap:8px; overflow-x:auto; margin-bottom:16px; padding-bottom:2px;">
-        <div class="chip bm-filter ${(!window.State.bookmarkFilter||window.State.bookmarkFilter==='all')?'active':''}" data-filter="all">All (${bms.length})</div>
-        ${categories.map(c=>`<div class="chip bm-filter ${window.State.bookmarkFilter===c?'active':''}" data-filter="${window.escapeHtml(c)}">${window.icon('folder','icon icon-sm')} ${window.escapeHtml(c)} (${bms.filter(b=>b.category===c).length})</div>`).join('')}
-        ${uncategorizedCount? `<div class="chip bm-filter ${window.State.bookmarkFilter==='uncategorized'?'active':''}" data-filter="uncategorized">No collection (${uncategorizedCount})</div>`:''}
-      </div>
-    `:''}
-    ${listHtml}
+    <div class="outer-stage-body${tabDirCls}" style="padding:0 20px;">
+      <div id="bm-filters-wrap">${buildFilterBarHtml(bms)}</div>
+      <div id="bm-list">${buildListHtml(bms)}</div>
     </div>
   </div>
   ${window.bottomNavHtml('bookmarks')}`;
   window.bindBottomNav();
 
-  document.querySelectorAll('.bm-filter').forEach(el=>{
-    el.onclick = ()=>{ window.State.bookmarkFilter = el.dataset.filter; renderBookmarksView(); };
-  });
-  document.querySelectorAll('.bm-jump').forEach(el=>{
-    el.onclick = ()=>{ window.openReader(el.dataset.file, Number(el.dataset.page)); };
-  });
-  document.querySelectorAll('.del-bm-btn').forEach(el=>{
-    el.onclick = async (e)=>{
-      e.stopPropagation();
-      await window.DB.del('bookmarks', el.dataset.id);
-      window.toast('Bookmark removed');
-      renderBookmarksView();
-    };
-  });
-  document.querySelectorAll('.del-bm-chip').forEach(el=>{
-    el.onclick = async (e)=>{
-      e.stopPropagation();
-      await window.DB.del('bookmarks', el.dataset.id);
-      window.toast('Removed from collection');
-      renderBookmarksView();
-    };
-  });
-  document.querySelectorAll('.open-collection').forEach(el=>{
-    el.onclick = ()=>{
-      const pages = el.dataset.pages.split(',').map(Number);
-      window.openReader(el.dataset.file, pages[0], pages, window.State.bookmarkFilter);
-    };
-  });
+  const updateBmCountsAndFilters = () => {
+    const cats = [...new Set(bms.map(b=>b.category).filter(Boolean))].sort();
+    const subEl = document.getElementById('bm-subtitle');
+    if (subEl) subEl.innerHTML = `<span>${bms.length} saved ${bms.length===1?'page':'pages'}</span>${cats.length ? `<span style="color:var(--text-faint); font-size:10px;">•</span><span style="color:var(--accent); font-weight:700;">${cats.length} ${cats.length===1?'collection':'collections'}</span>` : ''}`;
+    const badgeEl = document.getElementById('bm-total-badge');
+    if (badgeEl) badgeEl.textContent = `${bms.length} Total`;
+    const fw = document.getElementById('bm-filters-wrap');
+    if (fw) { fw.innerHTML = buildFilterBarHtml(bms); bindFilterChips(); }
+  };
+
+  const bindFilterChips = () => {
+    document.querySelectorAll('.bm-filter').forEach(el=>{
+      el.onclick = ()=>{
+        if ((window.State.bookmarkFilter || 'all') === el.dataset.filter) return;
+        window.State.bookmarkFilter = el.dataset.filter;
+        document.querySelectorAll('.bm-filter').forEach(c => c.classList.toggle('active', c.dataset.filter === window.State.bookmarkFilter));
+        const listEl = document.getElementById('bm-list');
+        if (listEl) {
+          listEl.innerHTML = buildListHtml(bms);
+          listEl.classList.remove('outer-list-swap');
+          void listEl.offsetWidth;
+          listEl.classList.add('outer-list-swap');
+          bindListItems();
+        }
+      };
+    });
+  };
+
+  const bindListItems = () => {
+    document.querySelectorAll('#bm-list .bm-jump').forEach(el=>{
+      el.onclick = ()=>{ window.openReader(el.dataset.file, Number(el.dataset.page)); };
+    });
+    document.querySelectorAll('#bm-list .del-bm-btn').forEach(el=>{
+      el.onclick = async (e)=>{
+        e.stopPropagation();
+        const id = el.dataset.id;
+        await window.DB.del('bookmarks', id);
+        bms = bms.filter(b => String(b.id) !== String(id));
+        window.toast('Bookmark removed');
+        const card = el.closest('.bm-jump');
+        const refresh = () => {
+          updateBmCountsAndFilters();
+          const listEl = document.getElementById('bm-list');
+          if (listEl) {
+            listEl.innerHTML = buildListHtml(bms);
+            bindListItems();
+          }
+        };
+        if (card && !document.documentElement.classList.contains('lite-motion')) {
+          card.classList.add('outer-item-out');
+          setTimeout(refresh, 180);
+        } else {
+          refresh();
+        }
+      };
+    });
+    document.querySelectorAll('#bm-list .del-bm-chip').forEach(el=>{
+      el.onclick = async (e)=>{
+        e.stopPropagation();
+        const id = el.dataset.id;
+        await window.DB.del('bookmarks', id);
+        bms = bms.filter(b => String(b.id) !== String(id));
+        window.toast('Removed from collection');
+        updateBmCountsAndFilters();
+        const listEl = document.getElementById('bm-list');
+        if (listEl) { listEl.innerHTML = buildListHtml(bms); bindListItems(); }
+      };
+    });
+    document.querySelectorAll('#bm-list .open-collection').forEach(el=>{
+      el.onclick = ()=>{
+        const pages = el.dataset.pages.split(',').map(Number);
+        window.openReader(el.dataset.file, pages[0], pages, window.State.bookmarkFilter);
+      };
+    });
+  };
+
+  bindFilterChips();
+  bindListItems();
 
   if (prevScroll > 0) {
     const el = getViewScrollEl();
@@ -1312,9 +1518,11 @@ function noteCardHtml(n, file) {
 
 export async function renderNotesView(preserveScroll = true){
   if (window.State.view !== 'notes') return;
+  const tok = window._outerRenderToken;
   const scrollEl = getViewScrollEl();
   const prevScroll = preserveScroll && scrollEl ? scrollEl.scrollTop : 0;
   const notes = (await window.DB.all('notes')).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  if (window.State.view !== 'notes' || (tok && tok !== window._outerRenderToken)) return;
   const fileMap = Object.fromEntries(window.State.files.map(f=>[f.id,f]));
 
   const byGroup = Object.fromEntries(NOTE_SECTIONS.map(s => [s.key, []]));
@@ -1328,21 +1536,24 @@ export async function renderNotesView(preserveScroll = true){
     ...NOTE_SECTIONS.filter(s => byGroup[s.key].length).map(s => ({ key: s.key, label: `${s.title} (${byGroup[s.key].length})` })),
   ];
 
-  const visible = NOTE_SECTIONS.filter(s => byGroup[s.key].length && (currentFilter === 'all' || currentFilter === s.key));
-
-  const sectionsHtml = visible.length ? visible.map(s => `
-    <section class="nt-section" data-section="${s.key}">
-      <div class="nt-section-head">
-        <div class="nt-section-badge">${s.emoji}</div>
-        <div class="nt-section-text">
-          <div class="nt-section-title font-display">${s.title}</div>
-          <div class="nt-section-hint">${s.hint}</div>
+  const buildSectionsHtml = (filterKey) => {
+    const visible = NOTE_SECTIONS.filter(s => byGroup[s.key].length && (filterKey === 'all' || filterKey === s.key));
+    return visible.length ? visible.map(s => `
+      <section class="nt-section" data-section="${s.key}">
+        <div class="nt-section-head">
+          <div class="nt-section-badge">${s.emoji}</div>
+          <div class="nt-section-text">
+            <div class="nt-section-title font-display">${s.title}</div>
+            <div class="nt-section-hint">${s.hint}</div>
+          </div>
+          <span class="nt-section-count font-mono">${byGroup[s.key].length}</span>
         </div>
-        <span class="nt-section-count font-mono">${byGroup[s.key].length}</span>
-      </div>
-      ${byGroup[s.key].map(n => noteCardHtml(n, fileMap[n.fileId])).join('')}
-    </section>`).join('')
-    : window.emptyState('note','No notes yet','Write notes or save AI tools, dictionary entries, and translations while reading.');
+        ${byGroup[s.key].map(n => noteCardHtml(n, fileMap[n.fileId])).join('')}
+      </section>`).join('')
+      : window.emptyState('note','No notes yet','Write notes or save AI tools, dictionary entries, and translations while reading.');
+  };
+
+  const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
 
   document.getElementById('app').innerHTML = `
   <div class="view fade-in">
@@ -1363,7 +1574,7 @@ export async function renderNotesView(preserveScroll = true){
           ${filterTabs.map(t => `<div class="chip note-filter ${currentFilter === t.key ? 'active' : ''}" data-filter="${t.key}">${window.escapeHtml(t.label)}</div>`).join('')}
         </div>` : ''}
       </div>
-      ${sectionsHtml}
+      <div id="notes-sections" class="outer-stage-body${tabDirCls}">${buildSectionsHtml(currentFilter)}</div>
     </div>
   </div>
   ${window.bottomNavHtml('notes')}`;
@@ -1387,27 +1598,40 @@ export async function renderNotesView(preserveScroll = true){
     window.toast('Notes exported');
   };
 
+  const noteById = Object.fromEntries(notes.map(n => [String(n.id), n]));
+  const bindNoteCards = () => {
+    document.querySelectorAll('#notes-sections .nt-card').forEach(card => {
+      const note = noteById[card.dataset.id];
+      if (!note) return;
+      const file = fileMap[note.fileId];
+      card.onclick = () => openNoteDetail(note, file);
+      card.querySelectorAll('.nt-act').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          if (btn.dataset.act === 'edit') openNoteEditor(note, file);
+          else if (btn.dataset.act === 'download') downloadNote(note, file);
+          else if (btn.dataset.act === 'delete') confirmDeleteNote(note, file);
+        };
+      });
+    });
+  };
+  bindNoteCards();
+
   document.querySelectorAll('.note-filter').forEach(el => {
     el.onclick = () => {
-      window.State.notesFilter = el.dataset.filter;
-      renderNotesView(false);
+      const next = el.dataset.filter;
+      if ((window.State.notesFilter || 'all') === next) return;
+      window.State.notesFilter = next;
+      document.querySelectorAll('.note-filter').forEach(c => c.classList.toggle('active', c.dataset.filter === next));
+      const secWrap = document.getElementById('notes-sections');
+      if (secWrap) {
+        secWrap.innerHTML = buildSectionsHtml(next);
+        secWrap.classList.remove('outer-stage-body', 'outer-dir-fwd', 'outer-dir-back', 'outer-dir-in', 'outer-list-swap');
+        void secWrap.offsetWidth;
+        secWrap.classList.add('outer-list-swap');
+        bindNoteCards();
+      }
     };
-  });
-
-  const noteById = Object.fromEntries(notes.map(n => [String(n.id), n]));
-  document.querySelectorAll('.nt-card').forEach(card => {
-    const note = noteById[card.dataset.id];
-    if (!note) return;
-    const file = fileMap[note.fileId];
-    card.onclick = () => openNoteDetail(note, file);
-    card.querySelectorAll('.nt-act').forEach(btn => {
-      btn.onclick = (e) => {
-        e.stopPropagation();
-        if (btn.dataset.act === 'edit') openNoteEditor(note, file);
-        else if (btn.dataset.act === 'download') downloadNote(note, file);
-        else if (btn.dataset.act === 'delete') confirmDeleteNote(note, file);
-      };
-    });
   });
 
   if (prevScroll > 0) {

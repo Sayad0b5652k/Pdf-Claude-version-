@@ -6,6 +6,7 @@ export function getDashboardScrollEl(){
 
 export async function renderDashboard(preserveScroll = true){
   if (window.State.view !== 'dashboard') return;
+  const tok = window._outerRenderToken;
   const scrollEl = getDashboardScrollEl();
   const prevScroll = preserveScroll && scrollEl ? scrollEl.scrollTop : 0;
   const files = window.State.files.slice().sort((a,b)=>b.lastOpened-a.lastOpened);
@@ -15,8 +16,8 @@ export async function renderDashboard(preserveScroll = true){
   const readingStats = await window.getReadingStats();
   const chatHistories = await window.DB.all('chathistory').catch(() => []);
   const planBack = typeof window.studyPlanBackHtml === 'function' ? await window.studyPlanBackHtml(files).catch(() => '') : '';
-  // The user may have navigated away (e.g. opened a book) while the awaits above were pending
-  if (window.State.view !== 'dashboard') return;
+  // The user may have navigated away (e.g. opened a book or switched tabs) while the awaits above were pending
+  if (window.State.view !== 'dashboard' || (tok && tok !== window._outerRenderToken)) return;
 
   const existingDash = document.getElementById('dashboard-drop');
   if (existingDash) {
@@ -68,9 +69,12 @@ export async function renderDashboard(preserveScroll = true){
 
   const isFirstMount = !window._hasDashboardMounted;
   window._hasDashboardMounted = true;
+  const tabDirCls = typeof window.consumeOuterDirClass === 'function'
+    ? window.consumeOuterDirClass()
+    : (isFirstMount ? ' outer-dir-in' : '');
 
   document.getElementById('app').innerHTML = `
-  <div class="view ${isFirstMount ? 'home-enter' : ''}" id="dashboard-drop" style="padding:0 0 100px;">
+  <div class="view fade-in" id="dashboard-drop" style="padding:0 0 100px;">
     <div style="position:sticky; top:0; z-index:40; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border);">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
         <div style="display:flex; align-items:center; gap:12px;">
@@ -97,7 +101,7 @@ export async function renderDashboard(preserveScroll = true){
       </div>
     </div>
 
-    <div style="padding:6px 20px;">
+    <div class="outer-stage-body${tabDirCls || (isFirstMount ? ' outer-dir-in' : '')}" style="padding:6px 20px;">
       <div id="dash-widgets">
         ${analyticsFlipHtml(files, readingStats, planBack)}
 
@@ -160,10 +164,17 @@ export function bindDashboardEvents() {
 
   document.querySelectorAll('[data-filter]').forEach(el=>{
     el.onclick = ()=>{
+      if (window.State.filterView === el.dataset.filter) return;
       window.State.filterView = el.dataset.filter;
       window.State.activeFolderSubject = null;
       document.querySelectorAll('[data-filter]').forEach(c=>c.classList.toggle('active', c.dataset.filter===window.State.filterView));
-      document.getElementById('books-section').innerHTML = renderBooksSectionHtml();
+      const sec = document.getElementById('books-section');
+      if (sec) {
+        sec.innerHTML = renderBooksSectionHtml();
+        sec.classList.remove('outer-list-swap');
+        void sec.offsetWidth;
+        sec.classList.add('outer-list-swap');
+      }
       bindBooksSectionEvents();
     };
   });
@@ -313,16 +324,25 @@ export function bindBooksSectionEvents(){
   });
   section.querySelectorAll('[data-folder-sub]').forEach(el => {
     el.onclick = () => {
-      window.State.activeFolderSubject = el.dataset.folderSub || null;
+      const nextSub = el.dataset.folderSub || null;
+      if (window.State.activeFolderSubject === nextSub) return;
+      window.State.activeFolderSubject = nextSub;
       section.innerHTML = renderBooksSectionHtml();
+      section.classList.remove('outer-list-swap');
+      void section.offsetWidth;
+      section.classList.add('outer-list-swap');
       bindBooksSectionEvents();
     };
   });
   section.querySelectorAll('.view-mode-btn').forEach(el=>{
     el.onclick = async ()=>{
+      if (window.State.viewMode === el.dataset.view) return;
       window.State.viewMode = el.dataset.view;
       await window.DB.setting('viewMode', window.State.viewMode);
       section.innerHTML = renderBooksSectionHtml();
+      section.classList.remove('outer-list-swap');
+      void section.offsetWidth;
+      section.classList.add('outer-list-swap');
       bindBooksSectionEvents();
     };
   });
@@ -1206,8 +1226,14 @@ export function bindAIChatHistoryEvents(){
       try {
         await window.DB.del('chathistory', chatId);
         window.toast('Chat history deleted 🗑️');
-        if (typeof window.renderDashboard === 'function') {
-          window.renderDashboard();
+        const row = btn.closest('.ai-chat-history-item');
+        if (row && !document.documentElement.classList.contains('lite-motion')) {
+          row.classList.add('outer-item-out');
+          setTimeout(() => {
+            if (typeof window.renderDashboard === 'function') window.renderDashboard(true);
+          }, 190);
+        } else if (typeof window.renderDashboard === 'function') {
+          window.renderDashboard(true);
         }
       } catch (err) {
         console.error('Failed to delete chat history:', err);

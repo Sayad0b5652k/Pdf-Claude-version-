@@ -328,7 +328,6 @@ export function openReaderSettings(){
   const ttsSettingsBtn = document.getElementById('open-tts-settings-btn');
   if (ttsSettingsBtn) {
     ttsSettingsBtn.onclick = () => {
-      window.Sheet.close();
       if (typeof window.openHandsFreeReadAloud === 'function') {
         window.openHandsFreeReadAloud();
       } else if (typeof window.openVoiceSettingsModal === 'function') {
@@ -533,6 +532,8 @@ export function openAdvancedSettingsModal() {
         </button>
       </div>
 
+      <!-- Fixed-stage viewport prevents outer sheet card height jumps across tabs -->
+      <div class="adv-panes-stage" id="adv-panes-stage">
       <!-- TAB 1: HIGHLIGHTS & COLOR -->
       <div id="adv-pane-tab-colors" class="adv-tab-pane active">
         <!-- Minimal Preview Strip -->
@@ -750,6 +751,7 @@ export function openAdvancedSettingsModal() {
           <span>Device rotation seamlessly expands reading viewport with no latency.</span>
         </div>
       </div>
+      </div>
     </div>
   `);
 
@@ -759,11 +761,17 @@ export function openAdvancedSettingsModal() {
     closeBtn.onclick = () => window.Sheet.close();
   }
 
-  // Segmented Tabs Switching Handler
-  document.querySelectorAll('.adv-tab-btn').forEach(btn => {
+  // Segmented Tabs Switching Handler (fixed outer height + directional carousel glide)
+  const tabBtns = Array.from(document.querySelectorAll('.adv-tab-btn'));
+  const panesStage = document.getElementById('adv-panes-stage');
+  let activeTabIdx = 0;
+  tabBtns.forEach((btn, idx) => {
     btn.onclick = () => {
+      if (idx === activeTabIdx) return;
+      const dir = idx > activeTabIdx ? 1 : -1;
+      activeTabIdx = idx;
       const targetTab = btn.getAttribute('data-tab');
-      document.querySelectorAll('.adv-tab-btn').forEach(b => {
+      tabBtns.forEach(b => {
         const isMatch = b === btn;
         b.classList.toggle('active', isMatch);
         b.setAttribute('aria-selected', isMatch ? 'true' : 'false');
@@ -776,7 +784,20 @@ export function openAdvancedSettingsModal() {
       const activePane = document.getElementById(`adv-pane-${targetTab}`);
       if (activePane) {
         activePane.classList.add('active');
+        if (panesStage) panesStage.scrollTop = 0;
+        if (!document.documentElement.classList.contains('lite-motion') && typeof activePane.animate === 'function') {
+          try {
+            activePane.animate(
+              [
+                { opacity: 0, transform: `translate3d(${dir * 22}px, 0, 0)` },
+                { opacity: 1, transform: 'translate3d(0, 0, 0)' }
+              ],
+              { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+            );
+          } catch (e) {}
+        }
       }
+      window.Sheet?.updateScrollIndicator?.();
     };
   });
 

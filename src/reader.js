@@ -2754,9 +2754,19 @@ export async function openReaderMenu(){
   function bindJumps(){
     content.querySelectorAll('.menu-jump').forEach(el=>{ el.onclick=()=>{ window.Sheet.close(); scrollToPage(Number(el.dataset.page)); }; });
   }
-  document.getElementById('tab-bookmarks').onclick = showBookmarks;
-  document.getElementById('tab-highlights').onclick = showHighlights;
-  document.getElementById('tab-notes').onclick = showNotes;
+  const animateTabContent = () => {
+    if (!content || typeof content.animate !== 'function') return;
+    if (document.documentElement.classList.contains('lite-motion')) return;
+    try {
+      content.animate(
+        [{ opacity: 0, transform: 'translate3d(0, 10px, 0)' }, { opacity: 1, transform: 'translate3d(0, 0, 0)' }],
+        { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+      );
+    } catch (e) {}
+  };
+  document.getElementById('tab-bookmarks').onclick = () => { showBookmarks(); animateTabContent(); };
+  document.getElementById('tab-highlights').onclick = () => { showHighlights(); animateTabContent(); };
+  document.getElementById('tab-notes').onclick = () => { showNotes(); animateTabContent(); };
   showBookmarks();
 }
 

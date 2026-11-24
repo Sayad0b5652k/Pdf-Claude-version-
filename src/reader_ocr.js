@@ -276,13 +276,24 @@ export async function openOcrBatch(startPage) {
   }
   const body = document.getElementById('ocrb-body'); if (!body) return;
   const fromHere = todo.filter(p => p >= startPage);
-  if (!todo.length) { body.innerHTML = `<div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:6px;">Sab ho chuka</div><div style="font-size:13px;color:var(--text-dim);">Is book me koi scanned page baaki nahi — sab ya to text wale hain ya pehle hi scan ho chuke.</div>`; return; }
+  const triggerSwap = () => {
+    body.classList.remove('menu-swap-in');
+    void body.offsetWidth;
+    body.classList.add('menu-swap-in');
+    window.Sheet?.updateScrollIndicator?.();
+  };
+  if (!todo.length) {
+    body.innerHTML = `<div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:6px;">Sab ho chuka</div><div style="font-size:13px;color:var(--text-dim);">Is book me koi scanned page baaki nahi — sab ya to text wale hain ya pehle hi scan ho chuke.</div>`;
+    triggerSwap();
+    return;
+  }
   const btn = (id, t, sub) => `<button type="button" id="${id}" class="btn ocrb-opt"><b>${t}</b><small>${sub}</small></button>`;
   body.innerHTML = `<div class="font-display" style="font-size:17px;font-weight:700;margin-bottom:4px;">Saare scanned pages</div>
     <div style="font-size:12.5px;color:var(--text-dim);margin-bottom:12px;line-height:1.5;">${todo.length} scanned page mile (book me ${n}). Text wale pages chhod diye jaate hain. Har page me kuch second lagte hain — app khuli aur screen on rakho, scan background me chalta rahega aur tum padhte reh sakte ho.</div>
     ${fromHere.length && fromHere.length < todo.length ? btn('ocrb-here', `Is page se aage (${fromHere.length} pages)`, 'Page ' + startPage + ' se aakhir tak') : ''}
     ${btn('ocrb-all', `Poori book (${todo.length} pages)`, 'Har scanned page, ek ke baad ek')}
     <div style="font-size:11px;color:var(--text-faint);margin-top:10px;">Pehli baar OCR data ke liye internet chahiye. Rokna ho to upar ✕ dabao.</div>`;
+  triggerSwap();
   const go = (list) => { window.Sheet.close(); setTimeout(() => runBatch(list, doc, fid), 250); };
   const h = document.getElementById('ocrb-here'); if (h) h.onclick = () => go(fromHere);
   document.getElementById('ocrb-all').onclick = () => go(todo);

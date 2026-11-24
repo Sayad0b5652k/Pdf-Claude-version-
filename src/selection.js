@@ -634,8 +634,12 @@ function renderMiniBar(){
       ${AI.map(([k,i,l]) => `<button class="sm-chip ${k==='teacher'?'p':''}" data-k="${k}">${ic(i)}<span>${l}</span></button>`).join('')}
       <button class="sm-chip" id="sm-full"><span>Full panel…</span></button>
     </div>`;
+  m.style.visibility = 'hidden';
   m.classList.add('show');
   bindMiniReposition();
+  positionMiniBar();
+  void m.offsetWidth;
+  m.style.visibility = '';
 
   m.querySelectorAll('.sm-dot').forEach(b => b.onclick = () => {
     const color = b.dataset.color;
@@ -770,8 +774,18 @@ function renderClassicToolbar(){
     </div>
   `;
 
-  bar.classList.add('show');
-  if(window.keepBottomBarPositioned) window.keepBottomBarPositioned(bar);
+  const wasVisible = bar.classList.contains('show');
+  if (!wasVisible) {
+    void bar.offsetHeight;
+    requestAnimationFrame(() => {
+      if (!pendingSelection || !bar) return;
+      bar.classList.add('show');
+      if (window.keepBottomBarPositioned) window.keepBottomBarPositioned(bar);
+    });
+  } else {
+    bar.classList.add('show');
+    if (window.keepBottomBarPositioned) window.keepBottomBarPositioned(bar);
+  }
 
   // Bind actions
   const closeBtn = document.getElementById('st-close-action');

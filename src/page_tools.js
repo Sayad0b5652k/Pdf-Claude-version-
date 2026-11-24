@@ -8,6 +8,12 @@ export async function openPageTools(fid){
   const selected = new Set();
   const pageRotations = {}; // pageNum -> degrees turn (90, 180, 270, 0)
 
+  const gridHtml = Array.from({length:numPages}, (_,i)=>i+1).map(i=>`
+    <div class="pt-page" data-page="${i}" style="position:relative; aspect-ratio:0.72; background:var(--surface-2); border:2px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+      <span class="pt-num font-mono" style="font-size:10.5px; color:var(--text-faint);">${i}</span>
+    </div>
+  `).join('');
+
   window.Sheet.open(`
     <div style="display:flex; align-items:center; justify-content:space-between; margin:4px 0 8px;">
       <div>
@@ -18,7 +24,7 @@ export async function openPageTools(fid){
         ${window.icon('x','icon icon-sm')}
       </button>
     </div>
-    <div id="pt-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; max-height:42vh; overflow-y:auto; margin-bottom:12px; padding:2px;"></div>
+    <div id="pt-grid" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; max-height:42vh; overflow-y:auto; margin-bottom:12px; padding:2px;">${gridHtml}</div>
     <div id="pt-selcount" style="font-size:12px; color:var(--text-faint); margin-bottom:10px; text-align:center;">No pages selected</div>
     <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
       <button class="btn btn-ghost" id="pt-rotate" disabled>${window.icon('rotate','icon icon-sm')} Rotate 90°</button>
@@ -34,12 +40,6 @@ export async function openPageTools(fid){
   const grid = document.getElementById('pt-grid');
   const selCountEl = document.getElementById('pt-selcount');
   const actButtons = ['pt-rotate','pt-delete','pt-extract'].map(id=>document.getElementById(id));
-
-  grid.innerHTML = Array.from({length:numPages}, (_,i)=>i+1).map(i=>`
-    <div class="pt-page" data-page="${i}" style="position:relative; aspect-ratio:0.72; background:var(--surface-2); border:2px solid var(--border); border-radius:var(--radius-sm); overflow:hidden; cursor:pointer; display:flex; align-items:center; justify-content:center;">
-      <span class="pt-num font-mono" style="font-size:10.5px; color:var(--text-faint);">${i}</span>
-    </div>
-  `).join('');
 
   function updateSelUI(){
     selCountEl.textContent = selected.size ? `${selected.size} page${selected.size>1?'s':''} selected` : 'No pages selected';
@@ -70,13 +70,15 @@ export async function openPageTools(fid){
   }
 
   const renderedPages = new Set();
+  const thumbQueue = [];
+  let activeThumbs = 0;
   let observer = null;
+  let thumbsReady = false;
 
-  async function renderThumb(pageNum, el) {
-    if (renderedPages.has(pageNum)) return;
-    renderedPages.add(pageNum);
+  async function renderThumbNow(pageNum, el) {
     try {
       const doc = await docPromise;
+      if (!el.isConnected) return;
       const page = await doc.getPage(pageNum);
       const vp1 = page.getViewport({scale: 1});
       const scale = 110 / vp1.width;
@@ -85,7 +87,8 @@ export async function openPageTools(fid){
       canvas.width = vp.width;
       canvas.height = vp.height;
       await page.render({canvasContext: canvas.getContext('2d'), viewport: vp}).promise;
-      canvas.style.cssText = 'width:100%; height:100%; object-fit:cover; transition: transform 0.25s ease;';
+      if (!el.isConnected) return;
+      canvas.style.cssText = 'width:100%; height:100%; object-fit:cover; opacity:0; transition: opacity 0.18s ease, transform 0.25s ease;';
       
       const rot = pageRotations[pageNum] || 0;
       if (rot) canvas.style.transform = `rotate(${rot}deg)`;
@@ -93,10 +96,36 @@ export async function openPageTools(fid){
       const numSpan = el.querySelector('.pt-num');
       if (numSpan) numSpan.style.display = 'none';
       el.appendChild(canvas);
+      requestAnimationFrame(() => { canvas.style.opacity = '1'; });
     } catch(e) {
       console.warn('Page thumbnail load error:', e);
     }
   }
+
+  function pumpThumbQueue() {
+    if (!thumbsReady) return;
+    while (activeThumbs < 2 && thumbQueue.length > 0) {
+      const item = thumbQueue.shift();
+      if (!item || !item.el.isConnected) continue;
+      activeThumbs++;
+      renderThumbNow(item.pageNum, item.el).finally(() => {
+        activeThumbs = Math.max(0, activeThumbs - 1);
+        pumpThumbQueue();
+      });
+    }
+  }
+
+  function renderThumb(pageNum, el) {
+    if (renderedPages.has(pageNum)) return;
+    renderedPages.add(pageNum);
+    thumbQueue.push({ pageNum, el });
+    pumpThumbQueue();
+  }
+
+  setTimeout(() => {
+    thumbsReady = true;
+    pumpThumbQueue();
+  }, 220);
 
   if ('IntersectionObserver' in window) {
     observer = new IntersectionObserver((entries) => {
@@ -583,6 +612,8 @@ export async function openMergeBookPicker(initialFid = null) {
         </button>
       </div>
     `;
+    window.enhanceCustomSelects?.(bodyEl);
+    window.Sheet?.updateScrollIndicator?.();
 
     // Bind events
     bodyEl.querySelectorAll('.mb-add-book').forEach(btn => {

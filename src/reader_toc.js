@@ -628,6 +628,12 @@ export async function openTOC(){
       const showPages = tab.dataset.tab === 'pages';
       if (outlineDiv) outlineDiv.style.display = showPages ? 'none' : 'block';
       if (pagesGrid) pagesGrid.style.display = showPages ? 'grid' : 'none';
+      const targetPanel = showPages ? pagesGrid : outlineDiv;
+      if (targetPanel) {
+        targetPanel.classList.remove('menu-swap-in');
+        void targetPanel.offsetWidth;
+        targetPanel.classList.add('menu-swap-in');
+      }
       if (showPages) buildPageThumbs();
     };
   });

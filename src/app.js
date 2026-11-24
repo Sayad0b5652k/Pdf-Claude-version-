@@ -72,10 +72,111 @@ export const NAV_TABS = [
   {key:'settings', label:'Settings', icon:'settings'},
 ];
 
+const OUTER_TAB_ORDER = ['dashboard', 'bookmarks', 'review', 'notes', 'settings'];
+let _outerDirClass = '';
+let _pendingTabAnim = false;
+let _lastOuterTab = null;
+window._outerRenderToken = window._outerRenderToken || 0;
+
+export function getOuterTabIndex(viewName) {
+  return OUTER_TAB_ORDER.indexOf(viewName);
+}
+
+export function consumeOuterDirClass() {
+  if (!_pendingTabAnim) return '';
+  _pendingTabAnim = false;
+  const cls = _outerDirClass || ' outer-dir-in';
+  _outerDirClass = '';
+  return cls;
+}
+window.consumeOuterDirClass = consumeOuterDirClass;
+
+export function ensurePersistentBottomNav() {
+  if (typeof document === 'undefined' || !document.body) return null;
+  let nav = document.getElementById('persistent-bottom-nav');
+  if (!nav) {
+    nav = document.createElement('div');
+    nav.id = 'persistent-bottom-nav';
+    nav.className = 'bottom-nav';
+    nav.innerHTML = `<div class="bnav-pill" aria-hidden="true"></div>${NAV_TABS.map(t =>
+      `<button type="button" data-nav="${t.key}">${window.icon(t.icon, 'icon icon-sm')}<span>${t.label}</span></button>`
+    ).join('')}`;
+    document.body.appendChild(nav);
+    nav.querySelectorAll('[data-nav]').forEach(b => {
+      b.onclick = (e) => {
+        e.stopPropagation();
+        switchOuterTab(b.dataset.nav);
+      };
+    });
+  }
+  return nav;
+}
+
+export function syncBottomNav(activeView) {
+  const nav = ensurePersistentBottomNav();
+  if (!nav) return;
+  const isOuter = OUTER_TAB_ORDER.includes(activeView);
+  if (!isOuter) {
+    nav.style.display = 'none';
+    return;
+  }
+  nav.style.display = '';
+  const activeKey = activeView || window.State?.view || 'dashboard';
+  const idx = Math.max(0, NAV_TABS.findIndex(t => t.key === activeKey));
+  nav.querySelectorAll('[data-nav]').forEach(b => {
+    const on = b.dataset.nav === activeKey;
+    const wasOn = b.classList.contains('active');
+    b.classList.toggle('active', on);
+    if (on && !wasOn) {
+      b.classList.remove('bnav-pop');
+      void b.offsetWidth;
+      b.classList.add('bnav-pop');
+    }
+  });
+  const pill = nav.querySelector('.bnav-pill');
+  if (pill) {
+    pill.style.setProperty('--bnav-idx', String(idx));
+    pill.style.setProperty('--bnav-count', String(NAV_TABS.length));
+    pill.style.opacity = '1';
+  }
+}
+window.syncBottomNav = syncBottomNav;
+
+export function switchOuterTab(targetView) {
+  if (!targetView) return;
+  const curView = window.State?.view;
+  if (curView === targetView) {
+    if (targetView === 'settings' && window.State.settingsPage === 'advanced') {
+      window.State.settingsPage = 'main';
+      if (typeof window.renderSettings === 'function') window.renderSettings({ resetScroll: true, dir: 'back' });
+      return;
+    }
+    const scroller = document.getElementById('dashboard-drop') || document.querySelector('.view');
+    if (scroller && scroller.scrollTop > 8) {
+      try { scroller.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { scroller.scrollTop = 0; }
+    }
+    return;
+  }
+  const prevIdx = getOuterTabIndex(_lastOuterTab || curView);
+  const nextIdx = getOuterTabIndex(targetView);
+  if (prevIdx !== -1 && nextIdx !== -1 && prevIdx !== nextIdx) {
+    _outerDirClass = nextIdx > prevIdx ? ' outer-dir-fwd' : ' outer-dir-back';
+  } else {
+    _outerDirClass = ' outer-dir-in';
+  }
+  _pendingTabAnim = true;
+  if (targetView === 'settings') window.State.settingsPage = 'main';
+  window.State.view = targetView;
+  syncBottomNav(targetView);
+  pushAppScreen(targetView);
+  window.scrollTo(0, 0);
+  render();
+}
+window.switchOuterTab = switchOuterTab;
+
 export function bottomNavHtml(active){
-  return `<div class="bottom-nav">
-    ${NAV_TABS.map(t=>`<button data-nav="${t.key}" class="${active===t.key?'active':''}">${window.icon(t.icon,'icon icon-sm')}<span>${t.label}</span></button>`).join('')}
-  </div>`;
+  syncBottomNav(active);
+  return '';
 }
 
 export function pushAppScreen(screenName){
@@ -90,46 +191,55 @@ export function pushAppScreen(screenName){
 window.pushAppScreen = pushAppScreen;
 
 export function bindBottomNav(){
-  document.querySelectorAll('[data-nav]').forEach(b=>{
+  syncBottomNav(window.State?.view);
+  document.querySelectorAll('#app [data-nav]').forEach(b=>{
     b.onclick = (e)=>{
       e.stopPropagation();
-      const targetView = b.dataset.nav;
-      if (targetView) {
-        if (targetView === 'settings') window.State.settingsPage = 'main';
-        window.State.view = targetView;
-        pushAppScreen(targetView);
-        window.scrollTo(0, 0);
-        render();
-      }
+      switchOuterTab(b.dataset.nav);
     };
   });
 }
 
 export function render(){
   try {
-    if(window.State.view!=='reader') {
+    window._outerRenderToken = (window._outerRenderToken || 0) + 1;
+    const viewName = window.State.view;
+    if (OUTER_TAB_ORDER.includes(viewName)) {
+      if (_lastOuterTab && _lastOuterTab !== viewName && !_pendingTabAnim) {
+        const pIdx = getOuterTabIndex(_lastOuterTab);
+        const nIdx = getOuterTabIndex(viewName);
+        if (pIdx !== -1 && nIdx !== -1 && pIdx !== nIdx) {
+          _outerDirClass = nIdx > pIdx ? ' outer-dir-fwd' : ' outer-dir-back';
+          _pendingTabAnim = true;
+        }
+      }
+      _lastOuterTab = viewName;
+    }
+    syncBottomNav(viewName);
+
+    if(viewName!=='reader') {
       if(typeof window.stopReadingSession === 'function') window.stopReadingSession();
       if(typeof window.hideSelToolbar === 'function') window.hideSelToolbar();
     }
-    if(window.State.view==='dashboard') {
+    if(viewName==='dashboard') {
       if(typeof window.renderDashboard === 'function') return window.renderDashboard();
     }
-    else if(window.State.view==='reader') {
+    else if(viewName==='reader') {
       if(typeof window.renderReaderShell === 'function') window.renderReaderShell();
     }
-    else if(window.State.view==='settings') {
+    else if(viewName==='settings') {
       if(typeof window.renderSettings === 'function') window.renderSettings();
     }
-    else if(window.State.view==='bookmarks') {
+    else if(viewName==='bookmarks') {
       if(typeof window.renderBookmarksView === 'function') window.renderBookmarksView();
     }
-    else if(window.State.view==='notes') {
+    else if(viewName==='notes') {
       if(typeof window.renderNotesView === 'function') window.renderNotesView();
     }
-    else if(window.State.view==='review') {
+    else if(viewName==='review') {
       if(typeof window.renderReviewView === 'function') window.renderReviewView();
     }
-    else if(window.State.view==='paper') {
+    else if(viewName==='paper') {
       if(typeof window.renderPaperView === 'function') window.renderPaperView();
     }
   } catch (err) {
@@ -395,7 +505,7 @@ export function initHardwareBackNavigation() {
     // Priority 2: Check if any Sheet / Modal / Overlay is open -> Close sheet & stay on current view
     const sheetEl = document.getElementById('sheet');
     const customModals = document.querySelectorAll('.modal.open, #teacher-sheet.open, #ocr-crop-overlay');
-    if (sheetEl && sheetEl.classList.contains('open')) {
+    if (sheetEl && (sheetEl.classList.contains('open') || (window.Sheet && window.Sheet._isOpening))) {
       if (window.Sheet && typeof window.Sheet.close === 'function') {
         window.Sheet.close();
       }
@@ -1213,16 +1323,12 @@ if(window.visualViewport){
   window.visualViewport.addEventListener('scroll', repositionAll);
 }
 
-// Delegated bottom navigation tap handler ensuring seamless switching from any screen
+// Delegated fallback handler only for non-persistent [data-nav] elements inside views/sheets
 document.addEventListener('click', (e) => {
+  if (e.target.closest('#persistent-bottom-nav')) return;
   const navBtn = e.target.closest('[data-nav]');
-  if (navBtn) {
-    const targetView = navBtn.dataset.nav;
-    if (targetView) {
-      window.State.view = targetView;
-      window.scrollTo(0, 0);
-      render();
-    }
+  if (navBtn && navBtn.dataset.nav) {
+    switchOuterTab(navBtn.dataset.nav);
   }
 });
 

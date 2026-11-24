@@ -295,7 +295,14 @@ dialog::-webkit-scrollbar {
   transition: transform .25s var(--ease), box-shadow .25s var(--ease), background .3s var(--ease), border-color .3s var(--ease);
 }
 
-.card:active {
+button.card:active,
+.card[data-open]:active,
+.card.bm-jump:active,
+.card.revise-one:active,
+.card.ai-chat-history-item:active,
+.card.search-note-item:active,
+.card.search-annot-item:active,
+.card.search-card-item:active {
   transform: scale(.97);
 }
 
@@ -548,7 +555,7 @@ html[data-theme="dark"] .marker-mark {
   left: 0;
   right: 0;
   bottom: 0;
-  z-index: 901;
+  z-index: 902;
   background: var(--bg-elev);
   border-top-left-radius: 18px;
   border-top-right-radius: 18px;
@@ -582,6 +589,7 @@ html[data-theme="dark"] .marker-mark {
 
 .sheet-body {
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 4px 20px 28px;
   flex: 1 1 auto;
   min-height: 0;
@@ -698,7 +706,7 @@ html[data-theme="dark"] .marker-mark {
   transform: translateY(120%);
   opacity: 0;
   pointer-events: none;
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
+  transition: transform 0.38s cubic-bezier(0.32, 1.24, 0.52, 1), opacity 0.2s ease;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1811,6 +1819,8 @@ html.touch-device .textLayer span {
 }
 
 .bottom-nav button {
+  position: relative;
+  z-index: 1;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1824,7 +1834,7 @@ html.touch-device .textLayer span {
   font-size: 10.5px;
   font-weight: 600;
   border-radius: var(--radius-sm);
-  transition: .2s var(--ease);
+  transition: color .2s var(--ease), transform .16s var(--ease);
 }
 
 .bottom-nav button.active {
@@ -2734,25 +2744,21 @@ html.touch-device .textLayer span {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+/* Fixed-stage tab viewport so switching Inspector tabs never resizes the sheet card */
+.adv-panes-stage {
+  height: min(55vh, 450px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 2px;
+}
+
 /* Tab Panes */
 .adv-tab-pane {
   display: none;
-  animation: advPaneFade 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .adv-tab-pane.active {
   display: block;
-}
-
-@keyframes advPaneFade {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 /* Clean Linear Grouping - No nested cards */
@@ -6582,16 +6588,19 @@ html[data-pro-theme="editorial"] .dict-def {
   flex-direction: column;
   overflow: hidden;
   transform: translateY(100%);
-  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.24s cubic-bezier(0.4, 0, 0.85, 0.6);
   padding-bottom: env(safe-area-inset-bottom, 14px);
+  will-change: transform;
 }
 
 .sayad-select-overlay.active .sayad-select-panel {
   transform: translateY(0);
+  transition: transform 0.38s cubic-bezier(0.22, 1.07, 0.36, 1);
 }
 
 .sayad-select-overlay.closing .sayad-select-panel {
   transform: translateY(100%);
+  transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @media (min-width: 641px) {
@@ -6604,15 +6613,17 @@ html[data-pro-theme="editorial"] .dict-def {
     max-height: 75vh;
     width: 480px;
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-    transform: translateY(16px) scale(0.97);
-    transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    transform: translateY(16px) scale(0.96);
+    transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
     padding-bottom: 8px;
   }
   .sayad-select-overlay.active .sayad-select-panel {
     transform: translateY(0) scale(1);
+    transition: transform 0.34s cubic-bezier(0.22, 1.07, 0.36, 1);
   }
   .sayad-select-overlay.closing .sayad-select-panel {
-    transform: translateY(16px) scale(0.97);
+    transform: translateY(16px) scale(0.96);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.85, 0.6);
   }
 }
 
@@ -7494,7 +7505,7 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 .sheet { transition: transform .2s cubic-bezier(.4, 0, 1, 1); }
 .sheet.open { transition: transform .52s var(--spring); }
 .sheet.peek, .sheet.peek.open { transition: transform .24s cubic-bezier(.16, 1, .3, 1), max-height .2s ease; }
-.sheet::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 64px; background: var(--bg-elev); pointer-events: none; }
+.sheet::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 220px; background: inherit; pointer-events: none; }
 .sheet.peek::after { display: none; }
 @keyframes sayadScaleUp {
   0%   { transform: translateY(-64px) scale(.94); opacity: 0; }
@@ -8500,8 +8511,13 @@ html.lite-motion .sheet-backdrop { transition-duration: .12s !important; }
 .adv-seg-btn.on{border-color:var(--accent);background:var(--accent-soft)}
 .adv-seg-btn.on .adv-seg-ic{background:var(--accent);color:var(--accent-ink,#fff)}
 .adv-seg-btn:active{transform:scale(.97)}
-.adv-preview{margin-top:12px;padding:11px 13px;border-radius:12px;border:1px dashed var(--accent);background:var(--bg);font-size:12px;color:var(--text-dim);min-height:20px}
+.adv-preview{margin-top:12px;padding:11px 13px;border-radius:12px;border:1px dashed var(--accent);background:var(--bg);font-size:12px;color:var(--text-dim);min-height:44px;display:flex;align-items:center;flex-wrap:wrap;gap:4px}
 .adv-preview i{font-style:normal;padding:2px 7px;border-radius:6px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:11px}
+@keyframes settingsSlideFwd{from{opacity:0;transform:translate3d(16px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes settingsSlideBack{from{opacity:0;transform:translate3d(-16px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+.settings-page-body.slide-forward{animation:settingsSlideFwd .24s cubic-bezier(.22,1,.36,1)}
+.settings-page-body.slide-back{animation:settingsSlideBack .24s cubic-bezier(.22,1,.36,1)}
+html.lite-motion .settings-page-body.slide-forward,html.lite-motion .settings-page-body.slide-back{animation:none}
 html.lite-motion .kv-actions button.spin{animation:none}
 
 /* ===== Privacy lock, cleaner, reset ===== */
@@ -8604,115 +8620,118 @@ html[data-pro-theme="notebook"] .lk-badge{border:2px solid var(--border);box-sha
 html[data-pro-theme="notebook"] #teacher-input,
 html[data-pro-theme="notebook"] #teacher-input:focus{border:none!important;box-shadow:none!important;background:transparent!important;border-radius:0}
 
-/* ===== Sheet open/close: softer slide (open ~0.4s with a long settle, close a little quicker) ===== */
-.sheet { transition: transform .26s cubic-bezier(0.4, 0, 0.8, 0.4); }
-.sheet.open { transition: transform .42s cubic-bezier(0.22, 1, 0.36, 1); }
-.sheet.peek, .sheet.peek.open { transition: transform .32s cubic-bezier(0.22, 1, 0.36, 1); }
-.sheet-backdrop { transition: opacity .26s ease-out; }
-.sheet-backdrop.open { transition: opacity .38s ease-out; }
-html.lite-motion .sheet, html.lite-motion .sheet.open { transition-duration: .14s !important; }
+/* ===== Sheet open/close: lively cushioned spring + Apple stacked-deck underlay ===== */
+.pt-page { content-visibility: auto; contain-intrinsic-size: 64px 89px; }
+.sheet { transition: transform .22s cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet.open { transition: transform .44s cubic-bezier(0.30, 1.28, 0.48, 1); }
+.sheet.peek, .sheet.peek.open { transition: transform .36s cubic-bezier(0.28, 1.20, 0.48, 1), max-height .24s cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet-backdrop { transition: opacity .22s ease-out; }
+.sheet-backdrop.open { transition: opacity .30s ease-out; }
+.sheet-deck-prev { position: fixed; left: 0; right: 0; bottom: 0; z-index: 901; pointer-events: none; border-top-left-radius: 18px; border-top-right-radius: 18px; border: 1px solid var(--border); border-bottom: none; box-shadow: 0 -8px 24px -8px rgba(0, 0, 0, .35); background: var(--bg-elev); transform-origin: 50% 100%; will-change: transform, opacity; }
+html.lite-motion .sheet, html.lite-motion .sheet.open { transition-duration: .14s !important; transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1) !important; }
 html.lite-motion .sheet-backdrop, html.lite-motion .sheet-backdrop.open { transition-duration: .12s !important; }
+html.lite-motion .sayad-select-panel, html.lite-motion .sayad-select-overlay.active .sayad-select-panel { transition-duration: .14s !important; transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1) !important; }
 
 /* Full-screen views fade in with opacity only: moving a tall scrolling layer by 3px forced a re-raster at the end of the
    animation (visible as a small stutter when opening Advanced settings). */
 @keyframes viewFadeOpacity { from { opacity: 0; } to { opacity: 1; } }
 .view.fade-in { animation-name: viewFadeOpacity; }
 
-/* ===== Motion polish: one soft-spring language for sheets, menus and dialogs (colours/themes untouched) =====
-   --spring-soft overshoots only ~3-4% so it reads as a gentle bounce, never a wobble. */
-:root {
-  --spring-soft: cubic-bezier(0.28, 1.24, 0.5, 1);
-  --spring-pop: cubic-bezier(0.3, 1.5, 0.5, 1);
-  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-in-soft: cubic-bezier(0.4, 0, 0.8, 0.4);
+/* ===== Outer App Navigation & Screen Cohesion (Home, Bookmarks, Review, Notes, Settings) ===== */
+.bnav-pill {
+  position: absolute;
+  top: 0;
+  left: 6px;
+  width: calc((100% - 12px) / var(--bnav-count, 5));
+  height: 3px;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0;
+  transform: translate3d(calc(var(--bnav-idx, 0) * 100%), 0, 0);
+  transition: transform .34s cubic-bezier(0.32, 1.18, 0.48, 1), opacity .18s ease;
+  will-change: transform;
+}
+.bnav-pill::after {
+  content: '';
+  display: block;
+  width: 26px;
+  height: 3px;
+  margin: 0 auto;
+  border-radius: 0 0 3px 3px;
+  background: var(--accent);
+}
+html[data-pro-theme="notebook"] .bnav-pill { display: none; }
+
+@keyframes bnavIconPop {
+  0%   { transform: scale(.84); }
+  55%  { transform: scale(1.14) translateY(-1px); }
+  100% { transform: none; }
+}
+.bottom-nav button.bnav-pop svg {
+  animation: bnavIconPop .28s cubic-bezier(0.30, 1.32, 0.48, 1);
 }
 
-/* Bottom sheets: bounce on open, quick clean slide on close. The ::after filler (already on .sheet) hides the overshoot gap. */
-.sheet.open { transition: transform .46s var(--spring-soft); }
-.sheet.peek, .sheet.peek.open { transition: transform .36s var(--spring-soft), max-height .2s ease; }
-
-/* Select / option menus (mobile bottom panel): the panel extends 24px below the screen so the overshoot never shows a gap */
-.sayad-select-overlay { transition: opacity .18s ease-out; }
-.sayad-select-backdrop { transition: opacity .2s ease-out; }
-.sayad-select-panel {
-  margin-bottom: -24px;
-  padding-bottom: calc(env(safe-area-inset-bottom, 14px) + 24px);
-  transition: transform .2s var(--ease-in-soft);
+@keyframes outerSlideFwd {
+  from { opacity: 0; transform: translate3d(16px, 0, 0); }
+  to   { opacity: 1; transform: none; }
 }
-.sayad-select-overlay.active .sayad-select-panel { transition: transform .44s var(--spring-soft); }
-.sayad-select-overlay.closing .sayad-select-panel { transition: transform .2s var(--ease-in-soft); }
-@media (min-width: 641px) {
-  .sayad-select-panel { margin-bottom: 0; padding-bottom: 8px; transition: transform .16s var(--ease-in-soft); }
-  .sayad-select-overlay.active .sayad-select-panel { transition: transform .38s var(--spring-pop); }
-  .sayad-select-overlay.closing .sayad-select-panel { transition: transform .16s var(--ease-in-soft); }
+@keyframes outerSlideBack {
+  from { opacity: 0; transform: translate3d(-16px, 0, 0); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes outerStageIn {
+  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes outerListSwap {
+  from { opacity: 0; transform: translate3d(0, 6px, 0); }
+  to   { opacity: 1; transform: none; }
 }
 
-/* Option rows: crisp press-in, springy release */
-.sayad-option-item { transition: background .12s ease, border-color .12s ease, transform .32s var(--spring-pop); }
-.sayad-option-item:active { transform: scale(.975); transition-duration: .12s, .12s, .08s; }
-.sayad-custom-select-trigger { transition: border-color .15s ease, background .15s ease, transform .32s var(--spring-pop); }
-.sayad-custom-select-trigger:active { transform: scale(.98); }
-.sayad-custom-select-trigger .sayad-trigger-chevron { transition: transform .38s var(--spring-pop), color .18s ease; }
+.outer-stage-body.outer-dir-fwd  { animation: outerSlideFwd .22s cubic-bezier(.22, 1, .36, 1); }
+.outer-stage-body.outer-dir-back { animation: outerSlideBack .22s cubic-bezier(.22, 1, .36, 1); }
+.outer-stage-body.outer-dir-in   { animation: outerStageIn .22s cubic-bezier(.22, 1, .36, 1); }
+.outer-list-swap { animation: outerListSwap .18s cubic-bezier(.22, 1, .36, 1); }
 
-/* Buttons / chips: same springy release everywhere */
-.btn:not(.no-press) { transition-property: transform, background-color, border-color, color, box-shadow, opacity; transition-timing-function: var(--spring-pop); }
-.btn:not(.no-press):active { transition-duration: .08s; }
-.an-chip, .mk-stamp-chip, .adv-seg-btn, .lk-pad button { transition-timing-function: var(--spring-pop); }
-
-/* Dialog drop-in: one smooth arc (down, tiny overshoot, settle) instead of four hard stops */
-@keyframes sayadScaleUp {
-  0%   { transform: translateY(-28px) scale(.95); opacity: 0; animation-timing-function: var(--ease-out-soft); }
-  55%  { transform: translateY(4px) scale(1.005); opacity: 1; animation-timing-function: ease-in-out; }
-  80%  { transform: translateY(-1.5px) scale(1); }
-  100% { transform: none; opacity: 1; }
-}
-@keyframes mw-modal-zoom {
-  0%   { transform: translateY(-28px) scale(.95); opacity: 0; animation-timing-function: var(--ease-out-soft); }
-  55%  { transform: translateY(4px) scale(1.005); opacity: 1; animation-timing-function: ease-in-out; }
-  80%  { transform: translateY(-1.5px) scale(1); }
-  100% { transform: none; opacity: 1; }
-}
-.mw-studio-card { animation-duration: .5s; animation-timing-function: linear; }
-
-/* Small pop-ins (selection mini bar, help answers, floating pill) */
-#sel-mini.show { animation: smIn .26s var(--spring-pop); }
-.help-ans { animation: helpin .3s var(--ease-out-soft); }
-.mw-dock-pill { animation-timing-function: var(--spring-pop); }
-
-html.lite-motion .sayad-select-overlay.active .sayad-select-panel,
-html.lite-motion .sayad-select-overlay.closing .sayad-select-panel { transition-duration: .12s !important; }
-@media (prefers-reduced-motion: reduce) {
-  .sayad-select-overlay.active .sayad-select-panel { transition-duration: .01s; }
+.outer-item-out {
+  opacity: 0 !important;
+  transform: scale(.96) !important;
+  pointer-events: none !important;
+  transition: opacity .16s ease, transform .16s ease !important;
 }
 
-/* ===== Battery: GPU-only liquid animation =====
-   Bubbles used to animate `top` (forces layout every frame = jank + battery drain). Now each bubble is a full-height
-   track with the dot painted at its bottom, and only transform/opacity move, so the compositor does all the work. */
-.battery-wave { will-change: transform; backface-visibility: hidden; }
-.battery-bubble { top: 0; height: 100%; background: radial-gradient(circle at 50% calc(100% - var(--r, 1.5px)), rgba(255,255,255,.75) var(--r, 1.5px), transparent calc(var(--r, 1.5px) + .7px)); border-radius: 0; will-change: transform, opacity; }
-.battery-bubble.bubble-1 { height: 100%; --r: 1.5px; }
-.battery-bubble.bubble-2 { height: 100%; --r: 2px; }
-.battery-bubble.bubble-3 { height: 100%; --r: 1.5px; }
-@keyframes bubbleFloat {
-  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
-  20%  { opacity: .9; }
-  75%  { opacity: .9; }
-  100% { transform: translate3d(0, -92%, 0); opacity: 0; }
-}
-.battery-bubble { animation-fill-mode: backwards; }
+/* ===== Settings -> Advanced Jhatka Elimination & Smooth Micro-interactions ===== */
+.kv-status { min-height: 16px; line-height: 1.35; }
+.kv-actions button { transition: background .15s ease, border-color .15s ease, color .15s ease, transform .14s var(--ease); }
+.kv-actions button:active { transform: scale(.9); }
+.adv-pills button { transition: background .16s ease, border-color .16s ease, color .16s ease, transform .14s var(--ease); }
+.adv-pills button:active { transform: scale(.96); }
+.adv-preview { min-height: 54px; box-sizing: border-box; }
+#reset-go { transition: background .2s ease, border-color .2s ease, color .2s ease, transform .14s var(--ease); }
 
-/* ===== Buttery: no live blur behind full-screen modal backdrops =====
-   A blurred full-screen layer is re-sampled every frame while the panel springs in on top of it, which is what made menus
-   stutter on phones. Same look, slightly deeper dim instead of the blur. */
-.sayad-select-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; background: rgba(0, 0, 0, 0.72); }
-.sayad-installer-backdrop, .mw-studio-backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
-/* Animated panels get their own compositor layer only while they move */
-.sayad-select-overlay.active .sayad-select-panel, .sheet.open { backface-visibility: hidden; }
-.mw-studio-backdrop { background: rgba(0, 0, 0, 0.66); }
-
-/* Equalizer bars: scaleY instead of height (no layout per frame while audio plays). Same look: 3px -> 12px. */
-.mw-pill-eq.playing span { height: 12px; transform-origin: 50% 100%; will-change: transform; }
-@keyframes mw-eq-bounce {
-  0%   { transform: scaleY(.25); }
-  100% { transform: scaleY(1); }
+@keyframes advRowIn {
+  from { opacity: 0; transform: translate3d(0, 6px, 0) scale(.985); }
+  to   { opacity: 1; transform: none; }
 }
+@keyframes advSoftFade {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
+  to   { opacity: 1; transform: none; }
+}
+.kv-row.adv-row-in { animation: advRowIn .22s cubic-bezier(.22, 1, .36, 1); }
+.adv-msg.adv-msg-in { animation: advSoftFade .18s ease; }
+.adv-form-in { animation: advSoftFade .20s cubic-bezier(.22, 1, .36, 1); }
+.adv-card.adv-card-swap { animation: advSoftFade .20s cubic-bezier(.22, 1, .36, 1); }
+.adv-preview-swap { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; animation: advSoftFade .18s cubic-bezier(.22, 1, .36, 1); }
+
+html.lite-motion .bnav-pill { transition-duration: .12s !important; }
+html.lite-motion .bottom-nav button.bnav-pop svg,
+html.lite-motion .outer-stage-body.outer-dir-fwd,
+html.lite-motion .outer-stage-body.outer-dir-back,
+html.lite-motion .outer-stage-body.outer-dir-in,
+html.lite-motion .outer-list-swap,
+html.lite-motion .kv-row.adv-row-in,
+html.lite-motion .adv-msg.adv-msg-in,
+html.lite-motion .adv-form-in,
+html.lite-motion .adv-card.adv-card-swap,
+html.lite-motion .adv-preview-swap { animation: none !important; }
+

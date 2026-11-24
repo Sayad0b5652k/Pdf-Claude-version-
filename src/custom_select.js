@@ -17,6 +17,7 @@ let overlayEl = null;
 let currentActiveSelect = null;
 let currentActiveTrigger = null;
 let isClosing = false;
+let openSelectRaf = null;
 
 /**
  * Cleanly parse an option text into a primary title and secondary hint/badge.
@@ -350,12 +351,17 @@ export function openCustomSelectPicker(selectEl, triggerEl) {
     listEl.appendChild(row);
   });
 
-  // Activate overlay
-  overlayEl.classList.add('active');
+  // Flush layout off-screen before adding .active so the spring transform animates from Frame 1
+  if (openSelectRaf) { cancelAnimationFrame(openSelectRaf); openSelectRaf = null; }
+  overlayEl.classList.remove('active', 'closing');
+  void overlayEl.offsetHeight;
   document.body.classList.add('sayad-select-open');
-
-  // Trigger button active state
   if (triggerEl) triggerEl.classList.add('active');
+  openSelectRaf = requestAnimationFrame(() => {
+    openSelectRaf = null;
+    if (!overlayEl || isClosing) return;
+    overlayEl.classList.add('active');
+  });
 
   // Auto focus search if visible on desktop, or scroll selected option into view
   setTimeout(() => {
@@ -406,7 +412,8 @@ function selectOptionValue(selectEl, value, index) {
  * Close the custom select picker with a smooth animation
  */
 export function closeCustomSelectPicker() {
-  if (!overlayEl || isClosing || !overlayEl.classList.contains('active')) return;
+  if (openSelectRaf) { cancelAnimationFrame(openSelectRaf); openSelectRaf = null; }
+  if (!overlayEl || isClosing || (!overlayEl.classList.contains('active') && !document.body.classList.contains('sayad-select-open'))) return;
   isClosing = true;
 
   overlayEl.classList.remove('active');

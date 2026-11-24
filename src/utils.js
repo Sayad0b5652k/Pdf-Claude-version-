@@ -9,6 +9,25 @@ export function toast(msg){
   t._timer = setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
+function sheetMotionEnabled() {
+  try {
+    if (document.documentElement.classList.contains('lite-motion')) return false;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
+  } catch (e) {}
+  return true;
+}
+
+function sheetViewSig(bodyEl) {
+  if (!bodyEl) return '';
+  const root = bodyEl.firstElementChild;
+  const h = bodyEl.querySelector('.font-display, h1, h2, h3, [data-sheet-view]');
+  const hTxt = h ? (h.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 48) : '';
+  const tag = root ? `${root.id || ''}|${root.className || ''}` : '';
+  const hasVoiceTabs = bodyEl.querySelector('#engine-tab-microsoft') ? '|voice' : '';
+  const hasBookMenu = bodyEl.querySelector('#reader-menu-content') ? '|bookmenu' : '';
+  return `${hTxt}::${tag}${hasVoiceTabs}${hasBookMenu}`;
+}
+
 export const Sheet = {
   el: null,
   backdrop: null,
@@ -16,6 +35,21 @@ export const Sheet = {
   fade: null,
   progressContainer: null,
   progressBar: null,
+  _openRaf: null,
+  _openSeq: 0,
+  _isOpening: false,
+  _surfaceAnim: null,
+  _bodyAnim: null,
+  _deckEl: null,
+  _deckAnim: null,
+  _cancelAnims() {
+    if (this._openRaf) { cancelAnimationFrame(this._openRaf); this._openRaf = null; }
+    this._isOpening = false;
+    if (this._surfaceAnim) { try { this._surfaceAnim.cancel(); } catch (e) {} this._surfaceAnim = null; }
+    if (this._bodyAnim) { try { this._bodyAnim.cancel(); } catch (e) {} this._bodyAnim = null; }
+    if (this._deckAnim) { try { this._deckAnim.cancel(); } catch (e) {} this._deckAnim = null; }
+    if (this._deckEl) { try { this._deckEl.remove(); } catch (e) {} this._deckEl = null; }
+  },
   init() {
     this.el = document.getElementById('sheet');
     this.backdrop = document.getElementById('sheet-backdrop');
@@ -93,37 +127,130 @@ export const Sheet = {
     if (typeof window.hideSelToolbar === 'function') {
       window.hideSelToolbar();
     }
-    const isAlreadyOpen = this.el && this.el.classList.contains('open');
-    const shouldPreserve = options.preserveScroll !== undefined
-      ? options.preserveScroll
-      : (isAlreadyOpen && !options.resetScroll);
-    const prevScroll = (shouldPreserve && this.body) ? this.body.scrollTop : 0;
+    const seq = ++this._openSeq;
+    const isAlreadyOpen = !!(this.el && this.el.classList.contains('open'));
+    const prevSig = isAlreadyOpen ? sheetViewSig(this.body) : '';
+    const prevH = (isAlreadyOpen && this.el) ? this.el.getBoundingClientRect().height : 0;
 
+    // Cancel any running animations so measurements below reflect the target natural layout.
+    this._cancelAnims();
+
+    const rawPrevScroll = (isAlreadyOpen && this.body) ? this.body.scrollTop : 0;
     this.body.innerHTML = html;
-    if (shouldPreserve && this.body && prevScroll > 0) {
-      this.body.scrollTop = prevScroll;
-    } else if (this.body) {
-      this.body.scrollTop = 0;
-    }
-    // Peek mode: page stays visible and tappable (no dimming backdrop), sheet starts at ~46% height; handle toggles full height.
-    const peek = options.peek === true;
-    this.el.classList.toggle('peek', peek);
-    if (!peek || !isAlreadyOpen) this.el.classList.remove('expanded');
-    // lay the new content out while the sheet is still off-screen, so the slide itself starts on a clean frame
-    if (!isAlreadyOpen) void this.el.offsetHeight;
-    this.el.classList.add('open');
-    this.backdrop.classList.toggle('open', !peek);
-    keepBottomBarPositioned(this.el);
-
-    this.body.querySelectorAll('.sheet-close-btn, [data-sheet-close]').forEach(btn => {
-      btn.onclick = () => this.close();
-    });
 
     if (typeof window.enhanceCustomSelects === 'function') {
       window.enhanceCustomSelects(this.body);
     }
 
+    const nextSig = isAlreadyOpen ? sheetViewSig(this.body) : '';
+    const isSubMenuSwap = isAlreadyOpen && (
+      options.animateSwap === true ||
+      (options.animateSwap !== false && prevSig !== nextSig)
+    );
+    const shouldPreserve = options.preserveScroll !== undefined
+      ? options.preserveScroll
+      : (isAlreadyOpen && !options.resetScroll && !isSubMenuSwap);
+    const prevScroll = shouldPreserve ? rawPrevScroll : 0;
+
+    if (shouldPreserve && this.body && prevScroll > 0) {
+      this.body.scrollTop = prevScroll;
+    } else if (this.body) {
+      this.body.scrollTop = 0;
+    }
+
+    // Peek mode: page stays visible and tappable (no dimming backdrop), sheet starts at ~46% height; handle toggles full height.
+    const peek = options.peek === true;
+    this.el.classList.toggle('peek', peek);
+    if (!peek || !isAlreadyOpen) this.el.classList.remove('expanded');
+
+    this.body.querySelectorAll('.sheet-close-btn, [data-sheet-close]').forEach(btn => {
+      btn.onclick = () => this.close();
+    });
+
+    if (!isAlreadyOpen) {
+      // Lay out all new content and enhanced selects once while #sheet is off-screen,
+      // then start the GPU spring transform on the next clean compositor frame.
+      positionBottomBar(this.el);
+      this.el.classList.remove('open');
+      this.backdrop.classList.remove('open');
+      void this.el.offsetHeight;
+      this._isOpening = true;
+      this._openRaf = requestAnimationFrame(() => {
+        if (seq !== this._openSeq || !this._isOpening) return;
+        this._openRaf = null;
+        this._isOpening = false;
+        this.el.classList.add('open');
+        this.backdrop.classList.toggle('open', !peek);
+      });
+    } else {
+      positionBottomBar(this.el);
+      this.backdrop.classList.toggle('open', !peek);
+
+      if (isSubMenuSwap && sheetMotionEnabled()) {
+        // Apple Stacked Deck transition: previous card surface gently tucks back in depth while
+        // the new card glides smoothly up cleanly at its settled bottom-anchored height (zero height-change jhatka).
+        if (prevH > 40 && this.el && typeof document.createElement === 'function' && document.body && typeof this.el.animate === 'function') {
+          try {
+            const deck = document.createElement('div');
+            deck.className = 'sheet-deck-prev';
+            deck.setAttribute('aria-hidden', 'true');
+            deck.style.height = Math.round(prevH) + 'px';
+            if (this.el.style.bottom) deck.style.bottom = this.el.style.bottom;
+            try {
+              const cs = window.getComputedStyle ? window.getComputedStyle(this.el) : null;
+              if (cs && cs.backgroundColor) deck.style.backgroundColor = cs.backgroundColor;
+              if (cs && cs.backgroundImage && cs.backgroundImage !== 'none') deck.style.backgroundImage = cs.backgroundImage;
+              if (cs && cs.borderTopColor) deck.style.borderColor = cs.borderTopColor;
+            } catch (e) {}
+            document.body.appendChild(deck);
+            this._deckEl = deck;
+            const dAnim = deck.animate(
+              [
+                { transform: 'translate3d(0, 0, 0) scale(1)', opacity: 0.96 },
+                { transform: 'translate3d(0, -14px, 0) scale(0.95)', opacity: 0 }
+              ],
+              { duration: 280, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' }
+            );
+            this._deckAnim = dAnim;
+            const cleanDeck = () => {
+              if (this._deckAnim === dAnim) this._deckAnim = null;
+              if (this._deckEl === deck) this._deckEl = null;
+              try { deck.remove(); } catch (e) {}
+            };
+            dAnim.onfinish = cleanDeck;
+            dAnim.oncancel = cleanDeck;
+          } catch (e) {}
+        }
+        if (typeof this.el.animate === 'function') {
+          try {
+            const sAnim = this.el.animate(
+              [
+                { transform: 'translate3d(0, 52px, 0)', opacity: 0.9 },
+                { transform: 'translate3d(0, 0, 0)', opacity: 1 }
+              ],
+              { duration: 320, easing: 'cubic-bezier(0.30, 1.28, 0.48, 1)' }
+            );
+            this._surfaceAnim = sAnim;
+            sAnim.onfinish = () => { if (this._surfaceAnim === sAnim) this._surfaceAnim = null; };
+            sAnim.oncancel = () => { if (this._surfaceAnim === sAnim) this._surfaceAnim = null; };
+          } catch (e) {}
+        }
+        if (typeof this.body.animate === 'function') {
+          try {
+            const bAnim = this.body.animate(
+              [{ opacity: 0.35 }, { opacity: 1 }],
+              { duration: 200, easing: 'ease-out' }
+            );
+            this._bodyAnim = bAnim;
+            bAnim.onfinish = () => { if (this._bodyAnim === bAnim) this._bodyAnim = null; };
+            bAnim.oncancel = () => { if (this._bodyAnim === bAnim) this._bodyAnim = null; };
+          } catch (e) {}
+        }
+      }
+    }
+
     requestAnimationFrame(() => {
+      if (seq !== this._openSeq) return;
       if (shouldPreserve && this.body && prevScroll > 0) {
         this.body.scrollTop = prevScroll;
       }
@@ -136,6 +263,7 @@ export const Sheet = {
       }
     });
     setTimeout(() => {
+      if (seq !== this._openSeq) return;
       if (shouldPreserve && this.body && prevScroll > 0) {
         this.body.scrollTop = prevScroll;
       }
@@ -148,6 +276,7 @@ export const Sheet = {
       }
     }, 120);
     setTimeout(() => {
+      if (seq !== this._openSeq) return;
       this.updateScrollIndicator();
       if (typeof window.renderMermaidDiagrams === 'function') {
         window.renderMermaidDiagrams(this.body);
@@ -155,9 +284,11 @@ export const Sheet = {
     }, 350);
   },
   close(){
+    ++this._openSeq;
+    this._cancelAnims();
     if (!this.el) return;
     this.el.classList.remove('open', 'peek', 'expanded');
-    this.backdrop.classList.remove('open');
+    if (this.backdrop) this.backdrop.classList.remove('open');
     if (window._readerSettingsTimer) {
       clearInterval(window._readerSettingsTimer);
       window._readerSettingsTimer = null;
@@ -168,10 +299,12 @@ export const Sheet = {
     }
   },
   closeImmediate(){
+    ++this._openSeq;
+    this._cancelAnims();
     if (!this.el) this.init();
     if (this.el) {
       this.el.style.transition = 'none';
-      this.el.classList.remove('open');
+      this.el.classList.remove('open', 'peek', 'expanded');
       requestAnimationFrame(() => {
         if (this.el) this.el.style.transition = '';
       });
@@ -655,7 +788,7 @@ export function positionBottomBar(el){
     const offset = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
     el.style.bottom = offset + 'px';
     if(el.id === 'sheet'){
-      const frac = (el.classList.contains('peek') && !el.classList.contains('expanded')) ? 0.46 : 0.82;
+      const frac = (el.classList.contains('peek') && !el.classList.contains('expanded')) ? 0.46 : 0.84;
       el.style.maxHeight = Math.min(vv.height * frac, vv.height - 24) + 'px';
     }
   } else {
@@ -976,8 +1109,11 @@ export function renderMermaidDiagrams(container) {
 
 export function renderMathFormulas(container) {
   if (typeof window.renderMathInElement === 'function') {
+    const target = container || document.body;
+    const txt = target && target.textContent ? target.textContent : '';
+    if (!txt || (!txt.includes('$') && !txt.includes('\\(') && !txt.includes('\\['))) return;
     try {
-      window.renderMathInElement(container || document.body, {
+      window.renderMathInElement(target, {
         delimiters: [
           { left: '$$', right: '$$', display: true },
           { left: '$', right: '$', display: false },
@@ -1346,11 +1482,15 @@ window.themeTransition = function themeTransition(apply, originEl, kind) {
   }
 
   const W = innerWidth || 360, H = innerHeight || 640;
-  let x = W / 2, y = H / 2;
+  let x = Math.round(W / 2), y = Math.round(H / 2);
   try {
     const r = originEl && originEl.getBoundingClientRect();
-    if (r && r.width) { x = r.left + r.width / 2; y = r.top + r.height / 2; }
+    if (r && r.width) {
+      x = Math.max(0, Math.min(W, Math.round(r.left + r.width / 2)));
+      y = Math.max(0, Math.min(H, Math.round(r.top + r.height / 2)));
+    }
   } catch (e) { /* ignore */ }
+  const maxR = Math.ceil(Math.hypot(Math.max(x, W - x), Math.max(y, H - y)));
   const accent = (() => {
     try { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#d9560f'; }
     catch (e) { return '#d9560f'; }
@@ -1590,7 +1730,7 @@ window.themeTransition = function themeTransition(apply, originEl, kind) {
       newFrames = { clipPath: ['ellipse(145% 0% at 50% -6%)', 'ellipse(165% 158% at 50% -6%)'] };
     } else if (kind === 'sepia') {
       dur = 680;
-      newFrames = { clipPath: ['ellipse(0% 0% at 15% 15%)', 'ellipse(175% 175% at 15% 15%)'] };
+      newFrames = { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${maxR}px at ${x}px ${y}px)`] };
     } else if (kind === 'classic') {
       dur = 640;
       easing = CRISP;
@@ -1603,7 +1743,7 @@ window.themeTransition = function themeTransition(apply, originEl, kind) {
       oldFrames = { transform: ['translate3d(0,0,0) scale(1)', 'translate3d(18px,0,0) scale(0.98)'], opacity: [1, 0.8] };
       newFrames = { clipPath: ['inset(0 100% 0 0)', 'inset(0 0% 0 0)'] };
     } else {
-      newFrames = { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${Math.hypot(W, H)}px at ${x}px ${y}px)`] };
+      newFrames = { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${maxR}px at ${x}px ${y}px)`] };
     }
 
     dur = Math.round(dur * 1.8);   // slower, so the change reads as a smooth ~1.2s sweep instead of a snap

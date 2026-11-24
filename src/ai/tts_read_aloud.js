@@ -1698,7 +1698,7 @@ export async function getCurrentPageText(pageNum) {
 let selectedVoiceCategory = 'hindi';
 let currentPlayingVoiceId = null;
 
-export function openVoiceSettingsModal() {
+export function openVoiceSettingsModal(sheetOpts = {}) {
   const settings = getTTSSettings();
   const currentEngine = settings.engine || 'microsoft';
   const msVoices = MICROSOFT_NEURAL_VOICES;
@@ -1903,7 +1903,7 @@ export function openVoiceSettingsModal() {
         ✓ Apply Voice &amp; Save
       </button>
     </div>
-  `);
+  `, sheetOpts);
 
   // Engine Tab Switchers
   const msTab = document.getElementById('engine-tab-microsoft');
@@ -1936,7 +1936,7 @@ export function openVoiceSettingsModal() {
     };
   });
 
-  // MS Voice Card Select & Preview
+  // MS Voice Card Select & Preview (re-render in-place without sheet fade)
   document.querySelectorAll('.ms-voice-card').forEach(card => {
     card.onclick = (e) => {
       if (e.target.closest('.ms-preview-btn')) return; // handled by preview button
@@ -1949,7 +1949,7 @@ export function openVoiceSettingsModal() {
       }
       const found = msVoices.find(v => v.id === voiceId);
       window.toast(`Selected voice: ${found ? found.name.replace(/^[^\w\s]+/, '').trim() : voiceId}`);
-      openVoiceSettingsModal();
+      openVoiceSettingsModal({ instant: true, preserveScroll: true });
     };
   });
 
@@ -1961,13 +1961,13 @@ export function openVoiceSettingsModal() {
       if (currentPlayingVoiceId === voiceId) {
         stopAllTTSAudio();
         currentPlayingVoiceId = null;
-        openVoiceSettingsModal();
+        openVoiceSettingsModal({ instant: true, preserveScroll: true });
         return;
       }
 
       stopAllTTSAudio();
       currentPlayingVoiceId = voiceId;
-      openVoiceSettingsModal();
+      openVoiceSettingsModal({ instant: true, preserveScroll: true });
 
       try {
         await previewMicrosoftVoice(
@@ -1976,7 +1976,7 @@ export function openVoiceSettingsModal() {
           () => {
             if (currentPlayingVoiceId === voiceId) {
               currentPlayingVoiceId = null;
-              openVoiceSettingsModal();
+              openVoiceSettingsModal({ instant: true, preserveScroll: true });
             }
           }
         );
@@ -1987,7 +1987,7 @@ export function openVoiceSettingsModal() {
         console.error('Preview error:', err);
         if (currentPlayingVoiceId === voiceId) {
           currentPlayingVoiceId = null;
-          openVoiceSettingsModal();
+          openVoiceSettingsModal({ instant: true, preserveScroll: true });
         }
         window.toast('Preview unavailable, please check network');
       }
@@ -2007,7 +2007,7 @@ export function openVoiceSettingsModal() {
       }
       const found = elevenVoices.find(v => v.id === voiceId);
       window.toast(`Selected voice: ${found ? found.name.replace(/^[^\w\s]+/, '').trim() : voiceId}`);
-      openVoiceSettingsModal();
+      openVoiceSettingsModal({ instant: true, preserveScroll: true });
     };
   });
 
@@ -2019,13 +2019,13 @@ export function openVoiceSettingsModal() {
       if (currentPlayingVoiceId === voiceId) {
         stopAllTTSAudio();
         currentPlayingVoiceId = null;
-        openVoiceSettingsModal();
+        openVoiceSettingsModal({ instant: true, preserveScroll: true });
         return;
       }
 
       stopAllTTSAudio();
       currentPlayingVoiceId = voiceId;
-      openVoiceSettingsModal();
+      openVoiceSettingsModal({ instant: true, preserveScroll: true });
 
       try {
         await previewElevenVoice(
@@ -2034,7 +2034,7 @@ export function openVoiceSettingsModal() {
           () => {
             if (currentPlayingVoiceId === voiceId) {
               currentPlayingVoiceId = null;
-              openVoiceSettingsModal();
+              openVoiceSettingsModal({ instant: true, preserveScroll: true });
             }
           }
         );
@@ -2044,7 +2044,7 @@ export function openVoiceSettingsModal() {
         }
         if (currentPlayingVoiceId === voiceId) {
           currentPlayingVoiceId = null;
-          openVoiceSettingsModal();
+          openVoiceSettingsModal({ instant: true, preserveScroll: true });
         }
         window.toast('Preview unavailable');
       }
@@ -2057,7 +2057,7 @@ export function openVoiceSettingsModal() {
       const p = btn.dataset.preset;
       applyPresetSettings(p);
       if (isReadingActive) continuePlaybackWithCurrentSettings();
-      openVoiceSettingsModal();
+      openVoiceSettingsModal({ instant: true, preserveScroll: true });
     };
   });
 
@@ -2067,7 +2067,7 @@ export function openVoiceSettingsModal() {
       const spd = parseFloat(btn.dataset.speed);
       saveTTSSettings({ rate: spd });
       if (isReadingActive) continuePlaybackWithCurrentSettings();
-      openVoiceSettingsModal();
+      openVoiceSettingsModal({ instant: true, preserveScroll: true });
     };
   });
 
