@@ -1,11 +1,10 @@
 // S.A.Y.A.D. Service Worker for Offline Study & Native WebAPK Minting
-const CACHE_NAME = 'sayad-v43-sharp-zoom-ocr';
+const CACHE_NAME = 'sayad-v44-lean-assets';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/favicon.png',
-  '/logo.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
   '/icons/icon-maskable-512.png',
@@ -14,7 +13,6 @@ const PRECACHE_URLS = [
   '/screenshots/screenshot-desktop-1.png',
   '/icons/theme-classic-512.png',
   '/icons/theme-editorial-512.png',
-  '/icons/theme-notebook-512.png',
   '/nb-ring-light.svg',
   '/nb-ring-dark.svg',
   '/pdfjs/pdf.min.js',

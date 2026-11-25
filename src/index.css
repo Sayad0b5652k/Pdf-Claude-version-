@@ -7515,11 +7515,12 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
   100% { transform: none; opacity: 1; }
 }
 @keyframes mw-modal-zoom {
-  0%   { transform: translateY(-64px) scale(.94); opacity: 0; }
-  45%  { transform: translateY(9px) scale(1); opacity: 1; }
-  68%  { transform: translateY(-4px); }
-  85%  { transform: translateY(1.5px); }
-  100% { transform: none; opacity: 1; }
+  /* the card is centred with translate(-50%,-50%), so every step must keep it (otherwise it jumps at the end) */
+  0%   { transform: translate(-50%, calc(-50% - 40px)) scale(.94); opacity: 0; }
+  45%  { transform: translate(-50%, calc(-50% + 6px)) scale(1); opacity: 1; }
+  68%  { transform: translate(-50%, calc(-50% - 3px)); }
+  85%  { transform: translate(-50%, calc(-50% + 1px)); }
+  100% { transform: translate(-50%, -50%); opacity: 1; }
 }
 #toast { transition: transform .5s var(--spring), opacity .25s ease; }
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
