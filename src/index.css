@@ -8660,15 +8660,15 @@ html[data-pro-theme="notebook"] .bnav-pill { display: none; }
 }
 
 @keyframes outerSlideFwd {
-  from { opacity: 0; transform: translate3d(16px, 0, 0); }
+  from { opacity: .35; transform: translate3d(14px, 0, 0); }
   to   { opacity: 1; transform: none; }
 }
 @keyframes outerSlideBack {
-  from { opacity: 0; transform: translate3d(-16px, 0, 0); }
+  from { opacity: .35; transform: translate3d(-14px, 0, 0); }
   to   { opacity: 1; transform: none; }
 }
 @keyframes outerStageIn {
-  from { opacity: 0; transform: translate3d(0, 8px, 0); }
+  from { opacity: .35; transform: translate3d(0, 8px, 0); }
   to   { opacity: 1; transform: none; }
 }
 @keyframes outerListSwap {
@@ -8676,9 +8676,9 @@ html[data-pro-theme="notebook"] .bnav-pill { display: none; }
   to   { opacity: 1; transform: none; }
 }
 
-.outer-stage-body.outer-dir-fwd  { animation: outerSlideFwd .22s cubic-bezier(.22, 1, .36, 1); }
-.outer-stage-body.outer-dir-back { animation: outerSlideBack .22s cubic-bezier(.22, 1, .36, 1); }
-.outer-stage-body.outer-dir-in   { animation: outerStageIn .22s cubic-bezier(.22, 1, .36, 1); }
+.outer-stage-body.outer-dir-fwd  { animation: outerSlideFwd .28s cubic-bezier(.25, .8, .3, 1); }
+.outer-stage-body.outer-dir-back { animation: outerSlideBack .28s cubic-bezier(.25, .8, .3, 1); }
+.outer-stage-body.outer-dir-in   { animation: outerStageIn .28s cubic-bezier(.25, .8, .3, 1); }
 .outer-list-swap { animation: outerListSwap .18s cubic-bezier(.22, 1, .36, 1); }
 
 .outer-item-out {
@@ -8742,3 +8742,8 @@ html.lite-motion .adv-preview-swap { animation: none !important; }
   0%   { transform: scaleY(.25); }
   100% { transform: scaleY(1); }
 }
+
+/* Outer screens (Home / Bookmarks / Review / Notes / Settings): the stage body already animates the new content in.
+   The whole-view opacity fade on top of it stacked two fades (screen went blank for a frame, then popped in) and also
+   re-played on every same-tab re-render. Only the stage body animates now, and it starts at .35 opacity so there is no blank frame. */
+.view.fade-in:has(.outer-stage-body) { animation: none; }
