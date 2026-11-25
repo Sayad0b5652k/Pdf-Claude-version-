@@ -247,28 +247,49 @@ export async function openShareAnnotatedSheet(fileId) {
  * Original ids are kept when free (so a re-share still matches), new ids are made only on a clash.
  */
 export async function restoreSayadPayload(fileId, payload) {
+  // The payload comes from a file somebody else made, so every field is treated as untrusted: ids/pages/colours are
+  // validated, text is length-capped, unknown fields are dropped (they used to be copied as they were).
+  const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
+  const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const pageOf = (v) => Math.max(1, Math.min(100000, Math.floor(num(v, 1))));
+  const idOf = (v) => (typeof v === 'string' && /^[\w.:-]{1,80}$/.test(v) ? v : '');
+  const rectOf = (r) => ({ x: num(r && r.x), y: num(r && r.y), w: num(r && r.w), h: num(r && r.h) });
   const authors = new Set();
   let total = 0;
   const freeId = async (store, id) => {
     const hit = id ? await window.DB.get(store, id).catch(() => null) : null;
     return hit ? window.uid() : (id || window.uid());
   };
-  for (const a of payload.annotations || []) {
-    if (!a || !a.rects || !a.rects.length) continue;
-    await window.DB.put('annotations', { ...a, id: await freeId('annotations', a.id), fileId });
-    if (a.by) authors.add(a.by);
+  for (const a of (Array.isArray(payload && payload.annotations) ? payload.annotations : [])) {
+    if (!a || !Array.isArray(a.rects) || !a.rects.length) continue;
+    const by = str(a.by, 80);
+    await window.DB.put('annotations', {
+      id: await freeId('annotations', idOf(a.id)), fileId, page: pageOf(a.page),
+      type: a.type === 'underline' ? 'underline' : 'highlight',
+      color: window.safeCssColor ? window.safeCssColor(a.color) : '#ffd84d',
+      text: str(a.text, 5000), rects: a.rects.slice(0, 400).map(rectOf),
+      createdAt: num(a.createdAt, Date.now()), ...(by ? { by } : {}), ...(a.reviewed === true ? { reviewed: true } : {}),
+    });
+    if (by) authors.add(by);
     total++;
   }
-  for (const d of payload.drawings || []) {
+  for (const d of (Array.isArray(payload && payload.drawings) ? payload.drawings : [])) {
     if (!d || !d.json) continue;
-    await window.DB.put('annotations', { id: `fabric_draw_f${fileId}_p${d.page}`, fileId, page: d.page, kind: 'drawing', json: d.json, updatedAt: d.updatedAt || Date.now(), by: d.by });
-    if (d.by) authors.add(d.by);
+    const json = typeof d.json === 'string' ? d.json.slice(0, 5e6) : d.json;
+    const by = str(d.by, 80);
+    const pg = pageOf(d.page);
+    await window.DB.put('annotations', { id: `fabric_draw_f${fileId}_p${pg}`, fileId, page: pg, kind: 'drawing', json, updatedAt: num(d.updatedAt, Date.now()), ...(by ? { by } : {}) });
+    if (by) authors.add(by);
     total++;
   }
-  for (const n of payload.notes || []) {
-    if (!n || !n.content) continue;
-    await window.DB.put('notes', { ...n, id: await freeId('notes', n.id), fileId });
-    if (n.by) authors.add(n.by);
+  for (const n of (Array.isArray(payload && payload.notes) ? payload.notes : [])) {
+    if (!n || typeof n.content !== 'string' || !n.content) continue;
+    const by = str(n.by, 80);
+    await window.DB.put('notes', {
+      id: await freeId('notes', idOf(n.id)), fileId, page: pageOf(n.page), kind: str(n.kind, 60) || 'note',
+      content: n.content.slice(0, 50000), sourceText: str(n.sourceText, 5000), createdAt: num(n.createdAt, Date.now()), ...(by ? { by } : {}),
+    });
+    if (by) authors.add(by);
     total++;
   }
   return { total, authors: [...authors] };

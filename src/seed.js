@@ -148,7 +148,13 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
     data: raw,
     ...extra
   };
-  if (sharedPayload && Array.isArray(sharedPayload.history)) rec.sharedHistory = sharedPayload.history;
+  if (sharedPayload && Array.isArray(sharedPayload.history)) {
+    // untrusted input: keep only plain short fields (a null/odd entry used to break the reader menu)
+    rec.sharedHistory = sharedPayload.history.filter((x) => x && typeof x === 'object').slice(-40).map((x) => ({
+      by: typeof x.by === 'string' ? x.by.slice(0, 80) : '?', action: typeof x.action === 'string' ? x.action.slice(0, 40) : 'edited',
+      at: Number.isFinite(Number(x.at)) ? Number(x.at) : Date.now(),
+    }));
+  }
   await window.DB.put('files', rec);
   window.State.files.unshift({...rec, data:undefined});
   if (sharedPayload) {

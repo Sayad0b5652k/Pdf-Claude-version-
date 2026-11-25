@@ -779,10 +779,10 @@ export async function runGlobalSearch(q){
         </div>
         <div style="display:grid; gap:10px;">
           ${matchedNotes.map(n => `
-            <div class="card search-note-item" data-file="${n.fileId}" data-page="${n.page||1}" style="padding:14px; cursor:pointer; border-left:3px solid var(--accent); transition:transform 0.15s ease;">
+            <div class="card search-note-item" data-file="${window.escapeHtml(n.fileId)}" data-page="${Number(n.page)||1}" style="padding:14px; cursor:pointer; border-left:3px solid var(--accent); transition:transform 0.15s ease;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <span style="font-size:12px; font-weight:700; color:var(--accent);">${window.escapeHtml(n.fileName)}</span>
-                <span class="font-mono" style="font-size:11px; color:var(--text-faint); background:var(--surface-2); padding:2px 8px; border-radius:6px;">p. ${n.page||1}</span>
+                <span class="font-mono" style="font-size:11px; color:var(--text-faint); background:var(--surface-2); padding:2px 8px; border-radius:6px;">p. ${Number(n.page)||1}</span>
               </div>
               <div style="font-size:13.5px; font-weight:600; color:var(--text); line-height:1.4; margin-bottom:4px;">
                 ${window.escapeHtml(n.content || '')}
@@ -804,10 +804,10 @@ export async function runGlobalSearch(q){
         </div>
         <div style="display:grid; gap:10px;">
           ${matchedAnnots.map(a => `
-            <div class="card search-annot-item" data-file="${a.fileId}" data-page="${a.page||1}" style="padding:14px; cursor:pointer; border-left:3px solid ${a.color || 'var(--accent)'}; transition:transform 0.15s ease;">
+            <div class="card search-annot-item" data-file="${window.escapeHtml(a.fileId)}" data-page="${Number(a.page)||1}" style="padding:14px; cursor:pointer; border-left:3px solid ${window.safeCssColor(a.color, 'var(--accent)')}; transition:transform 0.15s ease;">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <span style="font-size:12px; font-weight:700; color:var(--text-dim);">${window.escapeHtml(a.fileName)}</span>
-                <span class="font-mono" style="font-size:11px; color:var(--text-faint); background:var(--surface-2); padding:2px 8px; border-radius:6px;">p. ${a.page||1}</span>
+                <span class="font-mono" style="font-size:11px; color:var(--text-faint); background:var(--surface-2); padding:2px 8px; border-radius:6px;">p. ${Number(a.page)||1}</span>
               </div>
               <div style="font-size:13px; color:var(--text); font-weight:500; background:var(--surface-2); padding:8px 10px; border-radius:8px; line-height:1.4;">
                 "${window.escapeHtml(a.text || a.note || '')}"

@@ -766,6 +766,18 @@ export function renderMarkdown(raw){
 export function debounce(fn,ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; }
 export function throttle(fn,ms){ let last=0, t; return (...a)=>{ const now=Date.now(); if(now-last>ms){ last=now; fn(...a);} else { clearTimeout(t); t=setTimeout(()=>{last=Date.now(); fn(...a);}, ms-(now-last)); } }; }
 
+/** Only lets real CSS colours through (hex, rgb/hsl, a plain colour name or a CSS variable); anything else becomes the fallback.
+ *  Colours of imported annotations end up inside style="" attributes, so a crafted value must never be able to break out of them. */
+export function safeCssColor(c, fallback = '#ffd84d') {
+  const s = String(c == null ? '' : c).trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(s)) return s;
+  if (/^(?:rgb|hsl)a?\(\s*[\d.\s,%\/-]+\)$/i.test(s)) return s;
+  if (/^[a-z]{3,24}$/i.test(s)) return s;
+  if (/^var\(--[a-z0-9-]{1,40}\)$/i.test(s)) return s;
+  return fallback;
+}
+window.safeCssColor = safeCssColor;
+
 export function escapeHtml(s){
   if (s === null || s === undefined) return '';
   const str = typeof s === 'string' ? s : String(s);

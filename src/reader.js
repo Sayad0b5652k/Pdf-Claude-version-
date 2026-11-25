@@ -2704,11 +2704,11 @@ export async function openReaderMenu(){
     const pending = annots.filter(isForeign);
     content.innerHTML = (annots.length? `<button class="btn btn-ghost" id="hl-to-cards" style="width:100%; padding:10px; margin-bottom:6px; font-size:13px;">${window.icon('cards','icon icon-sm')} Make flashcards from my highlights</button>`:'') + (pending.length? `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; margin-bottom:6px; background:var(--accent-soft); border-radius:var(--radius-md); font-size:12.5px;"><span><b>${pending.length}</b> to review from ${[...new Set(pending.map(x=>window.escapeHtml(String(x.by))))].join(', ')}</span><button class="btn" id="review-accept-all" style="padding:6px 10px; font-size:12px;">Keep all</button></div>`:'') + (annots.length? annots.map(a=>`<div class="menu-jump" data-page="${a.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
       <div style="flex:1; min-width:0;">
-        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${a.color}; flex-shrink:0;"></span><span class="font-mono" style="font-size:11px; color:var(--text-faint);">Page ${a.page} · ${a.type==='underline'?'underline':'highlight'}${a.by?' · '+window.escapeHtml(String(a.by)):''}</span></div>
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${window.safeCssColor(a.color)}; flex-shrink:0;"></span><span class="font-mono" style="font-size:11px; color:var(--text-faint);">Page ${Number(a.page)||1} · ${a.type==='underline'?'underline':'highlight'}${a.by?' · '+window.escapeHtml(String(a.by)):''}</span></div>
         <div style="font-size:13.5px; color:var(--text-dim); overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${window.escapeHtml(a.text||'')}</div>
       </div>
-      ${isForeign(a)?`<button class="btn review-keep-btn" data-id="${a.id}" title="Keep" style="width:32px; height:32px; background:var(--accent-soft); color:var(--accent); flex-shrink:0;">${window.icon('check','icon icon-sm')}</button>`:''}
-      <button class="btn del-annot-btn" data-id="${a.id}" title="${isForeign(a)?'Reject':'Delete'}" style="width:32px; height:32px; background:transparent; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
+      ${isForeign(a)?`<button class="btn review-keep-btn" data-id="${window.escapeHtml(a.id)}" title="Keep" style="width:32px; height:32px; background:var(--accent-soft); color:var(--accent); flex-shrink:0;">${window.icon('check','icon icon-sm')}</button>`:''}
+      <button class="btn del-annot-btn" data-id="${window.escapeHtml(a.id)}" title="${isForeign(a)?'Reject':'Delete'}" style="width:32px; height:32px; background:transparent; color:var(--text-faint); flex-shrink:0;">${window.icon('trash','icon icon-sm')}</button>
     </div>`).join('') : window.emptyState('highlighter','No highlights yet','Select text while reading to highlight it.'));
     bindJumps();
     content.querySelectorAll('.review-keep-btn').forEach(btn=>{
@@ -2742,9 +2742,9 @@ export async function openReaderMenu(){
   function showNotes(){
     content.innerHTML = notes.length? notes.map(n=>{
       const info = window.getNoteCategoryInfo ? window.getNoteCategoryInfo(n.kind) : { label: n.kind || 'Note', emoji: '📝' };
-      return `<div class="menu-jump" data-page="${n.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer;">
+      return `<div class="menu-jump" data-page="${Number(n.page)||1}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer;">
         <div style="font-size:11px; color:var(--text-dim); margin-bottom:4px; font-weight:700; display:flex; align-items:center; gap:4px;">
-          <span>${info.emoji}</span> <span>${window.escapeHtml(info.label)}</span> <span style="font-weight:400; color:var(--text-faint);">· Page ${n.page}</span>
+          <span>${info.emoji}</span> <span>${window.escapeHtml(info.label)}</span> <span style="font-weight:400; color:var(--text-faint);">· Page ${Number(n.page)||1}</span>
         </div>
         <div style="font-size:13.5px; color:var(--text); overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;">${window.escapeHtml(window.stripMarkdown ? window.stripMarkdown(n.content||'') : (n.content||''))}</div>
       </div>`;

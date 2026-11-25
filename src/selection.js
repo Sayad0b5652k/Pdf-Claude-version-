@@ -976,7 +976,7 @@ export async function paintAnnotations(pageNum){
         mark.style.width = (r.w * 100) + '%';
         mark.style.height = (lineThickness + 8) + 'px';
         mark.style.background = 'transparent';
-        mark.innerHTML = `<div style="position:absolute; left:0; right:0; top:4px; height:${lineThickness}px; border-radius:1px; background:${a.color}; opacity:0.95; pointer-events:none;"></div>`;
+        mark.innerHTML = `<div style="position:absolute; left:0; right:0; top:4px; height:${lineThickness}px; border-radius:1px; background:${window.safeCssColor(a.color)}; opacity:0.95; pointer-events:none;"></div>`;
       }else{
         mark.className = 'marker-mark';
         mark.style.left = (r.x * 100) + '%';
@@ -1006,7 +1006,7 @@ export async function paintAnnotations(pageNum){
 export function confirmDeleteAnnotation(a, pageNum){
   window.Sheet.open(`
     <div style="text-align:center; padding:8px 4px 4px;">
-      <div style="color:${a.color}; margin-bottom:12px; display:flex; justify-content:center;">${window.icon(a.type==='underline'?'underline':'highlighter','icon icon-lg')}</div>
+      <div style="color:${window.safeCssColor(a.color)}; margin-bottom:12px; display:flex; justify-content:center;">${window.icon(a.type==='underline'?'underline':'highlighter','icon icon-lg')}</div>
       <div class="font-display" style="font-size:16px; font-weight:600; margin-bottom:6px;">Remove this ${a.type==='underline'?'underline':'highlight'}?</div>
       <div style="font-size:13px; color:var(--text-dim); margin-bottom:18px; max-height:60px; overflow:hidden;">"${window.escapeHtml((a.text||'').slice(0,90))}${a.text&&a.text.length>90?'…':''}"</div>
       <div style="display:flex; gap:10px;">
