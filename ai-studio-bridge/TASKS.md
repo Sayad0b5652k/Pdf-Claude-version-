@@ -95,3 +95,23 @@ Pages show as solid black rectangles (page marks still visible on top). Suspect:
 
 
 
+
+## 16. DISCUSSION (Claude -> AI Studio): which FREE APIs should the app use? Please answer in a report
+User wants a big upgrade today. Constraint stays: **no paid services, keep the app lean, never put keys in the repo/client** (BYOK via keyvault + server env is fine). You have the real keys and a live preview, so please TEST the claims below instead of trusting web pages, and answer with PASS/FAIL/NOT TESTED.
+
+Where we are today (from reading server.ts): text = Gemini (`gemini-3.1-flash-lite`) with Groq + OpenRouter as BYOK/fallback; `detectProvider()` already recognises `csk-` (Cerebras) keys; images = `/api/ai/image` tries Wikimedia first, then OpenRouter `google/gemini-2.5-flash-image`; no web-search provider yet.
+
+Candidates and what public pages say (they CONFLICT, so verify with your own key; limits change often):
+- **Cerebras** (very fast inference). One tracker (Nov 2026) says free ~1M tokens/day, 30 RPM, no training on data, no card; another says a $5 trial that expires in 30 days and needs a verified payment method. -> Please check: does a fresh free key work today without a card, and what is the real daily limit? Good for: chat tutor, quiz/flashcards (fast streaming).
+- **Mistral** (La Plateforme "Experiment" tier). One source says ~1B tokens/month free but only if you accept training on your data; another says no free API / billing activation needed. -> Please check on a real key. Privacy matters (user study notes), so if free = "trained on your data" we should either skip it or make it opt-in with a clear toast.
+- **Groq** (already in the app): about 30 RPM / 1,000 requests per day on gpt-oss-120b, no card. Keep as fast fallback.
+- **Tavily** (web search API, for "search the web" in the tutor / current-affairs notes / fact-check): I could not confirm its free quota from the sources I read. Please check the dashboard: how many free credits per month, and is a card needed? Idea: one `/api/web-search` endpoint, used only when the user asks or the answer needs fresh facts, results cached, hard monthly counter so we never exceed free credits.
+- **Images**: Cloudflare Workers AI (FLUX-class models, ~10,000 "neurons"/day free, no card, no training) looks like the best free generator; Pollinations is keyless but slow (~1 request per 30 s) and unreliable; Gemini image on the Google free tier trains on data outside the EEA. Keep Wikimedia first (real textbook media), then ONE free generator as fallback.
+
+What I need from you (answer each in the report):
+1. For every provider above: PASS/FAIL that a free key works today, the real RPM/day limit you hit, and whether a card was needed.
+2. Proposed routing table: task (chat, quiz, flashcards, summary, dictionary, translate, OCR cleanup, web search, image) -> primary provider -> fallback. Prefer the fastest free model for streaming chat, Gemini for long-context PDF work.
+3. How to keep user keys safe: BYOK only in keyvault, server never logs keys, per-provider daily counters in the UI ("Cerebras 120/1000 today") so the user sees when a free tier is almost used up.
+4. A single provider-adapter module (one function `callLLM({task, prompt, stream})`) so adding a provider is ~30 lines; please do NOT scatter provider code through study_core.js/teacher.js.
+5. Anything you recommend we do NOT add (keeps the app lean).
+Do not start building until the user confirms the routing table. Claude will review the adapter code afterwards.
