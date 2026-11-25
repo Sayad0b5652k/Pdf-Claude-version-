@@ -1688,4 +1688,5 @@ window.renderReviewView = renderReviewView;
 window.openReviewSession = openReviewSession;
 window.renderBookmarksView = renderBookmarksView;
 window.renderNotesView = renderNotesView;
+window.getNoteCategoryInfo = getNoteCategoryInfo;
 window.openNoteDetail = openNoteDetail;
