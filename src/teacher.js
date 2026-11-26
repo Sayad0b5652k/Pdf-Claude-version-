@@ -69,6 +69,8 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
 
   // Render Full Screen AI Teacher Workspace View
   window.State.view = 'teacher';
+  if (typeof window.leaveOuterShell === 'function') window.leaveOuterShell('teacher');
+  else if (typeof window.syncBottomNav === 'function') window.syncBottomNav('teacher');
   if (typeof window.stopReadingSession === 'function') window.stopReadingSession();
   if (typeof window.hideSelToolbar === 'function') window.hideSelToolbar();
 
@@ -1307,7 +1309,8 @@ Provide the complete academic answer now:`;
         window.mountReaderContent();
       } else {
         window.State.view = 'dashboard';
-        window.renderDashboard();
+        if (typeof window.render === 'function') window.render();
+        else if (typeof window.renderDashboard === 'function') window.renderDashboard();
       }
     };
   }

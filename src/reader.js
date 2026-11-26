@@ -204,6 +204,8 @@ export async function openReader(fileId, jumpToPage, pageList, pageListLabel){
   window.State.view = 'reader';
   window.State.pageList = pageList || null;
   window.State.pageListLabel = pageListLabel || '';
+  if (typeof window.leaveOuterShell === 'function') window.leaveOuterShell('reader');
+  else if (typeof window.syncBottomNav === 'function') window.syncBottomNav('reader');
 
   if (typeof window.pushAppScreen === 'function') {
     window.pushAppScreen('reader');
@@ -630,6 +632,8 @@ export function openGoalSummarySheet(doExitCallback, isAutoTriggered = false) {
 }
 
 export function renderReaderShell(){
+  if (typeof window.leaveOuterShell === 'function') window.leaveOuterShell('reader');
+  else if (typeof window.syncBottomNav === 'function') window.syncBottomNav('reader');
   const f = window.State.currentFile;
   const isBottomBarOn = window.State.showBottomBar === true;
   window.State.sessionStartTime = Date.now();
@@ -739,7 +743,7 @@ export function renderReaderShell(){
         window.closeOledBlackoutVisualizer();
       }
       if (typeof window.stopReadingSession === 'function') {
-        await window.stopReadingSession();
+        Promise.resolve(window.stopReadingSession()).catch(() => {});
       }
       window.State.view='dashboard';
       // Stop any further page renders immediately, wait for the async dashboard view
@@ -1187,6 +1191,7 @@ export async function mountReaderContent(){
   scrollEl.innerHTML = '';
   // Empty pageEls safely keeping identical reference of window.pageEls
   clearPageEls();
+  firstPagePainted = false;
   
   const mode = window.State.readingMode;
   scrollEl.classList.remove('rm-continuous','rm-single');
@@ -2031,8 +2036,10 @@ function pageTopOf(pe){
   if(pe.wrap && pe.wrap.offsetParent !== null) return pe.wrap.offsetTop;   // laid out: trust the browser
   return pe._top !== undefined ? pe._top : 0;                              // hidden (single-page mode): estimate
 }
+let firstPagePainted = false;
 function pumpRenderQueue(){
-  while(activeRenders < maxParallelRenders && renderQueue.length){
+  const limit = firstPagePainted ? maxParallelRenders : 1;
+  while(activeRenders < limit && renderQueue.length){
     const n = renderQueue.shift();
     const pe = pageEls[n];
     if(!pe || pe.rendered || pe.rendering) continue;
@@ -2327,6 +2334,10 @@ async function renderPageNow(num, pe, token){
     pe.rendered = true;
     pe.rendering = false;
     pe._renderPromise = null;
+    if (!firstPagePainted) {
+      firstPagePainted = true;
+      pumpRenderQueue();
+    }
     scheduleTiles(60);
     try { window.onPageRendered && window.onPageRendered(num); } catch (e) {}
     try { window.reapplyTTSHighlight && window.reapplyTTSHighlight(num); } catch (e) {}
@@ -2396,6 +2407,10 @@ async function renderPageNow(num, pe, token){
   }finally{
     if(!committed && canvas){
       try { canvas.width = 0; canvas.height = 0; } catch(e){}
+    }
+    if (!isStale() && !firstPagePainted) {
+      firstPagePainted = true;
+      pumpRenderQueue();
     }
   }
 }

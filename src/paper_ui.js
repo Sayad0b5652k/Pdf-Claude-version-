@@ -150,6 +150,8 @@ export async function openPaperView(opts = {}) {
   if (window.State.view !== 'paper') ps.prevView = window.State.view || 'dashboard';
   try { window.stopReadingSession?.(); window.hideSelToolbar?.(); } catch (e) {}
   window.State.view = 'paper';
+  if (typeof window.leaveOuterShell === 'function') window.leaveOuterShell('paper');
+  else if (typeof window.syncBottomNav === 'function') window.syncBottomNav('paper');
   ensurePaperCss(); syncCapsule();
   try { window.pushAppScreen?.('paper'); } catch (e) {}
   ensureSubscription();
@@ -203,6 +205,7 @@ window.exitPaperView = exitPaperView;
 function clearTimer() { if (ps.timer) { clearInterval(ps.timer); ps.timer = null; } }
 function mountSoft() { if (window.State.view === 'paper') mount(true); }
 function mount(keepScroll = false) {
+  if (typeof window.syncBottomNav === 'function') window.syncBottomNav('paper');
   const app = document.getElementById('app'); if (!app) return;
   const sc = app.querySelector('.pp-scroll'); const top = keepScroll && sc ? sc.scrollTop : 0;
   const prevScreen = app.firstElementChild?.dataset?.screen;

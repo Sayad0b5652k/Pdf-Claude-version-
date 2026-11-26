@@ -1,7 +1,7 @@
 // @ts-nocheck
 
 export function getDashboardScrollEl(){
-  return document.getElementById('dashboard-drop') || document.querySelector('.view') || document.documentElement;
+  return document.getElementById('dashboard-drop') || document.querySelector('.view:not([data-leaving="1"])') || document.documentElement;
 }
 
 export async function renderDashboard(preserveScroll = true){
@@ -13,9 +13,11 @@ export async function renderDashboard(preserveScroll = true){
   const recents = files.filter(f => f.lastOpened && !f.hideFromRecents).slice(0,8);
   const folders = [...new Set(files.map(f=>f.folder).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
   const totalSize = files.reduce((a,f)=>a+(f.size||0),0);
-  const readingStats = await window.getReadingStats();
-  const chatHistories = await window.DB.all('chathistory').catch(() => []);
-  const planBack = typeof window.studyPlanBackHtml === 'function' ? await window.studyPlanBackHtml(files).catch(() => '') : '';
+  const [readingStats, chatHistories, planBack] = await Promise.all([
+    window.getReadingStats(),
+    window.DB.all('chathistory').catch(() => []),
+    typeof window.studyPlanBackHtml === 'function' ? window.studyPlanBackHtml(files).catch(() => '') : Promise.resolve('')
+  ]);
   // The user may have navigated away (e.g. opened a book or switched tabs) while the awaits above were pending
   if (window.State.view !== 'dashboard' || (tok && tok !== window._outerRenderToken)) return;
 
@@ -67,19 +69,16 @@ export async function renderDashboard(preserveScroll = true){
     return;
   }
 
-  const isFirstMount = !window._hasDashboardMounted;
   window._hasDashboardMounted = true;
-  const tabDirCls = typeof window.consumeOuterDirClass === 'function'
-    ? window.consumeOuterDirClass()
-    : (isFirstMount ? ' outer-dir-in' : '');
+  const dir = typeof window.consumeOuterDir === 'function' ? window.consumeOuterDir() : '';
 
-  document.getElementById('app').innerHTML = `
-  <div class="view fade-in" id="dashboard-drop" style="padding:0 0 100px;">
+  const html = `
+  <div class="view" id="dashboard-drop" style="padding:0 0 100px;">
     <div style="position:sticky; top:0; z-index:40; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border);">
       <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
         <div style="display:flex; align-items:center; gap:12px;">
           <div style="width:44px; height:44px; border-radius:12px; background:var(--surface-2); border:1px solid var(--accent-soft); display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 10px var(--accent-soft); overflow:hidden;">
-            <img src="${(typeof window.getThemeCrestUrl === 'function' ? window.getThemeCrestUrl() : '/icons/theme-classic-512.png')}" alt="S.A.Y.A.D." style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
+            <img src="${(typeof window.getThemeCrestUrl === 'function' ? window.getThemeCrestUrl() : '/icons/theme-classic-512.png')}" alt="S.A.Y.A.D." decoding="async" style="width:100%; height:100%; object-fit:cover; border-radius:12px;" />
           </div>
           <div>
             <div class="font-display" style="font-size:22px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; line-height:1.1; color:var(--text);">S.A.Y.A.D.</div>
@@ -101,7 +100,7 @@ export async function renderDashboard(preserveScroll = true){
       </div>
     </div>
 
-    <div class="outer-stage-body${tabDirCls || (isFirstMount ? ' outer-dir-in' : '')}" style="padding:6px 20px;">
+    <div style="padding:6px 20px;">
       <div id="dash-widgets">
         ${analyticsFlipHtml(files, readingStats, planBack)}
 
@@ -127,25 +126,25 @@ export async function renderDashboard(preserveScroll = true){
         ${renderAIChatHistorySectionHtml(chatHistories, files)}
       </div>
     </div>
-  </div>
-  ${window.bottomNavHtml('dashboard')}`;
+  </div>`;
 
-  bindDashboardEvents();
-
-  if (preserveScroll && prevScroll > 0) {
-    const el = getDashboardScrollEl();
-    if (el) {
-      el.scrollTop = prevScroll;
-      requestAnimationFrame(() => {
-        const e = getDashboardScrollEl();
-        if (e) e.scrollTop = prevScroll;
-      });
-      setTimeout(() => {
-        const e = getDashboardScrollEl();
-        if (e) e.scrollTop = prevScroll;
-      }, 60);
+  await window.mountOuterView('dashboard', html, {
+    dir,
+    token: tok,
+    afterMount() {
+      bindDashboardEvents();
+      if (preserveScroll && prevScroll > 0) {
+        const el = getDashboardScrollEl();
+        if (el) {
+          el.scrollTop = prevScroll;
+          requestAnimationFrame(() => {
+            const e = getDashboardScrollEl();
+            if (e) e.scrollTop = prevScroll;
+          });
+        }
+      }
     }
-  }
+  });
 }
 
 export function bindDashboardEvents() {
@@ -543,7 +542,7 @@ export function bookCard(f, wide){
   return `<div class="book" data-hue="${bookHue(f.id)}" ${wide ? `data-recents-card="${f.id}"` : `data-book-card="${f.id}"`} style="${wide?'width:132px; min-width:132px; flex-shrink:0;':'width:100%;'}" data-open="${f.id}">
     ${f.pinned? `<div class="pin-dot"></div>`:''}
     <div class="thumbwrap">
-      ${f.thumb? `<img src="${f.thumb}">` : `<div class="skel" style="position:absolute; inset:0;"></div>`}
+      ${f.thumb? `<img src="${f.thumb}" decoding="async">` : `<div class="skel" style="position:absolute; inset:0;"></div>`}
       <div class="badge-pages">${f.pageCount||'—'}p</div>
       ${wide ? `<button class="btn btn-remove-recent" data-remove-recent="${f.id}" title="Remove from Continue reading" style="position:absolute; top:4px; right:4px; width:22px; height:22px; border-radius:50%; background:rgba(0,0,0,0.65); color:#fff; display:flex; align-items:center; justify-content:center; border:none; padding:0; z-index:4; cursor:pointer;">${window.icon('x','icon icon-xs')}</button>` : ''}
     </div>
@@ -572,7 +571,7 @@ export function bookCardList(f){
   return `<div class="card" data-hue="${bookHue(f.id)}" data-book-card="${f.id}" data-open="${f.id}" style="display:flex; align-items:center; gap:12px; padding:10px; margin-bottom:10px; cursor:pointer; position:relative;">
     ${f.pinned? `<span class="pin-dot-list" style="position:absolute; top:8px; left:8px; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); z-index:2;"></span>`:''}
     <div class="card-thumb-wrap" style="width:44px; height:58px; border-radius:4px; overflow:hidden; flex-shrink:0; background:var(--surface-2); position:relative;">
-      ${f.thumb? `<img class="card-thumb-img" src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">` : ''}
+      ${f.thumb? `<img class="card-thumb-img" src="${f.thumb}" decoding="async" style="width:100%; height:100%; object-fit:cover;">` : ''}
     </div>
     <div style="flex:1; min-width:0;">
       <div class="book-card-title" style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${window.escapeHtml(f.name)}</div>
@@ -622,7 +621,7 @@ export function updateBookCardDOM(fileId) {
     if (imgEl && f.thumb) {
       imgEl.src = f.thumb;
     } else if (thumbWrap && f.thumb) {
-      thumbWrap.innerHTML = `<img class="card-thumb-img" src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">`;
+      thumbWrap.innerHTML = `<img class="card-thumb-img" src="${f.thumb}" decoding="async" style="width:100%; height:100%; object-fit:cover;">`;
     }
 
     let pinDot = card.querySelector('.pin-dot, .pin-dot-list');

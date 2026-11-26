@@ -73,23 +73,175 @@ export const NAV_TABS = [
 ];
 
 const OUTER_TAB_ORDER = ['dashboard', 'bookmarks', 'review', 'notes', 'settings'];
-let _outerDirClass = '';
+let _outerDir = '';
 let _pendingTabAnim = false;
 let _lastOuterTab = null;
+let _activeOuterCleanup = null;
 window._outerRenderToken = window._outerRenderToken || 0;
 
 export function getOuterTabIndex(viewName) {
   return OUTER_TAB_ORDER.indexOf(viewName);
 }
 
-export function consumeOuterDirClass() {
+export function consumeOuterDir() {
   if (!_pendingTabAnim) return '';
   _pendingTabAnim = false;
-  const cls = _outerDirClass || ' outer-dir-in';
-  _outerDirClass = '';
-  return cls;
+  const dir = _outerDir || 'in';
+  _outerDir = '';
+  return dir;
 }
-window.consumeOuterDirClass = consumeOuterDirClass;
+window.consumeOuterDir = consumeOuterDir;
+
+function decodeVisibleImages(rootEl, maxImages = 8, timeoutMs = 45) {
+  if (!rootEl || typeof rootEl.querySelectorAll !== 'function') return Promise.resolve();
+  const imgs = [...rootEl.querySelectorAll('img')].slice(0, maxImages);
+  if (!imgs.length) return Promise.resolve();
+  const jobs = imgs.map((img) => {
+    try {
+      if (img.complete && img.naturalWidth > 0 && typeof img.decode === 'function') {
+        return img.decode().catch(() => {});
+      }
+      if (typeof img.decode === 'function') {
+        return img.decode().catch(() => {});
+      }
+    } catch (_) {}
+    return Promise.resolve();
+  });
+  return Promise.race([
+    Promise.all(jobs),
+    new Promise((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+export async function mountOuterView(viewKey, viewHtml, opts = {}) {
+  const appEl = document.getElementById('app');
+  if (!appEl) return null;
+  if (window.State?.view && window.State.view !== viewKey) return null;
+  const dir = opts.dir !== undefined ? opts.dir : consumeOuterDir();
+  const token = opts.token;
+  const afterMount = typeof opts.afterMount === 'function' ? opts.afterMount : null;
+
+  if (_activeOuterCleanup) {
+    try { _activeOuterCleanup(true); } catch (_) {}
+    _activeOuterCleanup = null;
+  }
+
+  const lite = document.documentElement.classList.contains('lite-motion');
+  let reduce = false;
+  try { reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (_) {}
+
+  const oldView = [...appEl.children].find((c) => c.classList?.contains('view') && !c.hasAttribute('data-leaving'));
+  const canCrossGlide = !lite && !reduce && !!oldView && !!oldView.dataset?.outerTab && oldView.dataset.outerTab !== viewKey && (dir === 'fwd' || dir === 'back' || dir === 'in');
+
+  if (!canCrossGlide) {
+    if ((token && token !== window._outerRenderToken) || (window.State?.view && window.State.view !== viewKey)) return null;
+    appEl.innerHTML = viewHtml;
+    const mounted = appEl.querySelector('.view:not([data-leaving="1"])');
+    if (mounted) mounted.dataset.outerTab = viewKey;
+    window.bindBottomNav();
+    if (afterMount) afterMount(mounted);
+    return mounted;
+  }
+
+  // Keep oldView fully visible (opacity: 1) underneath while stripping its IDs so queries stay 100% unique
+  appEl.querySelectorAll('.outer-view-leaving').forEach((n) => n.remove());
+  oldView.removeAttribute('id');
+  oldView.querySelectorAll('[id]').forEach((el) => el.removeAttribute('id'));
+  oldView.setAttribute('data-leaving', '1');
+  oldView.setAttribute('aria-hidden', 'true');
+  oldView.classList.add('outer-view-leaving');
+  oldView.classList.remove('fade-in');
+  oldView.style.pointerEvents = 'none';
+  oldView.style.zIndex = '1';
+
+  const tpl = document.createElement('template');
+  tpl.innerHTML = viewHtml.trim();
+  const newView = tpl.content.querySelector('.view');
+  if (!newView) {
+    appEl.innerHTML = viewHtml;
+    window.bindBottomNav();
+    if (afterMount) afterMount(appEl.querySelector('.view'));
+    return appEl.querySelector('.view');
+  }
+
+  newView.classList.remove('fade-in');
+  newView.dataset.outerTab = viewKey;
+  newView.style.zIndex = '2';
+  newView.style.opacity = '0';
+  newView.style.willChange = 'transform, opacity';
+  appEl.appendChild(newView);
+
+  window.bindBottomNav();
+  if (afterMount) afterMount(newView);
+
+  // Settle layout + decode visible cover thumbnails while oldView stays calmly on screen
+  void newView.offsetHeight;
+  await decodeVisibleImages(newView, 8, 45);
+
+  // User tapped another tab or opened a book while thumbnails were decoding
+  if ((token && token !== window._outerRenderToken) || (window.State?.view && window.State.view !== viewKey)) {
+    if (newView.parentNode) newView.remove();
+    return null;
+  }
+
+  const dxIn = dir === 'fwd' ? 22 : dir === 'back' ? -22 : 0;
+  const dyIn = dir === 'in' ? 12 : 0;
+  const dxOut = dir === 'fwd' ? -14 : dir === 'back' ? 14 : 0;
+
+  let finished = false;
+  let timer = null;
+  let animIn = null;
+  let animOut = null;
+
+  const cleanup = (aborted = false) => {
+    if (finished) return;
+    finished = true;
+    if (timer) { clearTimeout(timer); timer = null; }
+    try { animIn && animIn.cancel(); } catch (_) {}
+    try { animOut && animOut.cancel(); } catch (_) {}
+    if (oldView.parentNode) oldView.remove();
+    if (newView.isConnected) {
+      newView.style.opacity = '';
+      newView.style.transform = '';
+      newView.style.zIndex = '';
+      newView.style.willChange = '';
+    }
+    if (_activeOuterCleanup === cleanup) _activeOuterCleanup = null;
+  };
+  _activeOuterCleanup = cleanup;
+
+  await new Promise((resolve) => requestAnimationFrame(resolve));
+  if ((token && token !== window._outerRenderToken) || (window.State?.view && window.State.view !== viewKey)) {
+    cleanup(true);
+    return null;
+  }
+
+  if (typeof newView.animate === 'function' && typeof oldView.animate === 'function') {
+    const dur = 205;
+    const ease = 'cubic-bezier(0.22, 1, 0.36, 1)';
+    animIn = newView.animate(
+      [
+        { opacity: 0, transform: `translate3d(${dxIn}px, ${dyIn}px, 0)` },
+        { opacity: 1, transform: 'translate3d(0, 0, 0)' },
+      ],
+      { duration: dur, easing: ease, fill: 'both' }
+    );
+    animOut = oldView.animate(
+      [
+        { opacity: 1, transform: 'translate3d(0, 0, 0)' },
+        { opacity: 0, transform: `translate3d(${dxOut}px, 0, 0)` },
+      ],
+      { duration: dur, easing: ease, fill: 'both' }
+    );
+    animIn.onfinish = () => cleanup(false);
+    timer = setTimeout(() => cleanup(false), dur + 60);
+  } else {
+    cleanup(false);
+  }
+
+  return newView;
+}
+window.mountOuterView = mountOuterView;
 
 export function ensurePersistentBottomNav() {
   if (typeof document === 'undefined' || !document.body) return null;
@@ -112,16 +264,38 @@ export function ensurePersistentBottomNav() {
   return nav;
 }
 
+export function leaveOuterShell(nextView = '') {
+  window._outerRenderToken = (window._outerRenderToken || 0) + 1;
+  _lastOuterTab = null;
+  _outerDir = '';
+  _pendingTabAnim = false;
+  if (_activeOuterCleanup) {
+    try { _activeOuterCleanup(true); } catch (_) {}
+    _activeOuterCleanup = null;
+  }
+  if (typeof document !== 'undefined') {
+    document.querySelectorAll('.outer-view-leaving').forEach((n) => n.remove());
+  }
+  syncBottomNav(nextView || window.State?.view || '');
+}
+window.leaveOuterShell = leaveOuterShell;
+
 export function syncBottomNav(activeView) {
   const nav = ensurePersistentBottomNav();
   if (!nav) return;
-  const isOuter = OUTER_TAB_ORDER.includes(activeView);
+  const viewKey = activeView || window.State?.view || '';
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.dataset.activeView = viewKey;
+  }
+  const isOuter = OUTER_TAB_ORDER.includes(viewKey);
   if (!isOuter) {
     nav.style.display = 'none';
+    nav.setAttribute('aria-hidden', 'true');
     return;
   }
   nav.style.display = '';
-  const activeKey = activeView || window.State?.view || 'dashboard';
+  nav.removeAttribute('aria-hidden');
+  const activeKey = viewKey || 'dashboard';
   const idx = Math.max(0, NAV_TABS.findIndex(t => t.key === activeKey));
   nav.querySelectorAll('[data-nav]').forEach(b => {
     const on = b.dataset.nav === activeKey;
@@ -151,7 +325,7 @@ export function switchOuterTab(targetView) {
       if (typeof window.renderSettings === 'function') window.renderSettings({ resetScroll: true, dir: 'back' });
       return;
     }
-    const scroller = document.getElementById('dashboard-drop') || document.querySelector('.view');
+    const scroller = document.querySelector('.view:not([data-leaving="1"])');
     if (scroller && scroller.scrollTop > 8) {
       try { scroller.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { scroller.scrollTop = 0; }
     }
@@ -160,9 +334,9 @@ export function switchOuterTab(targetView) {
   const prevIdx = getOuterTabIndex(_lastOuterTab || curView);
   const nextIdx = getOuterTabIndex(targetView);
   if (prevIdx !== -1 && nextIdx !== -1 && prevIdx !== nextIdx) {
-    _outerDirClass = nextIdx > prevIdx ? ' outer-dir-fwd' : ' outer-dir-back';
+    _outerDir = nextIdx > prevIdx ? 'fwd' : 'back';
   } else {
-    _outerDirClass = ' outer-dir-in';
+    _outerDir = 'in';
   }
   _pendingTabAnim = true;
   if (targetView === 'settings') window.State.settingsPage = 'main';
@@ -192,12 +366,6 @@ window.pushAppScreen = pushAppScreen;
 
 export function bindBottomNav(){
   syncBottomNav(window.State?.view);
-  document.querySelectorAll('#app [data-nav]').forEach(b=>{
-    b.onclick = (e)=>{
-      e.stopPropagation();
-      switchOuterTab(b.dataset.nav);
-    };
-  });
 }
 
 export function render(){
@@ -209,11 +377,19 @@ export function render(){
         const pIdx = getOuterTabIndex(_lastOuterTab);
         const nIdx = getOuterTabIndex(viewName);
         if (pIdx !== -1 && nIdx !== -1 && pIdx !== nIdx) {
-          _outerDirClass = nIdx > pIdx ? ' outer-dir-fwd' : ' outer-dir-back';
+          _outerDir = nIdx > pIdx ? 'fwd' : 'back';
           _pendingTabAnim = true;
         }
       }
       _lastOuterTab = viewName;
+    } else {
+      _lastOuterTab = null;
+      _outerDir = '';
+      _pendingTabAnim = false;
+      if (_activeOuterCleanup) {
+        try { _activeOuterCleanup(true); } catch (_) {}
+        _activeOuterCleanup = null;
+      }
     }
     syncBottomNav(viewName);
 

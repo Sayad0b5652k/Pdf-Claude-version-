@@ -276,11 +276,13 @@ dialog::-webkit-scrollbar {
   height: 100%;
   width: 100%;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .view {
   position: absolute;
   inset: 0;
+  background-color: var(--bg);
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
@@ -1514,6 +1516,9 @@ html.touch-device .textLayer span {
   padding: 8px 6px calc(10px + env(safe-area-inset-bottom, 0px));
   background: var(--bg-elev);
   border-top: 1px solid var(--border);
+}
+html[data-active-view]:not([data-active-view="dashboard"]):not([data-active-view="bookmarks"]):not([data-active-view="review"]):not([data-active-view="notes"]):not([data-active-view="settings"]) #persistent-bottom-nav {
+  display: none !important;
 }
 
 /* Annotation Markup Floating Toolbar & Fabric Layer */
@@ -3435,6 +3440,11 @@ body.selection-disabled .textLayer * {
 @keyframes mw-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes mw-modal-zoom {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 .mw-studio-header {
@@ -6265,6 +6275,11 @@ html[data-pro-theme="editorial"] .dict-def {
   to { opacity: 1; }
 }
 
+@keyframes sayadScaleUp {
+  from { transform: scale(0.92); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
 @keyframes sayadSlideUp {
   from { transform: translate(-50%, 20px); opacity: 0; }
   to { transform: translate(-50%, 0); opacity: 1; }
@@ -7492,6 +7507,9 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
 
 /* ===== Motion polish: springy sheets, dialogs that drop in, theme colour reveal ===== */
 :root { --spring: cubic-bezier(.34, 1.32, .5, 1); }
+.sheet { transition: transform .2s cubic-bezier(.4, 0, 1, 1); }
+.sheet.open { transition: transform .52s var(--spring); }
+.sheet.peek, .sheet.peek.open { transition: transform .24s cubic-bezier(.16, 1, .3, 1), max-height .2s ease; }
 .sheet::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 220px; background: inherit; pointer-events: none; }
 .sheet.peek::after { display: none; }
 @keyframes sayadScaleUp {
@@ -7502,12 +7520,11 @@ html[data-theme="dark"] .sx-hl{mix-blend-mode:normal;background:rgba(255,196,0,.
   100% { transform: none; opacity: 1; }
 }
 @keyframes mw-modal-zoom {
-  /* the card is centred with translate(-50%,-50%), so every step must keep it (otherwise it jumps at the end) */
-  0%   { transform: translate(-50%, calc(-50% - 40px)) scale(.94); opacity: 0; }
-  45%  { transform: translate(-50%, calc(-50% + 6px)) scale(1); opacity: 1; }
-  68%  { transform: translate(-50%, calc(-50% - 3px)); }
-  85%  { transform: translate(-50%, calc(-50% + 1px)); }
-  100% { transform: translate(-50%, -50%); opacity: 1; }
+  0%   { transform: translateY(-64px) scale(.94); opacity: 0; }
+  45%  { transform: translateY(9px) scale(1); opacity: 1; }
+  68%  { transform: translateY(-4px); }
+  85%  { transform: translateY(1.5px); }
+  100% { transform: none; opacity: 1; }
 }
 #toast { transition: transform .5s var(--spring), opacity .25s ease; }
 ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
@@ -8659,26 +8676,16 @@ html[data-pro-theme="notebook"] .bnav-pill { display: none; }
   animation: bnavIconPop .28s cubic-bezier(0.30, 1.32, 0.48, 1);
 }
 
-@keyframes outerSlideFwd {
-  from { opacity: .35; transform: translate3d(14px, 0, 0); }
-  to   { opacity: 1; transform: none; }
+.outer-view-leaving {
+  pointer-events: none;
+  z-index: 1;
 }
-@keyframes outerSlideBack {
-  from { opacity: .35; transform: translate3d(-14px, 0, 0); }
-  to   { opacity: 1; transform: none; }
-}
-@keyframes outerStageIn {
-  from { opacity: .35; transform: translate3d(0, 8px, 0); }
-  to   { opacity: 1; transform: none; }
-}
+
 @keyframes outerListSwap {
   from { opacity: 0; transform: translate3d(0, 6px, 0); }
   to   { opacity: 1; transform: none; }
 }
 
-.outer-stage-body.outer-dir-fwd  { animation: outerSlideFwd .28s cubic-bezier(.25, .8, .3, 1); }
-.outer-stage-body.outer-dir-back { animation: outerSlideBack .28s cubic-bezier(.25, .8, .3, 1); }
-.outer-stage-body.outer-dir-in   { animation: outerStageIn .28s cubic-bezier(.25, .8, .3, 1); }
 .outer-list-swap { animation: outerListSwap .18s cubic-bezier(.22, 1, .36, 1); }
 
 .outer-item-out {
@@ -8713,9 +8720,6 @@ html[data-pro-theme="notebook"] .bnav-pill { display: none; }
 
 html.lite-motion .bnav-pill { transition-duration: .12s !important; }
 html.lite-motion .bottom-nav button.bnav-pop svg,
-html.lite-motion .outer-stage-body.outer-dir-fwd,
-html.lite-motion .outer-stage-body.outer-dir-back,
-html.lite-motion .outer-stage-body.outer-dir-in,
 html.lite-motion .outer-list-swap,
 html.lite-motion .kv-row.adv-row-in,
 html.lite-motion .adv-msg.adv-msg-in,
@@ -8723,27 +8727,3 @@ html.lite-motion .adv-form-in,
 html.lite-motion .adv-card.adv-card-swap,
 html.lite-motion .adv-preview-swap { animation: none !important; }
 
-
-/* ===== GPU-only battery + equalizer animations (no layout per frame) =====
-   Bubbles animated `top` and equalizer bars animated `height`; both forced layout every frame. Now only transform/opacity move. */
-.battery-wave { will-change: transform; backface-visibility: hidden; }
-.battery-bubble { top: 0; height: 100%; background: radial-gradient(circle at 50% calc(100% - var(--r, 1.5px)), rgba(255,255,255,.75) var(--r, 1.5px), transparent calc(var(--r, 1.5px) + .7px)); border-radius: 0; will-change: transform, opacity; animation-fill-mode: backwards; }
-.battery-bubble.bubble-1 { height: 100%; --r: 1.5px; }
-.battery-bubble.bubble-2 { height: 100%; --r: 2px; }
-.battery-bubble.bubble-3 { height: 100%; --r: 1.5px; }
-@keyframes bubbleFloat {
-  0%   { transform: translate3d(0, 0, 0); opacity: 0; }
-  20%  { opacity: .9; }
-  75%  { opacity: .9; }
-  100% { transform: translate3d(0, -92%, 0); opacity: 0; }
-}
-.mw-pill-eq.playing span { height: 12px; transform-origin: 50% 100%; will-change: transform; }
-@keyframes mw-eq-bounce {
-  0%   { transform: scaleY(.25); }
-  100% { transform: scaleY(1); }
-}
-
-/* Outer screens (Home / Bookmarks / Review / Notes / Settings): the stage body already animates the new content in.
-   The whole-view opacity fade on top of it stacked two fades (screen went blank for a frame, then popped in) and also
-   re-played on every same-tab re-render. Only the stage body animates now, and it starts at .35 opacity so there is no blank frame. */
-.view.fade-in:has(.outer-stage-body) { animation: none; }

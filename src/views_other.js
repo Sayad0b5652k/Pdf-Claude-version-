@@ -8,7 +8,7 @@ import { GUIDE, searchGuide, askHelpAI, logMiss } from './help_guide.js';
 export async function renderSettings(opts = {}){
   if (window.State.view !== 'settings') return;
   const tok = window._outerRenderToken;
-  const existingShell = document.querySelector('[data-settings-shell="1"]');
+  const existingShell = document.querySelector('[data-settings-shell="1"]:not([data-leaving="1"])');
   const curScrollEl = getViewScrollEl();
   const prevScroll = opts.resetScroll ? 0 : (curScrollEl ? curScrollEl.scrollTop : 0);
   const totalSize = window.State.files.reduce((a,f)=>a+(f.size||0),0);
@@ -334,74 +334,29 @@ export async function renderSettings(opts = {}){
     `}
   </div>`;
 
-  if (existingShell && opts.inPlace !== false) {
-    const hdr = document.getElementById('settings-header-slot');
-    const oldBody = document.getElementById('settings-page-body');
-    if (hdr && oldBody) {
-      if (opts.resetScroll) existingShell.scrollTop = 0;
-      hdr.innerHTML = headerHtml;
-      oldBody.outerHTML = bodyHtml;
-      window.syncBottomNav && window.syncBottomNav('settings');
-    } else {
-      const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
-      document.getElementById('app').innerHTML = `
-      <div class="view fade-in" data-settings-shell="1" style="padding:0 0 100px;">
-        <div id="settings-header-slot" style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
-          ${headerHtml}
-        </div>
-        <div class="outer-stage-body${tabDirCls}">
-          ${bodyHtml}
-        </div>
-      </div>
-      ${window.bottomNavHtml('settings')}`;
-      window.bindBottomNav();
+  const bindSettingsEvents = () => {
+    const openAdv = document.getElementById('btn-open-advanced');
+    if (openAdv) openAdv.onclick = () => { window.State.settingsPage = 'advanced'; renderSettings({ resetScroll: true, dir: 'forward' }); };
+    const advBack = document.getElementById('btn-adv-back');
+    if (advBack) advBack.onclick = () => { window.State.settingsPage = 'main'; renderSettings({ resetScroll: true, dir: 'back' }); };
+
+    const copyLinkBtn = document.getElementById('btn-copy-app-link');
+    if (copyLinkBtn) {
+      copyLinkBtn.onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(appUrl);
+          window.toast('App link copied to clipboard! 📋');
+        } catch (e) {
+          const ta = document.createElement('textarea');
+          ta.value = appUrl;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          window.toast('App link copied to clipboard! 📋');
+        }
+      };
     }
-  } else {
-    const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
-    document.getElementById('app').innerHTML = `
-    <div class="view fade-in" data-settings-shell="1" style="padding:0 0 100px;">
-      <div id="settings-header-slot" style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
-        ${headerHtml}
-      </div>
-      <div class="outer-stage-body${tabDirCls}">
-        ${bodyHtml}
-      </div>
-    </div>
-    ${window.bottomNavHtml('settings')}`;
-    window.bindBottomNav();
-  }
-
-  const openAdv = document.getElementById('btn-open-advanced');
-  if (openAdv) openAdv.onclick = () => { window.State.settingsPage = 'advanced'; renderSettings({ resetScroll: true, dir: 'forward' }); };
-  const advBack = document.getElementById('btn-adv-back');
-  if (advBack) advBack.onclick = () => { window.State.settingsPage = 'main'; renderSettings({ resetScroll: true, dir: 'back' }); };
-
-  const copyLinkBtn = document.getElementById('btn-copy-app-link');
-  if (copyLinkBtn) {
-    copyLinkBtn.onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(appUrl);
-        window.toast('App link copied to clipboard! 📋');
-      } catch (e) {
-        const ta = document.createElement('textarea');
-        ta.value = appUrl;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        window.toast('App link copied to clipboard! 📋');
-      }
-    };
-  }
-
-  const voiceBtn = document.getElementById('btn-open-voice-settings-main');
-  if (voiceBtn) {
-    voiceBtn.onclick = () => {
-      if (typeof window.openVoiceSettingsModal === 'function') {
-        window.openVoiceSettingsModal();
-      }
-    };
-  }
 
   const installBtn = document.getElementById('btn-install-pwa-settings');
   if (installBtn) {
@@ -900,16 +855,45 @@ export async function renderSettings(opts = {}){
     inp.click();
   };
 
-  if (opts.resetScroll) {
-    const vEl = getViewScrollEl();
-    if (vEl) vEl.scrollTop = 0;
-    window.scrollTo(0, 0);
-  } else if (prevScroll > 0) {
-    requestAnimationFrame(() => {
+    if (opts.resetScroll) {
       const vEl = getViewScrollEl();
-      if (vEl) vEl.scrollTop = prevScroll;
-    });
+      if (vEl) vEl.scrollTop = 0;
+      window.scrollTo(0, 0);
+    } else if (prevScroll > 0) {
+      requestAnimationFrame(() => {
+        const vEl = getViewScrollEl();
+        if (vEl) vEl.scrollTop = prevScroll;
+      });
+    }
+  };
+
+  if (existingShell && opts.inPlace !== false) {
+    const hdr = document.getElementById('settings-header-slot');
+    const oldBody = document.getElementById('settings-page-body');
+    if (hdr && oldBody) {
+      if (opts.resetScroll) existingShell.scrollTop = 0;
+      hdr.innerHTML = headerHtml;
+      oldBody.outerHTML = bodyHtml;
+      window.syncBottomNav && window.syncBottomNav('settings');
+      bindSettingsEvents();
+      return;
+    }
   }
+
+  const dir = typeof window.consumeOuterDir === 'function' ? window.consumeOuterDir() : '';
+  const html = `
+  <div class="view" data-settings-shell="1" style="padding:0 0 100px;">
+    <div id="settings-header-slot" style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
+      ${headerHtml}
+    </div>
+    ${bodyHtml}
+  </div>`;
+
+  await window.mountOuterView('settings', html, {
+    dir,
+    token: tok,
+    afterMount: bindSettingsEvents
+  });
 }
 
 export function themeBtn(key,iconName,label){
@@ -943,7 +927,7 @@ export function optRow(key,label,sub,on){
    REVIEW TAB (FSRS flashcard deck)
    ============================================================ */
 function getViewScrollEl() {
-  return document.querySelector('.view') || document.documentElement;
+  return document.querySelector('.view:not([data-leaving="1"])') || document.documentElement;
 }
 
 export async function renderReviewView(preserveScroll = true){
@@ -956,10 +940,10 @@ export async function renderReviewView(preserveScroll = true){
   const now = Date.now();
   const due = all.filter(c=>!c.due || c.due<=now);
   const revised = all.filter(c=>c.reps>0).sort((a,b)=>(a.due||0)-(b.due||0));
-  const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
+  const dir = typeof window.consumeOuterDir === 'function' ? window.consumeOuterDir() : '';
 
-  document.getElementById('app').innerHTML = `
-  <div class="view fade-in" style="padding:0 0 100px;">
+  const html = `
+  <div class="view" style="padding:0 0 100px;">
     <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:18px;">
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:12px;">
@@ -981,7 +965,7 @@ export async function renderReviewView(preserveScroll = true){
       </div>
     </div>
 
-    <div class="outer-stage-body${tabDirCls}" style="padding:0 20px;">
+    <div style="padding:0 20px;">
 
     ${due.length? `
       <button class="btn btn-primary" id="start-review" style="width:100%; padding:15px; margin-bottom:24px; font-size:15px;">${window.icon('cards','icon icon-sm')} Study ${due.length} due card${due.length===1?'':'s'}</button>
@@ -1000,42 +984,50 @@ export async function renderReviewView(preserveScroll = true){
       </div>`).join('')}
     `:''}
     </div>
-  </div>
-  ${window.bottomNavHtml('review')}`;
-  window.bindBottomNav();
+  </div>`;
 
-  const startBtn = document.getElementById('start-review');
-  if(startBtn) startBtn.onclick = ()=>openReviewSession(due);
-  const practiceBtn = document.getElementById('practice-revised');
-  if(practiceBtn) practiceBtn.onclick = ()=>openReviewSession(revised.slice(), true);
-  document.querySelectorAll('.del-card').forEach(btn=>{
-    btn.onclick = async (e)=>{
-      e.stopPropagation();
-      const row = btn.closest('.revise-one');
-      await window.DB.del('flashcards', btn.dataset.id);
-      window.toast('Card deleted');
-      if (row && !document.documentElement.classList.contains('lite-motion')) {
-        row.classList.add('outer-item-out');
-        setTimeout(() => renderReviewView(true), 180);
-      } else {
-        renderReviewView(true);
+  await window.mountOuterView('review', html, {
+    dir,
+    token: tok,
+    afterMount() {
+      const startBtn = document.getElementById('start-review');
+      if(startBtn) startBtn.onclick = ()=>openReviewSession(due);
+      const practiceBtn = document.getElementById('practice-revised');
+      if(practiceBtn) practiceBtn.onclick = ()=>openReviewSession(revised.slice(), true);
+      document.querySelectorAll('.del-card').forEach(btn=>{
+        btn.onclick = async (e)=>{
+          e.stopPropagation();
+          const row = btn.closest('.revise-one');
+          await window.DB.del('flashcards', btn.dataset.id);
+          window.toast('Card deleted');
+          if (row && !document.documentElement.classList.contains('lite-motion')) {
+            row.classList.add('outer-item-out');
+            setTimeout(() => renderReviewView(true), 180);
+          } else {
+            renderReviewView(true);
+          }
+        };
+      });
+      document.querySelectorAll('.revise-one').forEach(el=>{
+        el.onclick = (e)=>{
+          if(e.target.closest('.del-card')) return;
+          const card = revised.find(c=>c.id===el.dataset.id);
+          if(card) openReviewSession([card], true);
+        };
+      });
+
+      if (prevScroll > 0) {
+        const el = getViewScrollEl();
+        if (el) {
+          el.scrollTop = prevScroll;
+          requestAnimationFrame(() => {
+            const e = getViewScrollEl();
+            if (e) e.scrollTop = prevScroll;
+          });
+        }
       }
-    };
+    }
   });
-  document.querySelectorAll('.revise-one').forEach(el=>{
-    el.onclick = (e)=>{
-      if(e.target.closest('.del-card')) return;
-      const card = revised.find(c=>c.id===el.dataset.id);
-      if(card) openReviewSession([card], true);
-    };
-  });
-
-  if (prevScroll > 0) {
-    requestAnimationFrame(() => {
-      const el = getViewScrollEl();
-      if (el) el.scrollTop = prevScroll;
-    });
-  }
 }
 
 export function openReviewSession(queue, practiceMode){
@@ -1067,7 +1059,7 @@ export function openReviewSession(queue, practiceMode){
         <div style="font-size:11.5px; color:var(--text-faint);">
           ${practiceMode? 'Practice · ':''}Card ${idx+1} of ${total}
         </div>
-        <button class="icon-btn" id="review-del-card" title="Delete this card" style="width:28px; height:28px; color:var(--text-faint);">${window.icon('trash','icon icon-sm')}</button>
+        <button class="icon-btn review-del-card-btn" title="Delete this card" style="width:28px; height:28px; color:var(--text-faint);">${window.icon('trash','icon icon-sm')}</button>
       </div>
       <div id="flip-card" style="min-height:160px; background:var(--surface-2); border:1px solid var(--border); border-radius:4px; padding:22px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:16px; line-height:1.5; margin-bottom:16px; cursor:pointer;">
         ${window.escapeHtml(showBack? card.back : card.front)}
@@ -1080,17 +1072,18 @@ export function openReviewSession(queue, practiceMode){
           <button class="btn grade-btn" data-grade="4" style="flex-direction:column; height:56px; background:var(--surface-2); color:var(--accent); font-size:11.5px; gap:2px;">Easy</button>
         </div>
       `: `<div style="text-align:center; font-size:12.5px; color:var(--text-faint);">Tap the card to reveal the answer</div>`}
-      <div style="text-align:center; margin-top:12px;"><button class="btn" id="review-del-card" style="width:auto; height:auto; padding:5px 12px; background:transparent; color:var(--text-faint); font-size:11.5px;">${window.icon('trash','icon icon-sm')} Delete this card</button></div>
+      <div style="text-align:center; margin-top:12px;"><button class="btn review-del-card-btn" style="width:auto; height:auto; padding:5px 12px; background:transparent; color:var(--text-faint); font-size:11.5px;">${window.icon('trash','icon icon-sm')} Delete this card</button></div>
     `;
   }
   function bindDeleteBtn(card){
-    const delBtn = document.getElementById('review-del-card');
-    if(delBtn) delBtn.onclick = async ()=>{
-      await window.DB.del('flashcards', card.id);
-      queue.splice(i, 1);
-      window.toast('Card deleted');
-      draw();
-    };
+    document.querySelectorAll('.review-del-card-btn').forEach(delBtn => {
+      delBtn.onclick = async ()=>{
+        await window.DB.del('flashcards', card.id);
+        queue.splice(i, 1);
+        window.toast('Card deleted');
+        draw();
+      };
+    });
   }
   function bindCardEvents(card){
     bindDeleteBtn(card);
@@ -1166,7 +1159,7 @@ export async function renderBookmarksView(preserveScroll = true){
         return `<div class="card" style="padding:14px; margin-bottom:12px;">
           <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
             <div style="width:40px; height:52px; border-radius:4px; overflow:hidden; flex-shrink:0; background:var(--surface-2);">
-              ${f.thumb? `<img src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">`:''}
+              ${f.thumb? `<img src="${f.thumb}" decoding="async" style="width:100%; height:100%; object-fit:cover;">`:''}
             </div>
             <div style="flex:1; min-width:0;">
               <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${window.escapeHtml(f.name)}</div>
@@ -1185,7 +1178,7 @@ export async function renderBookmarksView(preserveScroll = true){
       if(!f) return '';
       return `<div class="card bm-jump" data-file="${b.fileId}" data-page="${b.page}" style="display:flex; align-items:center; gap:12px; padding:12px; margin-bottom:10px; cursor:pointer;">
         <div style="width:40px; height:52px; border-radius:4px; overflow:hidden; flex-shrink:0; background:var(--surface-2);">
-          ${f.thumb? `<img src="${f.thumb}" style="width:100%; height:100%; object-fit:cover;">`:''}
+          ${f.thumb? `<img src="${f.thumb}" decoding="async" style="width:100%; height:100%; object-fit:cover;">`:''}
         </div>
         <div style="flex:1; min-width:0;">
           <div style="font-size:13.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${window.escapeHtml(f.name)}</div>
@@ -1197,10 +1190,10 @@ export async function renderBookmarksView(preserveScroll = true){
   };
 
   const categories = [...new Set(bms.map(b=>b.category).filter(Boolean))].sort();
-  const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
+  const dir = typeof window.consumeOuterDir === 'function' ? window.consumeOuterDir() : '';
 
-  document.getElementById('app').innerHTML = `
-  <div class="view fade-in" style="padding:0 0 100px;">
+  const html = `
+  <div class="view" style="padding:0 0 100px;">
     <div style="position:sticky; top:0; z-index:10; background:var(--bg); padding:16px 20px 12px; border-bottom:1px solid var(--border); margin-bottom:16px;">
       <div style="display:flex; align-items:center; justify-content:space-between;">
         <div style="display:flex; align-items:center; gap:12px;">
@@ -1220,13 +1213,11 @@ export async function renderBookmarksView(preserveScroll = true){
         </div>
       </div>
     </div>
-    <div class="outer-stage-body${tabDirCls}" style="padding:0 20px;">
+    <div style="padding:0 20px;">
       <div id="bm-filters-wrap">${buildFilterBarHtml(bms)}</div>
       <div id="bm-list">${buildListHtml(bms)}</div>
     </div>
-  </div>
-  ${window.bottomNavHtml('bookmarks')}`;
-  window.bindBottomNav();
+  </div>`;
 
   const updateBmCountsAndFilters = () => {
     const cats = [...new Set(bms.map(b=>b.category).filter(Boolean))].sort();
@@ -1304,19 +1295,24 @@ export async function renderBookmarksView(preserveScroll = true){
     });
   };
 
-  bindFilterChips();
-  bindListItems();
-
-  if (prevScroll > 0) {
-    const el = getViewScrollEl();
-    if (el) {
-      el.scrollTop = prevScroll;
-      requestAnimationFrame(() => {
-        const e = getViewScrollEl();
-        if (e) e.scrollTop = prevScroll;
-      });
+  await window.mountOuterView('bookmarks', html, {
+    dir,
+    token: tok,
+    afterMount() {
+      bindFilterChips();
+      bindListItems();
+      if (prevScroll > 0) {
+        const el = getViewScrollEl();
+        if (el) {
+          el.scrollTop = prevScroll;
+          requestAnimationFrame(() => {
+            const e = getViewScrollEl();
+            if (e) e.scrollTop = prevScroll;
+          });
+        }
+      }
     }
-  }
+  });
 }
 
 /* ============================================================
@@ -1553,10 +1549,10 @@ export async function renderNotesView(preserveScroll = true){
       : window.emptyState('note','No notes yet','Write notes or save AI tools, dictionary entries, and translations while reading.');
   };
 
-  const tabDirCls = typeof window.consumeOuterDirClass === 'function' ? window.consumeOuterDirClass() : '';
+  const dir = typeof window.consumeOuterDir === 'function' ? window.consumeOuterDir() : '';
 
-  document.getElementById('app').innerHTML = `
-  <div class="view fade-in">
+  const html = `
+  <div class="view">
     <div class="nt-wrap">
       <div class="nt-head">
         <div class="nt-head-top">
@@ -1574,29 +1570,9 @@ export async function renderNotesView(preserveScroll = true){
           ${filterTabs.map(t => `<div class="chip note-filter ${currentFilter === t.key ? 'active' : ''}" data-filter="${t.key}">${window.escapeHtml(t.label)}</div>`).join('')}
         </div>` : ''}
       </div>
-      <div id="notes-sections" class="outer-stage-body${tabDirCls}">${buildSectionsHtml(currentFilter)}</div>
+      <div id="notes-sections">${buildSectionsHtml(currentFilter)}</div>
     </div>
-  </div>
-  ${window.bottomNavHtml('notes')}`;
-  window.bindBottomNav();
-
-  const expBtn = document.getElementById('notes-export');
-  if (expBtn) expBtn.onclick = () => {
-    const groups = {};
-    for (const n of notes) { const f = fileMap[n.fileId]; const k = f ? f.name : 'General'; (groups[k] ||= []).push(n); }
-    let md = '# My Study Notes\n\n_Exported from S.A.Y.A.D. on ' + new Date().toLocaleDateString() + '_\n';
-    for (const [book, list] of Object.entries(groups)) {
-      md += `\n## ${book}\n`;
-      for (const n of list.sort((a, b) => (a.page || 0) - (b.page || 0))) {
-        const info = getNoteCategoryInfo(n.kind);
-        md += `\n### ${info.label} · page ${n.page || '-'}\n${(n.content || n.text || '').trim()}\n`;
-      }
-    }
-    const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
-    const a = document.createElement('a'); a.href = url; a.download = 'sayad-notes.md'; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
-    window.toast('Notes exported');
-  };
+  </div>`;
 
   const noteById = Object.fromEntries(notes.map(n => [String(n.id), n]));
   const bindNoteCards = () => {
@@ -1615,35 +1591,60 @@ export async function renderNotesView(preserveScroll = true){
       });
     });
   };
-  bindNoteCards();
 
-  document.querySelectorAll('.note-filter').forEach(el => {
-    el.onclick = () => {
-      const next = el.dataset.filter;
-      if ((window.State.notesFilter || 'all') === next) return;
-      window.State.notesFilter = next;
-      document.querySelectorAll('.note-filter').forEach(c => c.classList.toggle('active', c.dataset.filter === next));
-      const secWrap = document.getElementById('notes-sections');
-      if (secWrap) {
-        secWrap.innerHTML = buildSectionsHtml(next);
-        secWrap.classList.remove('outer-stage-body', 'outer-dir-fwd', 'outer-dir-back', 'outer-dir-in', 'outer-list-swap');
-        void secWrap.offsetWidth;
-        secWrap.classList.add('outer-list-swap');
-        bindNoteCards();
-      }
-    };
-  });
+  await window.mountOuterView('notes', html, {
+    dir,
+    token: tok,
+    afterMount() {
+      const expBtn = document.getElementById('notes-export');
+      if (expBtn) expBtn.onclick = () => {
+        const groups = {};
+        for (const n of notes) { const f = fileMap[n.fileId]; const k = f ? f.name : 'General'; (groups[k] ||= []).push(n); }
+        let md = '# My Study Notes\n\n_Exported from S.A.Y.A.D. on ' + new Date().toLocaleDateString() + '_\n';
+        for (const [book, list] of Object.entries(groups)) {
+          md += `\n## ${book}\n`;
+          for (const n of list.sort((a, b) => (a.page || 0) - (b.page || 0))) {
+            const info = getNoteCategoryInfo(n.kind);
+            md += `\n### ${info.label} · page ${n.page || '-'}\n${(n.content || n.text || '').trim()}\n`;
+          }
+        }
+        const url = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
+        const a = document.createElement('a'); a.href = url; a.download = 'sayad-notes.md'; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+        window.toast('Notes exported');
+      };
 
-  if (prevScroll > 0) {
-    const el = getViewScrollEl();
-    if (el) {
-      el.scrollTop = prevScroll;
-      requestAnimationFrame(() => {
-        const e = getViewScrollEl();
-        if (e) e.scrollTop = prevScroll;
+      bindNoteCards();
+
+      document.querySelectorAll('.note-filter').forEach(el => {
+        el.onclick = () => {
+          const next = el.dataset.filter;
+          if ((window.State.notesFilter || 'all') === next) return;
+          window.State.notesFilter = next;
+          document.querySelectorAll('.note-filter').forEach(c => c.classList.toggle('active', c.dataset.filter === next));
+          const secWrap = document.getElementById('notes-sections');
+          if (secWrap) {
+            secWrap.innerHTML = buildSectionsHtml(next);
+            secWrap.classList.remove('outer-list-swap');
+            void secWrap.offsetWidth;
+            secWrap.classList.add('outer-list-swap');
+            bindNoteCards();
+          }
+        };
       });
+
+      if (prevScroll > 0) {
+        const el = getViewScrollEl();
+        if (el) {
+          el.scrollTop = prevScroll;
+          requestAnimationFrame(() => {
+            const e = getViewScrollEl();
+            if (e) e.scrollTop = prevScroll;
+          });
+        }
+      }
     }
-  }
+  });
 }
 
 export function openNoteDetail(note, file){

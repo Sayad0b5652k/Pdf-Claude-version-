@@ -1015,12 +1015,21 @@ export async function stopReadingSession() {
     clearInterval(readerTicker);
     readerTicker = null;
   }
+  let flushPromise = null;
   if (currentSessionSecs > 0) {
-    await flushCurrentReadingTime();
+    flushPromise = flushCurrentReadingTime().finally(() => {
+      if (window._statsFlushPromise === flushPromise) {
+        window._statsFlushPromise = null;
+      }
+    });
+    window._statsFlushPromise = flushPromise;
   }
   activeSessionStart = null;
   currentSessionSecs = 0;
   hasRecordedCurrentSession = false;
+  if (flushPromise) {
+    await flushPromise;
+  }
 }
 
 async function flushCurrentReadingTime() {
