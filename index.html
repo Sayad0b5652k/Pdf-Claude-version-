@@ -61,9 +61,12 @@
           }).catch(function(){});
         } else {
           if ('caches' in window && navigator.onLine !== false) {
+            // Drop only foreign/legacy caches. The app's own "sayad-*" cache belongs to sw.js (its activate step
+            // removes older versions), so bumping CACHE_NAME there never needs a matching edit here. A hard-coded
+            // name used to go stale and this loop then wiped the live offline cache on every online load.
             caches.keys().then(function(keys) {
               keys.forEach(function(k) {
-                if (k !== 'sayad-v43-sharp-zoom-ocr') caches.delete(k);
+                if (!/^sayad-/.test(k)) caches.delete(k);
               });
             }).catch(function(){});
           }

@@ -1,5 +1,7 @@
 // S.A.Y.A.D. Service Worker for Offline Study & Native WebAPK Minting
-const CACHE_NAME = 'sayad-v44-lean-assets';
+// Bump this whenever PRECACHE_URLS changes. Keep the "sayad-" prefix: index.html leaves every "sayad-*" cache alone
+// and this file's activate step deletes the older versions, so there is no second place to update.
+const CACHE_NAME = 'sayad-v45-offline-fix';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
