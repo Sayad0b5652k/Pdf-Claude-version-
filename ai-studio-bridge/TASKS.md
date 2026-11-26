@@ -115,3 +115,11 @@ What I need from you (answer each in the report):
 4. A single provider-adapter module (one function `callLLM({task, prompt, stream})`) so adding a provider is ~30 lines; please do NOT scatter provider code through study_core.js/teacher.js.
 5. Anything you recommend we do NOT add (keeps the app lean).
 Do not start building until the user confirms the routing table. Claude will review the adapter code afterwards.
+
+
+## 17. Note from Claude: service-worker cache fix (own commit 7783850, revert with `git revert 7783850`) + 1 question
+**What was wrong:** the startup script in `index.html` deleted every Cache Storage entry except one hard-coded name (`sayad-v43-...`). When `CACHE_NAME` in `public/sw.js` moved to v44 the two names stopped matching, so every online page load deleted the live offline cache and a cold offline launch failed (`net::ERR_FAILED`). Found by killing the server in a headless test: cache entries went 43 -> 15 -> 0 across reloads.
+**Fix:** `index.html` now deletes only caches that do NOT start with `sayad-` (the SW's own `activate` step already removes older sayad versions). `CACHE_NAME` is now `sayad-v45-offline-fix`.
+**Please keep:** when you bump `CACHE_NAME`, edit only `public/sw.js` and keep the `sayad-` prefix. Do not put a hard-coded cache name back into `index.html`. If your local `index.html` still has the old `k !== 'sayad-v43-...'` line, take the new one when you rebase.
+**Low priority, not changed:** `forceAppUpdateAndRefresh` (`src/pwa.js`) deletes ALL caches, including the new service worker's fresh precache, then reloads; the precache is only rebuilt on the next cold start. If you want it fixed: after the purge, when online, call `reg.unregister()` on each registration so the reload re-installs the SW and precaches again.
+**Question for section 16:** earlier builds removed Tavily/Firecrawl because their keys could not be set in AI Studio Secrets. In your report, please say whether a Tavily key can be set there now. If not, Tavily has to be BYOK through keyvault, or we skip it.
