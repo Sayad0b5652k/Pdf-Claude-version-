@@ -675,6 +675,8 @@ export function initHardwareBackNavigation() {
 
     // Priority 0.5: Full Classroom Stage active -> Save & exit cleanly back to Reader
     if (typeof window.isClassroomOpen === 'function' && window.isClassroomOpen()) {
+      // Back with a drawer (subtitles / boards / doubt / menu) open only closes the drawer, the lesson keeps going.
+      if (window.closeClassroomDrawer?.()) { pushAppScreen(window.State?.view || 'reader'); return; }
       window.closeFullClassroom?.();
       pushAppScreen(window.State?.view || 'reader');
       return;

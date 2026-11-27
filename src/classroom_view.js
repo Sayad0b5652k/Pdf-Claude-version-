@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { ClassroomBoard } from './classroom_board.js';
-import { LessonEngine, loadSavedLesson } from './lesson_engine.js';
+import { LessonEngine, friendlyLessonError, loadSavedLesson } from './lesson_engine.js';
 import { extractNumberedSentences } from './lesson_grounding.js';
 
 let activeClassroom = null;
@@ -31,6 +31,7 @@ export function isClassroomOpen() {
 }
 
 export function closeFullClassroom() {
+  openSeq++; // cancels any open that is still preparing
   if (!activeClassroom) {
     const stray = document.getElementById('classroom-stage');
     if (stray) stray.remove();
@@ -55,12 +56,25 @@ export function closeFullClassroom() {
   }
 }
 
+let openSeq = 0;
+
+/** Closes an open drawer (Back button / outside tap). Returns true when it closed one. */
+export function closeClassroomDrawer() {
+  const st = activeClassroom;
+  if (!st || !st.activeDrawer) return false;
+  const wasDoubt = st.activeDrawer === 'doubt';
+  closeDrawer(st);
+  if (wasDoubt) st.engine?.resume();
+  return true;
+}
+
 export async function openFullClassroom({
   selectedText = '',
   pageNum = null,
   topicFocus = '',
   resumeData = null,
 } = {}) {
+  const mySeq = ++openSeq;
   const file = window.State?.currentFile;
   const doc = window.State?.currentDoc;
   if (!file && !resumeData) {
@@ -76,6 +90,7 @@ export async function openFullClassroom({
   }
 
   closeFullClassroom();
+  openSeq = mySeq; // closeFullClassroom() bumped it; this open is still the current one
   if (typeof window.leaveOuterShell === 'function') window.leaveOuterShell('classroom');
   acquireClassroomWakeLock();
 
@@ -108,6 +123,8 @@ export async function openFullClassroom({
 
   const savedFromDb = (!selectedText && !resumeData) ? await loadSavedLesson(fileId, targetPage) : null;
   const initialSource = resumeData || savedFromDb;
+  // A newer open (or an exit) happened while we were reading the page: do not build a second stage.
+  if (mySeq !== openSeq) return;
 
   const stage = document.createElement('div');
   stage.id = 'classroom-stage';
@@ -337,13 +354,15 @@ function renderClassroomStepper(state) {
     const isDone = state.engine.completedSteps?.has(i);
     const isGenerating = !ready && genIdx !== null && i === genIdx;
     const canQueue = !ready && genIdx !== null;
-    const lbl = isGenerating ? `${i + 1}…` : `${i + 1}`;
-    html += `<button type="button" class="cr-step-tab ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isGenerating ? 'is-generating' : ''}" data-step="${i}" ${ready || canQueue ? '' : 'disabled'}>${lbl}</button>`;
+    const failed = !ready && state.engine.chunkFailed && i === state.engine.steps.length;
+    const lbl = failed ? `${i + 1} ↻` : isGenerating ? `${i + 1}…` : `${i + 1}`;
+    html += `<button type="button" class="cr-step-tab ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isGenerating ? 'is-generating' : ''}" data-step="${i}" data-failed="${failed ? 1 : 0}" ${ready || canQueue || failed ? '' : 'disabled'}>${lbl}</button>`;
   }
   stepper.innerHTML = html;
   stepper.querySelectorAll('.cr-step-tab').forEach((btn) => {
     btn.onclick = () => {
       const idx = Number(btn.dataset.step);
+      if (btn.dataset.failed === '1') { window.toast?.('Trying again…'); state.engine?.retryChunks(); return; }
       state.engine?.goToStep(idx);
     };
   });
@@ -377,10 +396,46 @@ function updateClassroomUI(state, status, errMsg) {
     updateClassroomStepHeader(state, state.engine.activeStep, state.engine.currentStepIndex);
   }
 
-  if (status === 'error' && errMsg) {
+  const hasSteps = (state.engine?.steps?.length || 0) > 0;
+  if (status === 'error' && !hasSteps) showClassroomError(state, errMsg);
+  else hideClassroomError();
+  if (status === 'error' && hasSteps && errMsg) {
     const sub = document.getElementById('cr-subtitle-text');
-    if (sub) sub.textContent = `Notice: ${errMsg}`;
+    if (sub) sub.textContent = friendlyLessonError(errMsg);
   }
+}
+
+function hideClassroomError() {
+  const el = document.getElementById('cr-error-card');
+  if (el) el.remove();
+}
+
+function showClassroomError(state, errMsg) {
+  const wrap = state.stage?.querySelector('.cr-stage-wrap');
+  if (!wrap) return;
+  hideClassroomError();
+  const sub = document.getElementById('cr-step-sub');
+  if (sub) sub.textContent = `Page ${state.pageNum} · Lesson not ready`;
+  const subText = document.getElementById('cr-subtitle-text');
+  if (subText) subText.textContent = '';
+  const card = document.createElement('div');
+  card.id = 'cr-error-card';
+  card.className = 'cr-error-card';
+  card.setAttribute('role', 'alert');
+  card.innerHTML = `
+    <div class="cr-error-emoji" aria-hidden="true">${window.icon ? window.icon('messageSquare', 'icon icon-lg') : ''}</div>
+    <div class="cr-error-title">Teacher couldn't start</div>
+    <div class="cr-error-msg">${esc(friendlyLessonError(errMsg))}</div>
+    <div class="cr-error-actions">
+      <button type="button" class="cr-mini-btn" id="cr-error-exit">Back to book</button>
+      <button type="button" class="cr-mini-btn cr-mini-accent" id="cr-error-retry">Try again</button>
+    </div>`;
+  wrap.appendChild(card);
+  card.querySelector('#cr-error-exit').onclick = () => closeFullClassroom();
+  card.querySelector('#cr-error-retry').onclick = () => {
+    hideClassroomError();
+    state.engine.generateAndStart({ topicFocus: state.engine._topicFocus, selectedText: state.engine._selectedText, autoPlay: true });
+  };
 }
 
 function renderCheckQuestionToast(state, step) {
@@ -870,5 +925,6 @@ function bindClassroomEvents(state, selectedText, topicFocus) {
 }
 
 window.openFullClassroom = openFullClassroom;
+window.closeClassroomDrawer = closeClassroomDrawer;
 window.closeFullClassroom = closeFullClassroom;
 window.isClassroomOpen = isClassroomOpen;

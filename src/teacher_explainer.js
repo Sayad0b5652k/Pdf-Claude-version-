@@ -5,7 +5,7 @@ import {
   paintExplainerSourceHighlight,
   clearExplainerSourceHighlights,
 } from './lesson_grounding.js';
-import { LessonEngine, loadSavedLesson, buildWordsForSubtitles } from './lesson_engine.js';
+import { LessonEngine, friendlyLessonError, loadSavedLesson, buildWordsForSubtitles } from './lesson_engine.js';
 import { ClassroomBoard } from './classroom_board.js';
 
 let activeExplainer = null;
@@ -413,7 +413,7 @@ function updateExplainerStatusUI(state, status, errMsg) {
       body.innerHTML = `
         <div class="exp-error-box">
           <div style="font-weight:700; margin-bottom:4px;">Could not start AI Teacher</div>
-          <div style="font-size:13px; color:var(--text-dim); margin-bottom:12px;">${esc(errMsg)}</div>
+          <div style="font-size:13px; color:var(--text-dim); margin-bottom:12px;">${esc(friendlyLessonError(errMsg))}</div>
           <button type="button" id="exp-retry-btn" class="btn btn-primary" style="padding:10px 16px;">Try Again</button>
         </div>
       `;

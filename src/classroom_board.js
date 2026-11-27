@@ -504,11 +504,70 @@ function enrichStepBoardCues(rawCues = [], step = null) {
   return out;
 }
 
+
+const COL_GUTTER = 28; // gap between the two board columns on wide (landscape / tablet / desktop) screens
+
+/**
+ * Makes the stacked board use the whole screen.
+ *  - wide screens: cues continue in a second column (the board is two 640-wide pages side by side)
+ *  - any screen: when the content is shorter than the screen, the gaps between rows grow so the board fills it
+ * Only positions change; every cue renderer keeps working in its own 640-wide space.
+ */
+function arrangeForScreen(cues, contentH, topPad, { cols = 1, minH = 0 } = {}) {
+  const placed = cues.filter((c) => c._layoutY !== undefined);
+  const shiftY = (c, dy) => {
+    if (!dy) return;
+    c._layoutY += dy;
+    if (c._axesBox) c._axesBox = { ...c._axesBox, y: c._axesBox.y + dy };
+  };
+  const bottomOf = (c) => c._layoutY + (c._layoutH || (c._layoutR ? c._layoutR * 2 : 40));
+
+  let col2Start = -1;
+  if (cols === 2 && placed.length >= 3) {
+    const target = topPad + (contentH - topPad) / 2;
+    let best = Infinity;
+    for (let i = 1; i < placed.length; i++) {
+      const c = placed[i], prev = placed[i - 1];
+      if (c._layoutY <= prev._layoutY + 2) continue; // same row as the previous cue (side-by-side boxes)
+      if (c._layoutX !== undefined && c._layoutX > MARGIN_X + 1) continue;
+      const d = Math.abs(c._layoutY - target);
+      if (d < best) { best = d; col2Start = i; }
+    }
+  }
+
+  const columns = [placed];
+  if (col2Start > 0) {
+    const second = placed.slice(col2Start);
+    const dy = second[0]._layoutY - topPad;
+    columns[0] = placed.slice(0, col2Start);
+    for (const c of second) { shiftY(c, -dy); c._colDx = LOGICAL_W + COL_GUTTER; }
+    columns.push(second);
+  }
+
+  let maxBottom = topPad;
+  for (const col of columns) {
+    // group cues that sit on the same row so side-by-side items move together
+    const rows = [];
+    for (const c of col) {
+      const last = rows[rows.length - 1];
+      if (last && Math.abs(last.y - c._layoutY) <= 2) last.items.push(c);
+      else rows.push({ y: c._layoutY, items: [c] });
+    }
+    const colBottom = Math.max(topPad, ...col.map(bottomOf));
+    if (minH > 0 && rows.length >= 2 && colBottom + 36 < minH) {
+      const gap = Math.min(86, (minH - 36 - colBottom) / (rows.length - 1));
+      rows.forEach((r, k) => r.items.forEach((c) => shiftY(c, gap * k)));
+    }
+    maxBottom = Math.max(maxBottom, ...col.map(bottomOf));
+  }
+  return Math.ceil(maxBottom + 42);
+}
+
 /**
  * Vertical Flow-Stack Layout Engine:
  * Measures exact dynamic height of EVERY cue and assigns guaranteed non-overlapping _layoutY & _layoutH.
  */
-function layoutBoardCues(rawCues = [], topPad = 30) {
+function layoutBoardCues(rawCues = [], topPad = 30, screen = {}) {
   const clean = (Array.isArray(rawCues) ? rawCues : []).filter(
     (c) => c && String(c.type || '').toLowerCase() !== 'imagebackdrop'
   );
@@ -869,7 +928,8 @@ function layoutBoardCues(rawCues = [], topPad = 30) {
     out.push(cue);
   }
 
-  return { cues: out, contentH: Math.max(LOGICAL_H, Math.ceil(cursorY + 42)) };
+  const arranged = arrangeForScreen(out, Math.ceil(cursorY + 42), topPad, screen);
+  return { cues: out, contentH: Math.max(LOGICAL_H, arranged) };
 }
 
 /**
@@ -1915,6 +1975,8 @@ export class ClassroomBoard {
     this._drawingStroke = null;
     this._tracks = [];
     this._ro = null;
+    this.cols = 1;
+    this.viewW = LOGICAL_W;
     this.onChange = null;
     this.onBoardTap = typeof opts.onBoardTap === 'function' ? opts.onBoardTap : null;
     this.onZoomChange = typeof opts.onZoomChange === 'function' ? opts.onZoomChange : null;
@@ -1994,7 +2056,10 @@ export class ClassroomBoard {
     this.gridDot = dot;
 
     if (typeof ResizeObserver !== 'undefined') {
-      this._ro = new ResizeObserver(() => this._layoutScrollStage());
+      this._ro = new ResizeObserver(() => {
+        if (this._desiredCols() !== this.cols) this._rebuildScene();
+        else this._layoutScrollStage();
+      });
       this._ro.observe(this.host);
     }
   }
@@ -2013,6 +2078,13 @@ export class ClassroomBoard {
     }
   }
 
+  /** Wide screens (landscape phone, tablet, desktop) get two board columns so the whole screen is used. */
+  _desiredCols() {
+    if (this.compact || !this.host) return 1;
+    const w = this.host.clientWidth || 0, h = this.host.clientHeight || 0;
+    return (w >= 640 && h > 0 && w / h >= 1.25) ? 2 : 1;
+  }
+
   _layoutScrollStage() {
     if (!this.scrollStage || !this.host || !this.svg) return;
     const hostW = Math.max(220, this.host.clientWidth || 340);
@@ -2029,14 +2101,14 @@ export class ClassroomBoard {
     }
 
     const z = this.state.zoom || 1;
-    // Expand viewBox height to match portrait/landscape screen aspect so dot-grid fills 100% of screen
-    // while keeping content anchored right at topPad (`68px` below toolbar)!
-    const minViewLogicalH = Math.round(LOGICAL_W * (hostH / hostW));
+    const VW = this.viewW || LOGICAL_W;
+    // Expand viewBox height to match the screen aspect so the dot-grid fills 100% of the screen.
+    const minViewLogicalH = Math.round(VW * (hostH / hostW));
     this.renderH = Math.max(this.logicalH, minViewLogicalH);
-    this.svg.setAttribute('viewBox', `0 0 ${LOGICAL_W} ${this.renderH}`);
-    if (this.bgRect) this.bgRect.setAttribute('height', String(this.renderH));
+    this.svg.setAttribute('viewBox', `0 0 ${VW} ${this.renderH}`);
+    if (this.bgRect) { this.bgRect.setAttribute('height', String(this.renderH)); this.bgRect.setAttribute('width', String(VW)); }
 
-    const stageNaturalH = Math.round(hostW * (this.renderH / LOGICAL_W));
+    const stageNaturalH = Math.round(hostW * (this.renderH / VW));
     const stageH = Math.max(hostH + 24, stageNaturalH);
     this.scrollStage.style.width = `${Math.round(hostW * z)}px`;
     this.scrollStage.style.height = `${Math.round(stageH * z)}px`;
@@ -2061,28 +2133,44 @@ export class ClassroomBoard {
     this._tracks = [];
 
     const page = this.state.pages[this.state.activePageIndex] || { cues: [], userStrokes: [] };
-    const { cues: laidCues, contentH } = layoutBoardCues(page.cues || [], this.compact ? 24 : 68);
+    this.cols = this._desiredCols();
+    this.viewW = this.cols === 2 ? LOGICAL_W * 2 + COL_GUTTER : LOGICAL_W;
+    const hostW0 = Math.max(220, this.host?.clientWidth || 340);
+    const hostH0 = Math.max(180, this.host?.clientHeight || 220);
+    const screenMinH = this.compact ? 0 : Math.round(this.viewW * (hostH0 / hostW0)) - 26;
+    const { cues: laidCues, contentH } = layoutBoardCues(page.cues || [], this.compact ? 24 : 68, { cols: this.cols, minH: screenMinH });
     this.logicalH = contentH || LOGICAL_H;
+    if (this.bgRect) this.bgRect.setAttribute('width', String(this.viewW));
 
     const total = Math.max(1, laidCues.length);
     let bulletCounter = 0;
+    // A teacher writes in the order she speaks and spends longer on bigger items: each cue gets writing time
+    // in proportion to how much it holds, one after the other, instead of a fixed slot per cue.
+    const weights = laidCues.map((c) => {
+      let n = 0;
+      try { n = JSON.stringify({ a: c.text, b: c.title, c: c.nodes, d: c.rows, e: c.items, f: c.left, g: c.right, h: c.pairs, i: c.branches, j: c.tiers, k: c.bars }).length; } catch {}
+      return 1 + Math.min(5, n / 110);
+    });
+    const totalW = weights.reduce((x, y) => x + y, 0) || 1;
+    let cumW = 0;
 
     laidCues.forEach((cue, idx) => {
       const t = String(cue.type || '').toLowerCase();
       if (t === 'divider') bulletCounter = 0;
       if (t === 'bullet') bulletCounter++;
 
-      const autoStart = (idx / total) * 0.82;
-      const cueProg = cue.atProgress !== undefined && idx < 4 ? Number(cue.atProgress) : autoStart;
-      const startP = cue._immediate ? 0 : Math.max(0, Math.min(0.88, Math.max(autoStart * 0.65, cueProg)));
-      const endP = cue._immediate ? 0.001 : Math.min(1, startP + Math.max(0.14, 0.72 / Math.min(total, 5)));
+      const startP = cue._immediate ? 0 : Math.min(0.9, (cumW / totalW) * 0.88);
+      const endP = cue._immediate ? 0.001 : Math.min(1, startP + Math.max(0.08, (weights[idx] / totalW) * 0.9));
+      cumW += weights[idx];
 
       const cg = buildCueElements(this.rc, this.dynamicDefs, cue, pal, theme, bulletCounter);
+      if (cue._colDx) cg.setAttribute('transform', `translate(${cue._colDx},0)`);
       this.cuesGroup.appendChild(cg);
 
       const tracks = cue._immediate
         ? collectAnimationTracks(this.dynamicDefs, cg, 0, 0.001, `c${idx}`)
         : collectAnimationTracks(this.dynamicDefs, cg, startP, endP, `c${idx}`);
+      if (cue._colDx) tracks.forEach((tr) => { tr.dx = cue._colDx; });
       this._tracks.push(...tracks);
     });
 
@@ -2124,14 +2212,14 @@ export class ClassroomBoard {
         if (local > 0.01 && local < 0.99 && typeof tr.el.getPointAtLength === 'function') {
           try {
             const pt = tr.el.getPointAtLength(tr.len * eased);
-            activeTip = { x: pt.x, y: pt.y };
+            activeTip = { x: pt.x + (tr.dx || 0), y: pt.y };
           } catch {}
         }
       } else if (tr.kind === 'clip') {
         const w = tr.fullW * eased;
         tr.rect.setAttribute('width', w.toFixed(1));
         if (local > 0.02 && local < 0.98) {
-          activeTip = { x: tr.tipX0 + w, y: tr.tipY };
+          activeTip = { x: tr.tipX0 + w + (tr.dx || 0), y: tr.tipY };
         }
       } else if (tr.kind === 'fade') {
         tr.el.style.opacity = `${eased}`;
@@ -2409,10 +2497,10 @@ export class ClassroomBoard {
     const theme = this.state.theme === 'whiteboard' ? 'whiteboard' : 'chalkboard';
     const pal = PALETTES[theme];
     const clone = this.svg.cloneNode(true);
-    const outW = Math.round(LOGICAL_W * 1.8);
+    const outW = Math.round((this.viewW || LOGICAL_W) * 1.8);
     const outH = Math.round((this.logicalH || LOGICAL_H) * 1.8);
     clone.setAttribute('xmlns', SVG_NS);
-    clone.setAttribute('viewBox', `0 0 ${LOGICAL_W} ${this.logicalH}`);
+    clone.setAttribute('viewBox', `0 0 ${this.viewW || LOGICAL_W} ${this.logicalH}`);
     clone.setAttribute('width', String(outW));
     clone.setAttribute('height', String(outH));
 
@@ -2488,8 +2576,9 @@ export class ClassroomBoard {
     if (!this.svg) return { x: CX, y: 310 };
     const rect = this.svg.getBoundingClientRect();
     const curH = this.renderH || this.logicalH || LOGICAL_H;
-    const baseScale = Math.min(rect.width / LOGICAL_W, rect.height / curH);
-    const drawnW = LOGICAL_W * baseScale;
+    const VW = this.viewW || LOGICAL_W;
+    const baseScale = Math.min(rect.width / VW, rect.height / curH);
+    const drawnW = VW * baseScale;
     const viewX0 = rect.left + (rect.width - drawnW) / 2;
     const viewY0 = rect.top;
 
