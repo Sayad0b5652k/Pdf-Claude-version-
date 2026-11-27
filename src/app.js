@@ -2,6 +2,7 @@
 
 import './icons.js';
 import './db.js';
+import './pdf_password.js';
 import './applock.js';
 import './ai.js';
 import './keyvault.js';

@@ -1,4 +1,6 @@
 // @ts-nocheck
+import { loadPdfWithPrompt } from './pdf_password.js';
+import { generateSmartCoverDataUrl } from './smart_cover.js';
 
 export const SAMPLE_PAGES = [
   {title:'Photosynthesis: An Overview', lines:[
@@ -99,15 +101,20 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
     throw new Error('Invalid or empty buffer provided for PDF');
   }
 
-  let doc;
-  if (typeof window.loadPdfDocumentSafely === 'function') {
-    doc = await window.loadPdfDocumentSafely(raw);
-  } else {
-    doc = await window.pdfjsLib.getDocument({ data: raw.slice(0), ...(window.PDFJS_LOAD_OPTS || {}) }).promise;
-  }
+  // Asks for the password when the PDF is protected (pdf_password.js); `locked` = it really needed one.
+  const { doc, locked } = await loadPdfWithPrompt(raw, name);
 
   let thumb = '';
-  try {
+  let coverTheme = null;
+  if (locked) {
+    // Never draw page 1 of a password-protected book into the library: use a generated cover instead.
+    coverTheme = { paletteId: 'obsidian', patternId: 'frame', textPosition: 'center', textAlign: 'center', customSubtitle: 'Password protected' };
+    try {
+      thumb = generateSmartCoverDataUrl({ title: name, subtitle: coverTheme.customSubtitle, pageCount: doc.numPages || 0, paletteId: coverTheme.paletteId, patternId: coverTheme.patternId, textPosition: coverTheme.textPosition, textAlign: coverTheme.textAlign });
+    } catch (coverErr) {
+      console.warn('Locked-book cover skipped:', coverErr);
+    }
+  } else try {
     const page1 = await doc.getPage(1);
     const vp = page1.getViewport({scale:1});
     const targetWidth = 300 * Math.min(window.devicePixelRatio || 1, 2);
@@ -146,6 +153,8 @@ export async function addBookFromBuffer(name, buf, size, extra={}){
     subject: '',
     createdAt: Date.now(),
     data: raw,
+    // Password-protected: the stored bytes stay encrypted. nativeStripped skips the S.A.Y.A.D. export-cleanup (it cannot read encrypted bytes).
+    ...(locked ? { encrypted: true, nativeStripped: true, customThumb: thumb, coverTheme } : {}),
     ...extra
   };
   if (sharedPayload && Array.isArray(sharedPayload.history)) {
@@ -185,8 +194,10 @@ export async function importFiles(fileList){
       }
     }catch(err){
       console.error(err);
-      if (err && (err.name === 'PasswordException' || /password/i.test(err.message || ''))) {
-        window.toast(`${file.name} is password protected. Remove the password and add it again.`);
+      if (err && err.name === 'PasswordCancelled') {
+        window.toast(`${file.name} skipped: password not entered`);
+      } else if (err && (err.name === 'PasswordException' || /password/i.test(err.message || ''))) {
+        window.toast(`${file.name} is password protected and could not be unlocked.`);
       } else {
         window.toast(`Couldn't import ${file.name} — file may be corrupted`);
       }

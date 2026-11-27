@@ -2,6 +2,7 @@
 
 export async function openPageTools(fid){
   if (!fid) fid = window.State && window.State.currentFile && window.State.currentFile.id; if (!fid) return;
+  if (window.refuseIfLocked && window.refuseIfLocked(fid, 'page tools')) return;
   const file = await window.DB.get('files', fid);
   if(!file) { window.toast('Book not found'); return; }
   const numPages = file.pageCount || 0;
@@ -412,7 +413,8 @@ async function deleteBookAndOrphans(fileId) {
 window.deleteBookAndOrphans = deleteBookAndOrphans;
 
 export async function openMergeBookPicker(initialFid = null) {
-  const allBooks = [...(window.State.files || [])];
+  if (initialFid && window.refuseIfLocked && window.refuseIfLocked(initialFid, 'merging')) return;
+  const allBooks = [...(window.State.files || [])].filter(f => !f.encrypted); // password-protected books cannot be merged
   if (allBooks.length < 2) {
     window.toast('Need at least 2 books in your library to merge');
     return;

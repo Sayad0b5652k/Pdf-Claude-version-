@@ -952,21 +952,44 @@ export function promptPassword(fileRec, rawBuffer){
       <div style="color:var(--accent); margin-bottom:14px; display:flex; justify-content:center;">${window.icon('lock','icon icon-lg')}</div>
       <div class="font-display" style="font-size:18px; font-weight:600; margin-bottom:6px;">Password protected</div>
       <div style="font-size:13.5px; color:var(--text-dim); margin-bottom:16px;">Enter the password to open this document.</div>
-      <input id="pdf-pass" type="password" placeholder="Password" style="width:100%; padding:12px; font-size:14.5px; margin-bottom:12px; text-align:center;">
+      <input id="pdf-pass" type="password" placeholder="Password" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" style="width:100%; padding:12px; font-size:16px; margin-bottom:6px; text-align:center;">
+      <div id="pdf-pass-msg" role="alert" style="min-height:18px; font-size:12.5px; color:#d64545; margin-bottom:8px;"></div>
       <button class="btn btn-primary" style="width:100%; padding:13px;" id="pdf-pass-go">Unlock</button>
     </div>`;
-  document.getElementById('pdf-pass-go').onclick = async ()=>{
-    const pass = document.getElementById('pdf-pass').value;
+  const input = document.getElementById('pdf-pass');
+  const goBtn = document.getElementById('pdf-pass-go');
+  const msg = document.getElementById('pdf-pass-msg');
+  let busy = false;
+  const unlock = async ()=>{
+    const pass = input.value;
+    if (busy) return;
+    if (!pass) { input.focus(); return; }
+    busy = true; goBtn.disabled = true; goBtn.textContent = 'Unlocking…'; msg.textContent = '';
     try{
       const buf = rawBuffer || (await window.DB.normalizeBuffer(fileRec.data));
       const doc = await loadPdfDocumentSafely(buf, pass);
+      // the reader was closed (or another book opened) while this was unlocking
+      if (window.State.view !== 'reader' || !window.State.currentFile || window.State.currentFile.id !== fileRec.id) { try { doc.destroy(); } catch(e){} return; }
+      // remember it for this session so every other feature (AI tools, page thumbnails...) can open the book too
+      if (typeof window.rememberPdfPassword === 'function') window.rememberPdfPassword(buf, pass);
       setCurrentDoc(doc);
       window.State.numPages = doc.numPages;
+      if (typeof applyOrientationLock === 'function') applyOrientationLock(window.State.screenOrientationMode || 'auto');
+      try { resolveAndCacheTOC(doc, fileRec.id).catch(() => {}); } catch(e) {}
       await mountReaderContent();
     }catch(e){
-      window.toast('Incorrect password or unable to unlock');
+      busy = false;
+      if (!document.body.contains(goBtn)) return;
+      goBtn.disabled = false; goBtn.textContent = 'Unlock';
+      const wrong = !e || e.name === 'PasswordException' || /password/i.test(e.message || '');
+      msg.textContent = wrong ? 'Wrong password, try again.' : 'Could not open this file.';
+      if (wrong) { try { input.parentElement.animate([{transform:'translateX(0)'},{transform:'translateX(-8px)'},{transform:'translateX(8px)'},{transform:'translateX(-4px)'},{transform:'translateX(0)'}], {duration:300}); } catch(e2){} }
+      input.select();
     }
   };
+  goBtn.onclick = unlock;
+  input.onkeydown = (e)=>{ if (e.key === 'Enter') { e.preventDefault(); unlock(); } };
+  setTimeout(()=>{ try { input.focus(); } catch(e){} }, 60);
 }
 
 export function computeFitScale(nativeVp, mode){

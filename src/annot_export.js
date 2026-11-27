@@ -174,6 +174,7 @@ function downloadBlob(blob, filename) {
 }
 
 export async function openShareAnnotatedSheet(fileId) {
+  if (window.refuseIfLocked && window.refuseIfLocked(fileId, 'exporting with highlights')) return;
   const all = await window.DB.byIndex('annotations', 'fileId', fileId);
   const nMarks = all.filter((a) => a.rects && a.rects.length).length;
   const nDraw = all.filter((a) => a.kind === 'drawing').length;
