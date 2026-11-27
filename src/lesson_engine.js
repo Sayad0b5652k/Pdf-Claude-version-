@@ -1,5 +1,17 @@
 // @ts-nocheck
 import { stopAllTTSAudio, pickMicrosoftVoiceForText } from './ai/tts_read_aloud.js';
+import { extractPageFacts, missingFactCues } from './lesson_facts.js';
+
+/** Server / network messages are for developers; the student gets one calm sentence. */
+export function friendlyLessonError(msg) {
+  const m = String(msg || '');
+  if (/quota|429|rate|limit|busy|overload/i.test(m)) return 'The AI teacher is busy right now (free limit reached). Please try again in a minute.';
+  if (/key|unavailable|503|No AI provider/i.test(m)) return 'The AI teacher is not reachable. Check your AI key in Settings, then try again.';
+  if (/Failed to fetch|network|offline|NetworkError/i.test(m)) return 'No internet connection. Connect and try again.';
+  if (/Could not generate lesson steps/i.test(m)) return 'This page has too little text to teach (maybe a scanned image page). Try another page.';
+  return 'The lesson could not be prepared this time. Please try again.';
+}
+
 
 function getCustomGeminiKey() {
   try {
@@ -211,6 +223,15 @@ export class LessonEngine {
     }
   }
 
+  /** Manual retry after a chunk failed (tap on the failed concept tab). */
+  retryChunks() {
+    this.chunkFailed = false;
+    this.generationComplete = false;
+    this.generatingStepIndex = null;
+    this.onStateChange(this.status);
+    return this.resumeRemainingChunks();
+  }
+
   async resumeRemainingChunks() {
     const totalTarget = Math.max(2, Math.min(6, Number(this.meta?.totalSteps || this.meta?.outline?.length || 4)));
     if (this.generationComplete || this.steps.length >= totalTarget) {
@@ -228,6 +249,8 @@ export class LessonEngine {
 
   async _generateRemainingChunks(runId) {
     const totalTarget = Math.max(2, Math.min(6, Number(this.meta?.totalSteps || this.meta?.outline?.length || 4)));
+    this.chunkFailed = false;
+    let attempt = 0;
     try {
       for (let k = this.steps.length; k < totalTarget; k++) {
         if (runId !== this._genRunId || this._abortCtrl?.signal?.aborted) return;
@@ -264,8 +287,14 @@ export class LessonEngine {
         } catch (chunkErr) {
           if (chunkErr?.name === 'AbortError' || runId !== this._genRunId) return;
           console.warn(`[LessonEngine] chunk ${k} error:`, chunkErr);
+          // One quiet automatic retry (network blips / rate limit), then tell the student and offer a manual retry.
+          if (attempt < 1) { attempt++; await new Promise((r) => setTimeout(r, 1500)); k--; continue; }
+          this.chunkFailed = true;
+          this.pendingJumpStepIndex = null;
+          window.toast?.(`Concept ${k + 1} could not be prepared. Tap its tab to try again.`);
           break;
         }
+        attempt = 0;
 
         if (runId !== this._genRunId) return;
         this.saveMemory();
@@ -274,6 +303,7 @@ export class LessonEngine {
       if (runId === this._genRunId) {
         this.generatingStepIndex = null;
         this.generationComplete = this.steps.length >= totalTarget;
+        if (this.steps.length) this._addMissingFacts(this.steps[this.steps.length - 1], true);
         this.saveMemory();
         this.onStateChange(this.status);
       }
@@ -295,6 +325,25 @@ export class LessonEngine {
     this.onStateChange(this.status);
   }
 
+  _pageFacts() {
+    if (!this._facts || this._factsFor !== (this.sentences || []).length) {
+      try { this._facts = extractPageFacts(this.sentences || []); } catch { this._facts = { formulas: [], dates: [] }; }
+      this._factsFor = (this.sentences || []).length;
+    }
+    return this._facts;
+  }
+
+  /** Every formula and date of the page must reach the board, even when the AI forgot one (see lesson_facts.js). */
+  _addMissingFacts(step, isLastOverride) {
+    try {
+      const total = Math.max(2, Math.min(6, Number(this.meta?.totalSteps || this.meta?.outline?.length || 4)));
+      const isLast = isLastOverride !== undefined ? isLastOverride : step.stepIndex >= total - 1;
+      const others = this.steps.filter((x) => x !== step);
+      const extra = missingFactCues(step, others, this._pageFacts(), { isLast });
+      if (extra.length) step.boardCues = [...(step.boardCues || []), ...extra];
+    } catch (e) { console.warn('[LessonEngine] fact coverage skipped:', e); }
+  }
+
   _handleStep(stepObj, startIfFirst, markStarted, forcedIndex = null) {
     const idx = forcedIndex !== null ? this.steps.length : this.steps.length;
     const normalized = {
@@ -308,6 +357,7 @@ export class LessonEngine {
       sourceQuote: String(stepObj.sourceQuote || '').trim(),
       sourceType: stepObj.sourceType || (stepObj.sourceQuote ? 'quote' : 'synthesis'),
     };
+    this._addMissingFacts(normalized);
     this.steps.push(normalized);
 
     if (idx === 0 && startIfFirst) {
