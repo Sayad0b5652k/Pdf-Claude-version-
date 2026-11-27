@@ -15,6 +15,8 @@ import './reader.js';
 import './page_tools.js';
 import './selection.js';
 import './teacher.js';
+import './teacher_explainer.js';
+import './classroom_view.js';
 
 // ---- Safety net: one place that notices crashes and a full phone, so nothing fails silently ----
 {
@@ -670,6 +672,20 @@ export function initHardwareBackNavigation() {
       return;
     }
 
+    // Priority 0.5: Full Classroom Stage active -> Save & exit cleanly back to Reader
+    if (typeof window.isClassroomOpen === 'function' && window.isClassroomOpen()) {
+      window.closeFullClassroom?.();
+      pushAppScreen(window.State?.view || 'reader');
+      return;
+    }
+
+    // Priority 0.8: Split AI Teacher Explainer open -> Close panel & stay in Reader
+    if (typeof window.isExplainerOpen === 'function' && window.isExplainerOpen()) {
+      window.closeTeacherExplainer?.(false);
+      pushAppScreen(window.State?.view || 'reader');
+      return;
+    }
+
     // Priority 1: Check if Humorous Exit Dialog is open -> Close dialog and stay on dashboard
     const exitDialog = document.getElementById('sayad-exit-dialog');
     if (exitDialog) {
@@ -1296,10 +1312,26 @@ export function openAIMenu(isFromSettings = false){
       </div>
 
       <!-- Main Orange Action Button -->
-      <button class="btn" id="ai-open-chat" style="width:100%; padding:14px; margin-bottom:16px; background:#e05314; color:#ffffff; font-size:15px; font-weight:700; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:8px; border:none; box-shadow:0 3px 12px rgba(224, 83, 20, 0.28); cursor:pointer;">
+      <button class="btn" id="ai-open-chat" style="width:100%; padding:14px; margin-bottom:10px; background:#e05314; color:#ffffff; font-size:15px; font-weight:700; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:8px; border:none; box-shadow:0 3px 12px rgba(224, 83, 20, 0.28); cursor:pointer;">
         ${window.icon('sparkle','icon icon-sm')}
         <span>${hasText ? 'Ask AI about this selection' : 'Chat AI about the book'}</span>
       </button>
+
+      <!-- Interactive Live Teaching Launchers -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px;">
+        <button class="btn" id="ai-open-explainer" style="padding:12px 10px; background:var(--surface-2); border:1.5px solid var(--accent); border-radius:12px; color:var(--text); display:flex; flex-direction:column; align-items:flex-start; gap:3px; cursor:pointer;">
+          <div style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700; color:var(--accent);">
+            ${window.icon('book','icon icon-xs')} <span>AI Explainer</span>
+          </div>
+          <span style="font-size:11px; color:var(--text-dim); text-align:left;">Split PDF + synced highlight</span>
+        </button>
+        <button class="btn" id="ai-open-classroom" style="padding:12px 10px; background:#101921; border:1.5px solid #2FC6BC; border-radius:12px; color:#F4F1EA; display:flex; flex-direction:column; align-items:flex-start; gap:3px; cursor:pointer;">
+          <div style="display:flex; align-items:center; gap:6px; font-size:13px; font-weight:700; color:#5BE0D5;">
+            ${window.icon('teacher','icon icon-xs')} <span>Full Classroom</span>
+          </div>
+          <span style="font-size:11px; color:rgba(244,241,234,0.72); text-align:left;">Live blackboard & subtitles</span>
+        </button>
+      </div>
 
       <!-- 2-Column Grid of 7 Tools -->
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
@@ -1324,6 +1356,18 @@ export function openAIMenu(isFromSettings = false){
     } else {
       openAIChat(null);
     }
+  };
+
+  document.getElementById('ai-open-explainer').onclick = () => {
+    const picked = hasText && sel?.text ? sel.text.trim() : '';
+    window.Sheet.close();
+    window.openTeacherExplainer?.({ selectedText: picked, pageNum: curPage });
+  };
+
+  document.getElementById('ai-open-classroom').onclick = () => {
+    const picked = hasText && sel?.text ? sel.text.trim() : '';
+    window.Sheet.close();
+    window.openFullClassroom?.({ selectedText: picked, pageNum: curPage });
   };
 
   document.querySelectorAll('.ai-tool').forEach(b => {

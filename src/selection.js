@@ -750,6 +750,14 @@ function renderClassicToolbar(){
           <button class="st-ai-btn st-ai-btn-primary" id="st-act-teach-me" style="background:var(--accent); color:#ffffff; font-weight:700; width:100%; padding:12px; border-radius:10px; border:none; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">
             ${window.icon('teacher','icon icon-xs')} <span>Ask AI Teacher</span>
           </button>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+            <button class="st-ai-btn" id="st-act-explainer" style="padding:10px 8px; background:var(--surface); border:1px solid var(--accent); color:var(--accent); font-weight:700; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+              ${window.icon('book','icon icon-xs')} <span>AI Explainer</span>
+            </button>
+            <button class="st-ai-btn" id="st-act-classroom" style="padding:10px 8px; background:#101921; border:1px solid #2FC6BC; color:#5BE0D5; font-weight:700; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:6px; cursor:pointer;">
+              ${window.icon('teacher','icon icon-xs')} <span>Classroom</span>
+            </button>
+          </div>
           <button class="st-ai-btn" id="st-act-topic-chat" style="width:100%; padding:11px; background:var(--surface); border:1px solid var(--border); color:var(--accent); font-weight:700; border-radius:10px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer;">
             ${window.icon('sparkle','icon icon-xs')} <span>Topic AI Chat</span>
           </button>
@@ -869,6 +877,22 @@ function renderClassicToolbar(){
     if (typeof window.openTeacherView === 'function') {
       window.openTeacherView(selText ? `Teach me about this selected excerpt:\n"${selText}"` : '');
     }
+  };
+
+  const expSplitBtn = document.getElementById('st-act-explainer');
+  if (expSplitBtn) expSplitBtn.onclick = () => {
+    const selText = pendingSelection?.text?.trim() || '';
+    const pg = pendingSelection?.pageNum || window.State?.currentPage || 1;
+    hideSelToolbar();
+    window.openTeacherExplainer?.({ selectedText: selText, pageNum: pg });
+  };
+
+  const classRoomBtn = document.getElementById('st-act-classroom');
+  if (classRoomBtn) classRoomBtn.onclick = () => {
+    const selText = pendingSelection?.text?.trim() || '';
+    const pg = pendingSelection?.pageNum || window.State?.currentPage || 1;
+    hideSelToolbar();
+    window.openFullClassroom?.({ selectedText: selText, pageNum: pg });
   };
 
   const chatBtn = document.getElementById('st-act-topic-chat');

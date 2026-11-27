@@ -79,12 +79,33 @@ export function openReaderSettings(){
               ${window.icon('sparkle','icon icon-sm')}
             </div>
             <div style="text-align:left;">
-              <div style="font-size:14px; font-weight:700; color:var(--text);">✨ AI Study Tools</div>
+              <div style="font-size:14px; font-weight:700; color:var(--text);">AI Study Tools</div>
               <div style="font-size:11.5px; color:var(--text-dim);">Summarize, Flashcards, MCQs & Notes</div>
             </div>
           </div>
           <span style="color:var(--accent); font-weight:700; font-size:14px;">${window.icon('chevRight','icon icon-sm')}</span>
         </button>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <button class="btn" id="open-ai-explainer-btn" style="padding:12px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px; display:flex; align-items:center; gap:10px; cursor:pointer;">
+            <div style="width:32px; height:32px; border-radius:9px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${window.icon('book','icon icon-xs')}
+            </div>
+            <div style="text-align:left;">
+              <div style="font-size:13px; font-weight:700; color:var(--text);">AI Explainer</div>
+              <div style="font-size:10.5px; color:var(--text-dim);">Split PDF Tutor</div>
+            </div>
+          </button>
+          <button class="btn" id="open-full-classroom-btn" style="padding:12px; background:#101921; border:1px solid #2FC6BC; border-radius:12px; display:flex; align-items:center; gap:10px; cursor:pointer;">
+            <div style="width:32px; height:32px; border-radius:9px; background:rgba(47,198,188,0.16); color:#5BE0D5; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              ${window.icon('teacher','icon icon-xs')}
+            </div>
+            <div style="text-align:left;">
+              <div style="font-size:13px; font-weight:700; color:#F4F1EA;">Full Classroom</div>
+              <div style="font-size:10.5px; color:rgba(244,241,234,0.72);">Live Blackboard</div>
+            </div>
+          </button>
+        </div>
 
         <!-- Option 2: Focus Mode -->
         <button class="btn" id="toggle-focus-mode-btn" style="width:100%; padding:13px 14px; background:var(--surface-2); border:1px solid ${isFocus ? 'var(--accent)' : 'var(--border)'}; border-radius:14px; display:flex; align-items:center; justify-content:space-between; cursor:pointer;">
@@ -308,6 +329,22 @@ export function openReaderSettings(){
   if (aiToolsBtn) {
     aiToolsBtn.onclick = () => {
       window.openAIMenu(true);
+    };
+  }
+
+  const expSetBtn = document.getElementById('open-ai-explainer-btn');
+  if (expSetBtn) {
+    expSetBtn.onclick = () => {
+      window.Sheet.close();
+      window.openTeacherExplainer?.({ pageNum: window.State?.currentPage || 1 });
+    };
+  }
+
+  const clsSetBtn = document.getElementById('open-full-classroom-btn');
+  if (clsSetBtn) {
+    clsSetBtn.onclick = () => {
+      window.Sheet.close();
+      window.openFullClassroom?.({ pageNum: window.State?.currentPage || 1 });
     };
   }
 

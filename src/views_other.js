@@ -222,7 +222,7 @@ export async function renderSettings(opts = {}){
       </details>
       S.A.Y.A.D. stores every book, note, and flashcard directly on this device using IndexedDB — nothing leaves your browser except AI requests and dictionary/OCR lookups you trigger yourself.
       <details style="margin-top:10px;"><summary style="cursor:pointer; font-size:12px; font-weight:700;">Credits</summary><div style="margin-top:6px; font-size:12px;">Built on: PDF.js (rendering), pdf-lib (annotated export), Tesseract.js (scanned-page OCR), Fuse.js (search), the Free Dictionary API, and a hand-implemented FSRS scheduler for spaced repetition.</div></details>
-      <div class="font-mono" style="margin-top:12px; font-size:11px; color:var(--text-faint); border-top:1px solid var(--border); padding-top:10px;">S.A.Y.A.D V2</div>
+      <div class="font-mono" style="margin-top:12px; font-size:11px; color:var(--text-faint); border-top:1px solid var(--border); padding-top:10px;">S.A.Y.A.D V3</div>
     </div>
 
 

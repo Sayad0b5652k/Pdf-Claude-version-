@@ -3,11 +3,12 @@
 export const BUILD_TAG = 'quality-and-autozoom-2026-07-26';
 console.log('%cSTRATA build: ' + BUILD_TAG, 'font-weight:bold; font-size:14px; color:#FF6A2B;');
 
+// v12 adds the `lessons` store for persistent AI Classroom & Explainer sessions. Additive, nothing is moved.
 // v11 adds the `papers` store (generated question papers + attempts). Additive, nothing is moved.
 // v10 adds the small `filemeta` store (name, thumb, lastPage, folder ... without the PDF bytes).
 // The `files` store is left exactly as it was: it keeps owning the binary. Upgrading is additive,
 // nothing is moved or deleted, and a book that is not indexed yet gets indexed lazily (see allFileMeta).
-const DB_NAME='marginal_db', DB_VER=11;
+const DB_NAME='marginal_db', DB_VER=12;
 let dbP;
 try{
   if(!('indexedDB' in window)) throw new Error('IndexedDB is not available in this browser context.');
@@ -68,6 +69,11 @@ try{
       }
       if(!db.objectStoreNames.contains('papers')){
         const s = db.createObjectStore('papers', {keyPath:'id'});
+        s.createIndex('fileId','fileId');
+        s.createIndex('updatedAt','updatedAt');
+      }
+      if(!db.objectStoreNames.contains('lessons')){
+        const s = db.createObjectStore('lessons', {keyPath:'id'});
         s.createIndex('fileId','fileId');
         s.createIndex('updatedAt','updatedAt');
       }
@@ -233,6 +239,19 @@ export const DB = {
   async getSetting(key, fallback){ const r = await this.get('settings', key); return r ? r.val : fallback; },
   async getCachedPage(fileId, pageNum){ return this.get('pagecache', `${fileId}_p${pageNum}`); },
   async putCachedPage(fileId, pageNum, text){ return this.put('pagecache', { id: `${fileId}_p${pageNum}`, fileId, page: pageNum, text, updatedAt: Date.now() }); },
+  async getLesson(id){ try{ return await this.get('lessons', id); }catch(e){ return null; } },
+  async putLesson(lesson){
+    if(!lesson || !lesson.id) return null;
+    const payload = { ...lesson, updatedAt: Date.now() };
+    await this.put('lessons', payload);
+    return payload;
+  },
+  async listLessonsForFile(fileId){
+    try{
+      const rows = await this.byIndex('lessons', 'fileId', fileId);
+      return (rows || []).sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+    }catch(e){ return []; }
+  },
   normalizeBuffer,
   async updateFileMeta(fileId, updates){
     // Metadata only: the PDF bytes in `files` are not read or rewritten.

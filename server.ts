@@ -3607,6 +3607,378 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
     }
   });
 
+  // Helper: safely extract balanced JSON objects from partial or complete AI output
+  const extractJsonObjectsFromBuffer = (buf: string): { objects: any[]; rest: string } => {
+    const objects: any[] = [];
+    let i = 0;
+    let lastConsumed = 0;
+    while (i < buf.length) {
+      if (buf[i] !== '{') {
+        i++;
+        continue;
+      }
+      let depth = 0;
+      let inStr = false;
+      let escaped = false;
+      let endIdx = -1;
+      for (let j = i; j < buf.length; j++) {
+        const ch = buf[j];
+        if (inStr) {
+          if (escaped) escaped = false;
+          else if (ch === '\\') escaped = true;
+          else if (ch === '"') inStr = false;
+        } else {
+          if (ch === '"') inStr = true;
+          else if (ch === '{') depth++;
+          else if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+              endIdx = j;
+              break;
+            }
+          }
+        }
+      }
+      if (endIdx === -1) break;
+      const candidate = buf.slice(i, endIdx + 1);
+      try {
+        const parsed = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object') objects.push(parsed);
+      } catch {}
+      lastConsumed = endIdx + 1;
+      i = endIdx + 1;
+    }
+    return { objects, rest: buf.slice(lastConsumed) };
+  };
+
+  // =============================================================
+  // AI TEACHER EXPLAINER & FULL CLASSROOM STREAMING LESSON ENGINE
+  // =============================================================
+  app.post("/api/ai/lesson-plan", async (req, res) => {
+    try {
+      const {
+        numberedSentences,
+        rawText,
+        pageNum = 1,
+        totalPages = 1,
+        chapterTitle = "",
+        bookTitle = "",
+        topicFocus = "",
+        selectedText = "",
+        language = "hinglish",
+        mode = "classroom",
+        simplifyStep = null,
+        stream: useStream = true,
+        customKey,
+      } = req.body || {};
+
+      const sentencesText = Array.isArray(numberedSentences) && numberedSentences.length
+        ? numberedSentences.map((s: any) => `[${s.id}] ${s.text}`).join("\n")
+        : String(rawText || "").slice(0, 7500);
+
+      if (!sentencesText.trim() && !selectedText.trim()) {
+        return res.status(400).json({ error: "Document text is required to build a lesson." });
+      }
+
+      const langDesc = language === "hindi"
+        ? "Clear, natural everyday Hindi in Devanagari (technical terms in English brackets if helpful)."
+        : language === "english"
+        ? "Warm, clear conversational English like a great tutor."
+        : "Natural conversational Hinglish (mix of easy everyday Hindi in Latin script + clear English academic terms, the way the best Indian teachers explain to students). NEVER write unreadable Devanagari-English gibberish; keep Hinglish fluent and easy for Indian Neural TTS to pronounce clearly.";
+
+      const sysInstruction = `You are an elite visual teacher inside S.A.Y.A.D. who teaches step-by-step using live hand-drawn WHITEBOARD FLOWCHARTS & DIAGRAMS.
+Your teaching MUST stay 100% grounded in the provided document sentences with ZERO hallucinations.
+TEACHING LANGUAGE: ${langDesc}
+
+VISUAL TEACHING RULE (CRITICAL):
+- NEVER dump just plain text bullets! Every step MUST feature a clear visual diagram ('flowchart', 'cycle', 'tree', 'comparison', 'venn', 'timeline', or 'barchart') paired cleanly with a crisp 'title' and optional 'equation' or 1-2 short bottom takeaway 'bullet's.
+- Keep text inside diagram nodes SHORT (2–5 words title, 2–6 words sub) so everything looks crisp like a Golpo AI whiteboard video!
+- Available semantic vector icons ('icon' field): "sun", "leaf", "chloroplast", "water", "atom", "dna", "cell", "heart", "brain", "bulb", "book", "crown", "castle", "scroll", "mountain", "ship", "people", "flag", "fire", "coin", "map", "wheel", "gear", "globe", "scale".
+
+SEMANTIC BOARD CUE TYPES (auto-arranged cleanly with ZERO overlaps — omit x/y for auto-layout):
+1. {"type":"title","atProgress":0.0,"text":"Short Step Title","sublabel":"Optional short tag","color":"amber"}
+2. {"type":"flowchart","atProgress":0.12,"direction":"row","nodes":[{"title":"Sunlight","sub":"Light energy","shape":"circle","icon":"sun","color":"amber"},{"title":"Photolysis","sub":"Splits H2O","shape":"box","icon":"water","color":"teal"},{"title":"ATP & NADPH","sub":"Energy carriers","shape":"pill","icon":"bulb","color":"coral"}],"edges":[{"from":0,"to":1,"label":"absorbs"},{"from":1,"to":2,"label":"produces"}]}
+   (shapes supported: "box" | "pill" | "circle" | "diamond" | "cloud"; 2 to 4 nodes max)
+3. {"type":"cycle","atProgress":0.12,"centerTitle":"Calvin Cycle","nodes":[{"title":"Fixation","sub":"CO2 + RuBP","icon":"leaf","color":"teal"},{"title":"Reduction","sub":"Uses ATP","icon":"bulb","color":"amber"},{"title":"Glucose","sub":"Sugar formed","icon":"cell","color":"mint"},{"title":"Regenerate","sub":"RuBP ready","icon":"wheel","color":"coral"}]}
+4. {"type":"tree","atProgress":0.12,"root":{"title":"Photosynthesis","sub":"Plant food process","icon":"leaf","color":"mint"},"branches":[{"title":"Light Reaction","sub":"Thylakoid · O2","icon":"sun","color":"amber"},{"title":"Dark Reaction","sub":"Stroma · Glucose","icon":"chloroplast","color":"teal"}]}
+5. {"type":"comparison","atProgress":0.12,"left":{"title":"Light Reaction","color":"amber","points":["Needs sunlight","Produces ATP & O2"]},"right":{"title":"Calvin Cycle","color":"teal","points":["In Stroma","Makes Glucose"]}}
+6. {"type":"venn","atProgress":0.12,"left":{"title":"Set A","sub":"Unique A","color":"amber"},"right":{"title":"Set B","sub":"Unique B","color":"teal"},"overlap":"Shared core"}
+7. {"type":"timeline","atProgress":0.12,"items":[{"year":"Stage 1","text":"Absorption"},{"year":"Stage 2","text":"Splitting H2O"},{"year":"Stage 3","text":"Glucose"}]}
+8. {"type":"barchart","atProgress":0.15,"title":"Comparison","bars":[{"label":"A","value":40,"color":"amber"},{"label":"B","value":85,"color":"teal"}]}
+9. {"type":"equation","atProgress":0.62,"text":"6CO2 + 6H2O -> C6H12O6 + 6O2","color":"amber"}
+10. {"type":"bullet","atProgress":0.72,"text":"1 short crisp takeaway line","color":"teal"}`;
+
+      let prompt = "";
+      if (simplifyStep) {
+        prompt = `Re-explain ONLY this step in MUCH SIMPLER language with a vivid everyday real-life Indian analogy and a super clear visual flowchart/tree so even a 10-year-old grasps it instantly, staying 100% accurate to the source text.
+ORIGINAL STEP TITLE: ${simplifyStep.title || ""}
+ORIGINAL SOURCE QUOTE: ${simplifyStep.sourceQuote || ""}
+SOURCE SENTENCES FROM PAGE ${pageNum}:
+${sentencesText}
+
+Output ONE compact JSON object on a single line (no markdown fences):
+{"stepIndex":${Number(simplifyStep.stepIndex || 0)},"title":"Simpler: ...","conceptTag":"Simplified","spokenText":"...","realLifeExample":"...","keyFormula":"...","keyTerms":["term1"],"sourceType":"quote","sourceSentenceIds":["S1"],"sourceQuote":"verbatim exact substring from source sentences","newBoardPage":false,"checkQuestion":"","boardCues":[...]}`;
+      } else {
+        prompt = `Book: "${bookTitle || "Study Material"}" | Chapter: "${chapterTitle || `Page ${pageNum}`}" | Page ${pageNum} of ${totalPages}
+${selectedText ? `STUDENT SELECTED PASSAGE (prioritize explaining this cleanly):\n"""${selectedText}"""\n` : ""}
+${topicFocus ? `FOCUS TOPIC: ${topicFocus}\n` : ""}
+SOURCE SENTENCES (Use [S#] IDs and verbatim sourceQuote substrings ONLY from here):
+${sentencesText}
+
+TASK: Teach this content as an engaging ${mode === "explainer" ? "Visual Split-PDF Tutor" : "Live Blackboard/Whiteboard Teacher"} using FLOWCHARTS, CYCLES, MIND-MAP TREES, COMPARISONS & ICONS in 4 progressive steps:
+1. Big Picture Overview (Use a "tree" or 3-node "flowchart" showing the main idea & components)
+2. Core Mechanism Part 1 (Use a detailed "flowchart" with shapes box/diamond/circle/pill, arrows, and icons)
+3. Mechanism Part 2 / Comparison / Process Cycle (Use "cycle", "comparison", "venn", or "flowchart" + "equation" if applicable)
+4. Summary & Exam Takeaways (Use a "timeline" or summary "tree" + crisp formula/takeaway)
+
+CRITICAL OUTPUT FORMAT: Output STRICTLY NDJSON (each JSON object on its own line, NO markdown \`\`\` fences, NO wrapper array).
+Line 1 MUST be meta:
+{"_kind":"meta","chapterTitle":"...","topicSummary":"1 sentence summary","totalSteps":4}
+Lines 2..5 MUST be each step one by one:
+{"_kind":"step","stepIndex":0,"title":"Short Step Title","conceptTag":"Intro|Flowchart|Mechanism|Summary","spokenText":"Natural 45-85 word conversational teacher explanation referring naturally to what is being drawn on the board","realLifeExample":"Relatable real-life comparison","keyFormula":"Equation/definition or empty","keyTerms":["term1","term2"],"sourceType":"quote|synthesis","sourceSentenceIds":["S1"],"sourceQuote":"exact verbatim substring copied character-for-character from one cited [S#] above (or empty if synthesis)","newBoardPage":true,"checkQuestion":"Optional quick thought question for student","boardCues":[2 to 4 semantic cues e.g. title + flowchart/tree/cycle + optional equation or 1 bullet]}`;
+      }
+
+      const wantsStream = Boolean(useStream);
+      if (wantsStream) {
+        res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache, no-transform");
+        res.setHeader("Connection", "keep-alive");
+        res.flushHeaders?.();
+      }
+
+      const sendEvent = (event: string, data: any) => {
+        if (!wantsStream) return;
+        res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      };
+
+      const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
+      const hasByokGemini = cleanCustomKey.length > 10;
+      const preferUserAuxFirst = !hasByokGemini && (hasUserGroq() || hasUserOr());
+
+      const emitParsedObjects = (objects: any[], emittedCountRef: { n: number }) => {
+        for (const obj of objects) {
+          if (obj._kind === "meta") {
+            sendEvent("meta", obj);
+          } else if (obj._kind === "step" || typeof obj.spokenText === "string") {
+            emittedCountRef.n++;
+            sendEvent("step", obj);
+          } else if (Array.isArray(obj.steps)) {
+            if (obj.chapterTitle || obj.topicSummary) sendEvent("meta", obj);
+            for (const st of obj.steps) {
+              emittedCountRef.n++;
+              sendEvent("step", st);
+            }
+          }
+        }
+      };
+
+      let buffer = "";
+      const emittedRef = { n: 0 };
+      let finalRawText = "";
+
+      const handleTextOutput = (fullText: string) => {
+        const cleaned = String(fullText || "")
+          .replace(/```json\s*/gi, "")
+          .replace(/```\s*/g, "");
+        const { objects } = extractJsonObjectsFromBuffer(cleaned);
+        if (wantsStream) {
+          if (emittedRef.n === 0) emitParsedObjects(objects, emittedRef);
+          sendEvent("done", { count: emittedRef.n });
+          return res.end();
+        }
+        return res.json({ status: "success", objects });
+      };
+
+      if (!preferUserAuxFirst && (keyPool.hasAnyKey() || hasByokGemini)) {
+        let byokOutcome: ByokOutcome | null = null;
+        if (wantsStream) {
+          const streamRes = await executeWithGeminiPoolStream(
+            "study",
+            prompt,
+            (chunk) => {
+              buffer += chunk.replace(/```json\s*/gi, "").replace(/```/g, "");
+              const parsed = extractJsonObjectsFromBuffer(buffer);
+              buffer = parsed.rest;
+              if (parsed.objects.length) {
+                emitParsedObjects(parsed.objects, emittedRef);
+              }
+            },
+            {
+              systemInstruction: sysInstruction,
+              targetModel: "gemini-3.1-flash-lite",
+              temperature: 0.35,
+              customKey: cleanCustomKey || undefined,
+              onByokOutcome: (o) => { byokOutcome = o; },
+            }
+          );
+          if (streamRes && streamRes.text) {
+            if (buffer.trim()) {
+              const tail = extractJsonObjectsFromBuffer(buffer);
+              if (tail.objects.length) emitParsedObjects(tail.objects, emittedRef);
+            }
+            if (emittedRef.n === 0) {
+              // Fallback parse full text in case objects spanned oddly
+              const fullParsed = extractJsonObjectsFromBuffer(
+                streamRes.text.replace(/```json\s*/gi, "").replace(/```/g, "")
+              );
+              emitParsedObjects(fullParsed.objects, emittedRef);
+            }
+            sendEvent("done", { count: emittedRef.n, model: streamRes.model, keySlot: streamRes.keyTag });
+            return res.end();
+          }
+        } else {
+          const r = await executeWithGeminiPool("study", prompt, {
+            systemInstruction: sysInstruction,
+            targetModel: "gemini-3.1-flash-lite",
+            temperature: 0.35,
+            customKey: cleanCustomKey || undefined,
+            onByokOutcome: (o) => { byokOutcome = o; },
+          });
+          if (r && r.text) return handleTextOutput(r.text);
+        }
+      }
+
+      if (groqKey()) {
+        const gText = await executeWithGroq(prompt, sysInstruction, 0.35);
+        if (gText) {
+          finalRawText = gText;
+          return handleTextOutput(finalRawText);
+        }
+      }
+      if (orKey()) {
+        const oRes = await executeWithOpenRouter(prompt, sysInstruction, 0.35);
+        if (oRes?.text) {
+          finalRawText = oRes.text;
+          return handleTextOutput(finalRawText);
+        }
+      }
+
+      if (wantsStream) {
+        sendEvent("error", { message: "AI teacher temporarily unavailable. Check your API key in Settings." });
+        return res.end();
+      }
+      return res.status(503).json({ error: "No AI provider available." });
+    } catch (err: any) {
+      console.error("Lesson Plan Error:", err);
+      if (res.headersSent) {
+        try {
+          res.write(`event: error\ndata: ${JSON.stringify({ message: err?.message || "Lesson generation failed" })}\n\n`);
+          return res.end();
+        } catch {}
+      }
+      return res.status(500).json({ error: err?.message || "Lesson generation failed" });
+    }
+  });
+
+  app.post("/api/ai/lesson-doubt", async (req, res) => {
+    try {
+      const {
+        question,
+        language = "hinglish",
+        activeStep = null,
+        boardSummary = "",
+        numberedSentences = [],
+        pageNum = 1,
+        chapterTitle = "",
+        bookTitle = "",
+        customKey,
+      } = req.body || {};
+
+      if (!question || !String(question).trim()) {
+        return res.status(400).json({ error: "Doubt question is required." });
+      }
+
+      const sentencesText = Array.isArray(numberedSentences) && numberedSentences.length
+        ? numberedSentences.map((s: any) => `[${s.id}] ${s.text}`).join("\n")
+        : "";
+
+      const langDesc = language === "hindi"
+        ? "Clear, natural everyday Hindi in Devanagari."
+        : language === "english"
+        ? "Clear, friendly English."
+        : "Natural Hinglish (mix of everyday Hindi + English academic terms, clear Latin script).";
+
+      const sysInstruction = `You are a patient classroom teacher pausing mid-lesson to answer a student's doubt accurately.
+LANGUAGE: ${langDesc}
+Ground every answer in the textbook lines and current board state. Never hallucinate citations.
+Return strictly ONE JSON object (no markdown fences):
+{
+  "answerSpoken": "Clear 35-70 word conversational answer teacher speaks aloud right away",
+  "answerSummary": "Crisp 1-2 line written takeaway for subtitles/notes",
+  "sourceType": "quote|synthesis",
+  "sourceSentenceIds": ["S1"],
+  "sourceQuote": "exact verbatim substring from source sentences if directly referenced, else empty",
+  "needsNewBoardPage": false,
+  "extraBoardCues": [
+    {"type":"box|arrow|equation|bullet|highlight|circle","atProgress":0.1,"x":600,"y":430,"w":310,"h":90,"text":"Doubt Clarified","sublabel":"Short visual proof/example","color":"mint"}
+  ]
+}`;
+
+      const prompt = `Book: "${bookTitle}" | Chapter: "${chapterTitle}" | Page ${pageNum}
+CURRENT PAUSED LESSON STEP: ${activeStep ? `${activeStep.title || ""} — "${activeStep.spokenText || ""}"` : "Active lesson"}
+CURRENT BLACKBOARD STATE: ${boardSummary || "Diagram showing active concept"}
+SOURCE SENTENCES ON PAGE:
+${sentencesText.slice(0, 5500)}
+
+STUDENT'S DOUBT: "${String(question).trim()}"
+
+Respond warmly, clarify the exact confusion, cite verbatim sourceQuote if applicable, and add 1–3 non-overlapping extraBoardCues (usually in lower-right x:560..930, y:370..560 or highlighted on existing elements) if drawing helps.`;
+
+      const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
+      const hasByokGemini = cleanCustomKey.length > 10;
+      const preferUserAuxFirst = !hasByokGemini && (hasUserGroq() || hasUserOr());
+
+      const parseDoubt = (raw: string) => {
+        const cleaned = String(raw || "").replace(/```json\s*/gi, "").replace(/```/g, "");
+        const { objects } = extractJsonObjectsFromBuffer(cleaned);
+        if (objects.length) return objects[0];
+        return {
+          answerSpoken: cleaned.slice(0, 420),
+          answerSummary: cleaned.slice(0, 180),
+          sourceType: "synthesis",
+          sourceSentenceIds: [],
+          sourceQuote: "",
+          extraBoardCues: [],
+        };
+      };
+
+      if (preferUserAuxFirst) {
+        if (hasUserGroq()) {
+          const g = await executeWithGroq(prompt, sysInstruction, 0.28);
+          if (g) return res.json({ status: "success", doubt: parseDoubt(g) });
+        }
+        if (hasUserOr()) {
+          const o = await executeWithOpenRouter(prompt, sysInstruction, 0.28);
+          if (o?.text) return res.json({ status: "success", doubt: parseDoubt(o.text) });
+        }
+      }
+
+      if (keyPool.hasAnyKey() || hasByokGemini) {
+        const r = await executeWithGeminiPool("chat", prompt, {
+          systemInstruction: sysInstruction,
+          targetModel: "gemini-3.1-flash-lite",
+          temperature: 0.28,
+          customKey: cleanCustomKey || undefined,
+        });
+        if (r?.text) return res.json({ status: "success", doubt: parseDoubt(r.text) });
+      }
+
+      if (groqKey() && !preferUserAuxFirst) {
+        const g = await executeWithGroq(prompt, sysInstruction, 0.28);
+        if (g) return res.json({ status: "success", doubt: parseDoubt(g) });
+      }
+      if (orKey() && !preferUserAuxFirst) {
+        const o = await executeWithOpenRouter(prompt, sysInstruction, 0.28);
+        if (o?.text) return res.json({ status: "success", doubt: parseDoubt(o.text) });
+      }
+
+      return res.status(503).json({ error: "AI teacher temporarily unavailable." });
+    } catch (err: any) {
+      console.error("Lesson Doubt Error:", err);
+      return res.status(500).json({ error: err?.message || "Failed to answer doubt" });
+    }
+  });
+
   // Dedicated AI Visual Generation Endpoint
   app.post("/api/ai/image", async (req, res) => {
     try {
@@ -3668,6 +4040,7 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
 
       return res.json({
         status: "success",
+        provider: result.provider || "microsoft",
         audioBase64: result.audioBase64,
         mimeType: result.mimeType,
         wordBoundaries: result.wordBoundaries,
@@ -3675,9 +4048,10 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
         durationEstimateMs: result.durationEstimateMs
       });
     } catch (ttsErr: any) {
-      console.error("Microsoft TTS Synthesis Error:", ttsErr);
-      return res.status(500).json({
-        error: ttsErr.message || "Failed to synthesize speech using Microsoft Neural Voice"
+      const msg = ttsErr?.message || "Failed to synthesize speech";
+      console.warn("[TTS] All server TTS providers unavailable:", msg);
+      return res.status(503).json({
+        error: msg
       });
     }
   });

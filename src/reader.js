@@ -745,6 +745,12 @@ export function renderReaderShell(){
       if (typeof window.stopReadingSession === 'function') {
         Promise.resolve(window.stopReadingSession()).catch(() => {});
       }
+      if (typeof window.closeTeacherExplainer === 'function') {
+        window.closeTeacherExplainer(false);
+      }
+      if (typeof window.closeFullClassroom === 'function') {
+        window.closeFullClassroom();
+      }
       window.State.view='dashboard';
       // Stop any further page renders immediately, wait for the async dashboard view
       // to mount cleanly into #app, and only then release canvases + PDF worker.

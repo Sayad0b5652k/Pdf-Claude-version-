@@ -96,6 +96,7 @@ export function openTeacherView(prefillQuery = '', defaultMode = 'professional',
         <div class="cw-head-title" title="${window.escapeHtml(docTitle)}">${window.escapeHtml(docTitle)}</div>
         <div class="cw-head-sub">${isGlobal ? 'Universal Library · Grounded' : `Page ${currentPage} of ${totalPages} · <button type="button" class="cw-focus-chip" id="cw-focus-chip"><i class="cw-dot"></i><span id="cw-reading-text">…</span>${window.icon('chevDown','icon icon-xs')}</button>`}</div>
       </div>
+      ${!isGlobal ? `<button class="cw-tune" id="teacher-classroom-btn" title="Open Full Classroom Board" style="margin-right:6px; border-color:var(--teal); color:var(--teal);">${window.icon('teacher','icon icon-sm')}<span>Board</span></button>` : ''}
       <button class="cw-tune" id="teacher-custom-toggle" title="Tutor style, engine and persona" aria-label="Tutor settings">${window.icon('sliders','icon icon-sm')}<span>Tutor</span></button>
     </header>
 
@@ -138,6 +139,12 @@ export async function initTeacherViewLogic(fileId, prefillQuery) {
   const sendBtn = document.getElementById('teacher-send-btn');
   const backBtn = document.getElementById('teacher-back-btn');
   const customToggle = document.getElementById('teacher-custom-toggle');
+  const classroomBtn = document.getElementById('teacher-classroom-btn');
+  if (classroomBtn) {
+    classroomBtn.onclick = () => {
+      window.openFullClassroom?.({ pageNum: window.State?.currentPage || 1 });
+    };
+  }
   const inputMicBtn = document.getElementById('teacher-input-mic-btn');
   const inputWrapper = document.getElementById('teacher-input-wrapper');
 
