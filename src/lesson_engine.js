@@ -50,6 +50,13 @@ export class LessonEngine {
     this.activeWordIdx = -1;
     this.stepProgress = 0;
 
+    this.generatingStepIndex = null;
+    this.pendingJumpStepIndex = null;
+    this.generationComplete = Boolean(options.generationComplete);
+    this._topicFocus = options.topicFocus || '';
+    this._selectedText = options.selectedText || '';
+    this._genRunId = 0;
+
     this._audio = null;
     this._audioCache = new Map();
     this._playbackToken = 0;
@@ -77,102 +84,199 @@ export class LessonEngine {
     return this.steps[this.currentStepIndex] || null;
   }
 
+  async _requestLessonChunk({ chunkIndex = 0, topicFocus = '', selectedText = '', outline = null, previousStepsSummary = [], onMeta, onStep, signal }) {
+    const resp = await fetch('/api/ai/lesson-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal,
+      body: JSON.stringify({
+        numberedSentences: this.sentences,
+        rawText: this.sentences.map((s) => s.text).join(' '),
+        pageNum: this.pageNum,
+        totalPages: this.totalPages,
+        chapterTitle: this.chapterTitle,
+        bookTitle: this.bookTitle,
+        topicFocus,
+        selectedText,
+        language: this.language,
+        mode: this.mode,
+        chunkMode: true,
+        chunkIndex,
+        outline,
+        previousStepsSummary,
+        stream: true,
+        customKey: getCustomGeminiKey() || undefined,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || `Server error (${resp.status})`);
+    }
+
+    const contentType = resp.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const json = await resp.json();
+      const objs = Array.isArray(json.objects) ? json.objects : [];
+      for (const o of objs) {
+        if (o?._kind === 'meta' || o?.topicSummary || Array.isArray(o?.outline)) onMeta?.(o);
+        if (o?._kind === 'step' || typeof o?.spokenText === 'string') onStep?.(o);
+      }
+      return;
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let sseBuf = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      sseBuf += decoder.decode(value, { stream: true });
+
+      const blocks = sseBuf.split('\n\n');
+      sseBuf = blocks.pop() || '';
+      for (const blk of blocks) {
+        const lines = blk.split('\n');
+        let evName = 'message';
+        let dataStr = '';
+        for (const ln of lines) {
+          if (ln.startsWith('event:')) evName = ln.slice(6).trim();
+          else if (ln.startsWith('data:')) dataStr += ln.slice(5).trim();
+        }
+        if (!dataStr) continue;
+        try {
+          const payload = JSON.parse(dataStr);
+          if (evName === 'meta') {
+            onMeta?.(payload);
+          } else if (evName === 'step') {
+            onStep?.(payload);
+          } else if (evName === 'error') {
+            throw new Error(payload.message || 'Lesson stream failed');
+          }
+        } catch (e) {
+          if (evName === 'error') throw e;
+        }
+      }
+    }
+  }
+
   async generateAndStart({ topicFocus = '', selectedText = '', autoPlay = true } = {}) {
     this.stopAudioOnly();
     this._abortCtrl?.abort();
     this._abortCtrl = new AbortController();
+    const runId = ++this._genRunId;
 
+    this._topicFocus = topicFocus;
+    this._selectedText = selectedText;
     this.status = 'loading';
     this.steps = [];
+    this.completedSteps = new Set();
     this.currentStepIndex = 0;
+    this.generatingStepIndex = 0;
+    this.pendingJumpStepIndex = null;
+    this.generationComplete = false;
     this.onStateChange(this.status);
 
     let stepOneStarted = false;
 
     try {
-      const resp = await fetch('/api/ai/lesson-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      await this._requestLessonChunk({
+        chunkIndex: 0,
+        topicFocus,
+        selectedText,
         signal: this._abortCtrl.signal,
-        body: JSON.stringify({
-          numberedSentences: this.sentences,
-          rawText: this.sentences.map((s) => s.text).join(' '),
-          pageNum: this.pageNum,
-          totalPages: this.totalPages,
-          chapterTitle: this.chapterTitle,
-          bookTitle: this.bookTitle,
-          topicFocus,
-          selectedText,
-          language: this.language,
-          mode: this.mode,
-          stream: true,
-          customKey: getCustomGeminiKey() || undefined,
-        }),
+        onMeta: (m) => this._handleMeta(m),
+        onStep: (s) => this._handleStep(s, autoPlay && !stepOneStarted, () => { stepOneStarted = true; }),
       });
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.error || `Server error (${resp.status})`);
-      }
-
-      const contentType = resp.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const json = await resp.json();
-        const objs = Array.isArray(json.objects) ? json.objects : [];
-        for (const o of objs) {
-          this._handleStreamObject(o, autoPlay && !stepOneStarted, () => { stepOneStarted = true; });
-        }
-      } else {
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let sseBuf = '';
-        let curEvent = 'message';
-
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          sseBuf += decoder.decode(value, { stream: true });
-
-          const blocks = sseBuf.split('\n\n');
-          sseBuf = blocks.pop() || '';
-          for (const blk of blocks) {
-            const lines = blk.split('\n');
-            let evName = curEvent;
-            let dataStr = '';
-            for (const ln of lines) {
-              if (ln.startsWith('event:')) evName = ln.slice(6).trim();
-              else if (ln.startsWith('data:')) dataStr += ln.slice(5).trim();
-            }
-            if (!dataStr) continue;
-            try {
-              const payload = JSON.parse(dataStr);
-              if (evName === 'meta') {
-                this._handleMeta(payload);
-              } else if (evName === 'step') {
-                this._handleStep(payload, autoPlay && !stepOneStarted, () => { stepOneStarted = true; });
-              } else if (evName === 'error') {
-                throw new Error(payload.message || 'Lesson stream failed');
-              }
-            } catch (e) {
-              if (evName === 'error') throw e;
-            }
-          }
-        }
-      }
-
+      if (runId !== this._genRunId) return;
       if (!this.steps.length) {
         throw new Error('Could not generate lesson steps from this page.');
       }
 
-      this.saveMemory();
       if (!stepOneStarted && autoPlay) {
         this.playStep(0);
       }
+      this.saveMemory();
+
+      // Sequentially generate Chunk 2, Chunk 3, Chunk 4 in the background
+      this._generateRemainingChunks(runId);
     } catch (err) {
-      if (err.name === 'AbortError') return;
+      if (err.name === 'AbortError' || runId !== this._genRunId) return;
       console.warn('[LessonEngine] stream error:', err);
+      this.generatingStepIndex = null;
       this.status = 'error';
       this.onStateChange(this.status, err.message);
+    }
+  }
+
+  async resumeRemainingChunks() {
+    const totalTarget = Math.max(2, Math.min(6, Number(this.meta?.totalSteps || this.meta?.outline?.length || 4)));
+    if (this.generationComplete || this.steps.length >= totalTarget) {
+      this.generationComplete = true;
+      this.generatingStepIndex = null;
+      return;
+    }
+    if (this.generatingStepIndex !== null) return;
+    if (!this._abortCtrl || this._abortCtrl.signal.aborted) {
+      this._abortCtrl = new AbortController();
+    }
+    const runId = ++this._genRunId;
+    await this._generateRemainingChunks(runId);
+  }
+
+  async _generateRemainingChunks(runId) {
+    const totalTarget = Math.max(2, Math.min(6, Number(this.meta?.totalSteps || this.meta?.outline?.length || 4)));
+    try {
+      for (let k = this.steps.length; k < totalTarget; k++) {
+        if (runId !== this._genRunId || this._abortCtrl?.signal?.aborted) return;
+        this.generatingStepIndex = k;
+        this.onStateChange(this.status);
+
+        let receivedForK = false;
+        const prevSummary = this.steps.map((s) => ({
+          title: s.title,
+          keyTerms: s.keyTerms || [],
+        }));
+
+        try {
+          await this._requestLessonChunk({
+            chunkIndex: k,
+            topicFocus: this._topicFocus,
+            selectedText: this._selectedText,
+            outline: this.meta?.outline || null,
+            previousStepsSummary: prevSummary,
+            signal: this._abortCtrl.signal,
+            onMeta: (m) => this._handleMeta(m),
+            onStep: (stepObj) => {
+              if (receivedForK || runId !== this._genRunId) return;
+              receivedForK = true;
+              const pushedIdx = this._handleStep(stepObj, false, () => {}, k);
+              if (this.pendingJumpStepIndex === pushedIdx) {
+                this.pendingJumpStepIndex = null;
+                this.playStep(pushedIdx);
+              } else if (this.status === 'ended' && this.currentStepIndex === pushedIdx - 1) {
+                this.playStep(pushedIdx);
+              }
+            },
+          });
+        } catch (chunkErr) {
+          if (chunkErr?.name === 'AbortError' || runId !== this._genRunId) return;
+          console.warn(`[LessonEngine] chunk ${k} error:`, chunkErr);
+          break;
+        }
+
+        if (runId !== this._genRunId) return;
+        this.saveMemory();
+      }
+    } finally {
+      if (runId === this._genRunId) {
+        this.generatingStepIndex = null;
+        this.generationComplete = this.steps.length >= totalTarget;
+        this.saveMemory();
+        this.onStateChange(this.status);
+      }
     }
   }
 
@@ -185,15 +289,18 @@ export class LessonEngine {
   _handleMeta(meta) {
     this.meta = { ...this.meta, ...meta };
     if (meta.chapterTitle) this.chapterTitle = meta.chapterTitle;
+    if (Array.isArray(meta.outline) && meta.outline.length && !meta.totalSteps) {
+      this.meta.totalSteps = meta.outline.length;
+    }
     this.onStateChange(this.status);
   }
 
-  _handleStep(stepObj, startIfFirst, markStarted) {
-    const idx = this.steps.length;
+  _handleStep(stepObj, startIfFirst, markStarted, forcedIndex = null) {
+    const idx = forcedIndex !== null ? this.steps.length : this.steps.length;
     const normalized = {
       ...stepObj,
       stepIndex: idx,
-      title: stepObj.title || `Step ${idx + 1}`,
+      title: stepObj.title || `Concept ${idx + 1}`,
       spokenText: String(stepObj.spokenText || '').trim(),
       boardCues: Array.isArray(stepObj.boardCues) ? stepObj.boardCues : [],
       keyTerms: Array.isArray(stepObj.keyTerms) ? stepObj.keyTerms : [],
@@ -207,12 +314,12 @@ export class LessonEngine {
       markStarted();
       this.playStep(0);
     } else {
-      // Prefetch Step 1 if currently on Step 0!
       if (idx === this.currentStepIndex + 1) {
         this.prefetchStepAudio(normalized);
       }
       this.onStateChange(this.status);
     }
+    return idx;
   }
 
   async _fetchVisualBackdrop(query, stepIndex = 0) {
@@ -579,10 +686,32 @@ export class LessonEngine {
     this.playStep(target);
   }
 
+  goToStep(idx) {
+    if (idx < 0) return;
+    if (this.steps[idx]) {
+      this.pendingJumpStepIndex = null;
+      this.playStep(idx);
+      return;
+    }
+    const total = Math.max(this.steps.length, this.meta?.totalSteps || 4);
+    if (idx < total && (this.generatingStepIndex !== null || !this.generationComplete)) {
+      this.pendingJumpStepIndex = idx;
+      window.toast?.(`Preparing Concept ${idx + 1}… will start right away!`);
+      this.onStateChange(this.status);
+    }
+  }
+
   nextStep() {
     if (!this.steps.length) return;
-    if (this.currentStepIndex + 1 < this.steps.length) {
-      this.playStep(this.currentStepIndex + 1);
+    const nxt = this.currentStepIndex + 1;
+    const total = Math.max(this.steps.length, this.meta?.totalSteps || 4);
+    if (nxt < this.steps.length) {
+      this.pendingJumpStepIndex = null;
+      this.playStep(nxt);
+    } else if (nxt < total && (this.generatingStepIndex !== null || !this.generationComplete)) {
+      this.pendingJumpStepIndex = nxt;
+      window.toast?.(`Generating Concept ${nxt + 1}… will play as soon as ready!`);
+      this.onStateChange(this.status);
     } else {
       window.toast?.('Lesson complete! Tap Replay or open Next Page.');
     }
@@ -705,12 +834,15 @@ export class LessonEngine {
           subtitleHistory: this.subtitleHistory.slice(-40),
           doubts: this.doubts.slice(-25),
           boardState: this.boardState,
+          generationComplete: this.generationComplete,
+          schemaVersion: 4,
         });
       } catch (e) {}
     }, 350);
   }
 
   destroy() {
+    this._genRunId++;
     this._abortCtrl?.abort();
     this.stopAudioOnly();
     if (this._saveTimer) clearTimeout(this._saveTimer);
@@ -721,7 +853,9 @@ export async function loadSavedLesson(fileId, pageNum) {
   try {
     if (!window.DB || typeof window.DB.getLesson !== 'function') return null;
     const saved = await window.DB.getLesson(`lesson_${fileId}_p${pageNum}`);
-    if (saved && Array.isArray(saved.steps) && saved.steps.length) return saved;
+    if (saved && saved.schemaVersion >= 4 && Array.isArray(saved.steps) && saved.steps.length) {
+      return saved;
+    }
   } catch {}
   return null;
 }

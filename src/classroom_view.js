@@ -124,11 +124,9 @@ export async function openFullClassroom({
   document.body.appendChild(stage);
 
   const canvas = document.getElementById('cr-board-canvas');
-  const board = new ClassroomBoard(canvas, initialSource?.boardState || { theme: savedBoardTheme });
-
   const state = {
     stage,
-    board,
+    board: null,
     engine: null,
     fileId,
     doc,
@@ -141,7 +139,21 @@ export async function openFullClassroom({
     subSize: savedSubSize,
     subBg: savedSubBg,
     activeDrawer: null,
+    chromeHidden: false,
   };
+
+  const board = new ClassroomBoard(
+    canvas,
+    initialSource?.boardState || { theme: savedBoardTheme },
+    {
+      onBoardTap: () => toggleClassroomChrome(state),
+      onZoomChange: (z) => {
+        const lbl = document.getElementById('cr-zoom-reset');
+        if (lbl) lbl.textContent = `${Math.round((z || 1) * 100)}%`;
+      },
+    }
+  );
+  state.board = board;
 
   const engine = new LessonEngine({
     fileId,
@@ -200,6 +212,9 @@ export async function openFullClassroom({
     renderClassroomStepper(state);
     renderCinematicSubtitle(state, [], -1, step.spokenText || '');
     updateClassroomUI(state, 'paused');
+    if (!initialSource.generationComplete) {
+      engine.resumeRemainingChunks();
+    }
     if (resumeData) {
       engine.playStep(idx);
     } else {
@@ -212,49 +227,62 @@ export async function openFullClassroom({
 
 function buildClassroomHtml({ bookTitle, pageNum, lang, speed, boardTheme, subSize, subBg }) {
   return `
-    <header class="cr-top-bar">
-      <div class="cr-top-left">
-        <button type="button" id="cr-exit-btn" class="cr-squircle-btn" title="Exit Classroom" aria-label="Exit Classroom">
-          ${window.icon('chevLeft', 'icon icon-sm')}
-        </button>
-        <div class="cr-topic-meta">
-          <div class="cr-topic-title" id="cr-chapter-title">${esc(bookTitle)}</div>
-          <div class="cr-topic-sub" id="cr-step-sub">Page ${pageNum} · Preparing studio board…</div>
+    <div id="cr-top-chrome" class="cr-top-chrome">
+      <header class="cr-top-bar">
+        <div class="cr-top-left">
+          <button type="button" id="cr-exit-btn" class="cr-squircle-btn" title="Exit Classroom" aria-label="Exit Classroom">
+            ${window.icon('chevLeft', 'icon icon-sm')}
+          </button>
+          <div class="cr-topic-meta">
+            <div class="cr-topic-title" id="cr-chapter-title">${esc(bookTitle)}</div>
+            <div class="cr-topic-sub" id="cr-step-sub">Page ${pageNum} · Preparing studio board…</div>
+          </div>
         </div>
-      </div>
 
-      <div class="cr-top-right">
-        <button type="button" id="cr-theme-btn" class="cr-mode-chip" title="Switch Chalkboard / Whiteboard">
-          <span>${boardTheme === 'chalkboard' ? 'Whiteboard' : 'Chalkboard'}</span>
-        </button>
-        <button type="button" id="cr-orient-btn" class="cr-squircle-btn" title="Toggle Orientation (Auto / Landscape / Portrait)">
-          ${window.icon('rotate', 'icon icon-sm')}
-        </button>
-        <button type="button" id="cr-more-btn" class="cr-squircle-btn" title="Classroom Options">
-          ${window.icon('sliders', 'icon icon-sm')}
-        </button>
-      </div>
-    </header>
+        <div class="cr-top-right">
+          <button type="button" id="cr-theme-btn" class="cr-mode-chip" title="Switch Chalkboard / Whiteboard">
+            <span>${boardTheme === 'chalkboard' ? 'Whiteboard' : 'Chalkboard'}</span>
+          </button>
+          <button type="button" id="cr-orient-btn" class="cr-squircle-btn" title="Toggle Orientation (Auto / Landscape / Portrait)">
+            ${window.icon('rotate', 'icon icon-sm')}
+          </button>
+          <button type="button" id="cr-more-btn" class="cr-squircle-btn" title="Classroom Options">
+            ${window.icon('sliders', 'icon icon-sm')}
+          </button>
+        </div>
+      </header>
 
-    <nav id="cr-stepper" class="cr-stepper" aria-label="Lesson Concepts">
-      <button type="button" class="cr-step-tab active" data-step="0">1</button>
-      <button type="button" class="cr-step-tab" data-step="1" disabled>2</button>
-      <button type="button" class="cr-step-tab" data-step="2" disabled>3</button>
-      <button type="button" class="cr-step-tab" data-step="3" disabled>4</button>
-    </nav>
+      <nav id="cr-stepper" class="cr-stepper" aria-label="Lesson Concepts">
+        <button type="button" class="cr-step-tab active" data-step="0">1</button>
+        <button type="button" class="cr-step-tab" data-step="1" disabled>2</button>
+        <button type="button" class="cr-step-tab" data-step="2" disabled>3</button>
+        <button type="button" class="cr-step-tab" data-step="3" disabled>4</button>
+      </nav>
 
-    <div class="cr-step-progress-line"><div id="cr-step-bar" class="cr-step-bar-fill"></div></div>
+      <div class="cr-step-progress-line"><div id="cr-step-bar" class="cr-step-bar-fill"></div></div>
+    </div>
 
     <main class="cr-stage-wrap">
       <div id="cr-board-canvas" class="cr-board-canvas"></div>
 
       <div class="cr-board-tools" aria-label="Board drawing tools">
-        <button type="button" class="cr-tool-btn active" data-tool="view" title="Pan & Zoom">Move</button>
+        <button type="button" class="cr-tool-btn active" data-tool="view" title="Scroll & Tap">Move</button>
         <button type="button" class="cr-tool-btn" data-tool="pen" title="Draw on Board">${window.icon('edit', 'icon icon-xs')}<span>Pen</span></button>
+        <div id="cr-pen-colors" class="cr-pen-colors" hidden>
+          <button type="button" class="cr-pen-dot active" data-pcol="amber" title="Amber Pen" aria-label="Amber Pen"></button>
+          <button type="button" class="cr-pen-dot" data-pcol="teal" title="Teal Pen" aria-label="Teal Pen"></button>
+          <button type="button" class="cr-pen-dot" data-pcol="coral" title="Coral Pen" aria-label="Coral Pen"></button>
+          <button type="button" class="cr-pen-dot" data-pcol="cream" title="Ink Pen" aria-label="Ink Pen"></button>
+        </div>
         <button type="button" class="cr-tool-btn" data-tool="eraser" title="Erase Strokes">Erase</button>
         <button type="button" id="cr-undo-btn" class="cr-tool-btn" title="Undo">${window.icon('rotateCcw', 'icon icon-xs')}</button>
+        <button type="button" id="cr-clear-ink-btn" class="cr-tool-btn" title="Clear Hand Strokes">Clear</button>
+        <span class="cr-tool-sep" aria-hidden="true"></span>
+        <button type="button" id="cr-follow-btn" class="cr-tool-btn active" title="Auto-follow teacher pen">Follow</button>
         <button type="button" id="cr-png-btn" class="cr-tool-btn" title="Download Board PNG">${window.icon('download', 'icon icon-xs')}</button>
+        <button type="button" id="cr-zoom-out" class="cr-tool-btn" title="Zoom Out">&minus;</button>
         <button type="button" id="cr-zoom-reset" class="cr-tool-btn" title="Reset Zoom">100%</button>
+        <button type="button" id="cr-zoom-in" class="cr-tool-btn" title="Zoom In">+</button>
       </div>
 
       <div id="cr-checkin-card" class="cr-checkin-card" hidden></div>
@@ -268,28 +296,30 @@ function buildClassroomHtml({ bookTitle, pageNum, lang, speed, boardTheme, subSi
       <div id="cr-drawer" class="cr-drawer" hidden></div>
     </main>
 
-    <!-- Non-overlapping Dedicated Cinematic Subtitle Band -->
-    <div id="cr-subtitle-stage" class="cr-subtitle-stage cr-sub-size-${subSize} cr-sub-bg-${subBg}">
-      <div id="cr-subtitle-text" class="cr-subtitle-text">Starting live teacher explanation…</div>
+    <div id="cr-bottom-chrome" class="cr-bottom-chrome">
+      <!-- Non-overlapping Dedicated Cinematic Subtitle Band -->
+      <div id="cr-subtitle-stage" class="cr-subtitle-stage cr-sub-size-${subSize} cr-sub-bg-${subBg}">
+        <div id="cr-subtitle-text" class="cr-subtitle-text">Starting live teacher explanation…</div>
+      </div>
+
+      <footer class="cr-controls-bar">
+        <div class="cr-ctrl-group cr-ctrl-left">
+          <button type="button" id="cr-boards-btn" class="cr-ctrl-chip" title="Board Pages">${window.icon('grid', 'icon icon-xs')}<span id="cr-boards-lbl">1/1</span></button>
+          <button type="button" id="cr-subs-btn" class="cr-ctrl-chip" title="Subtitles & History">${window.icon('fileText', 'icon icon-xs')}<span>Subs</span></button>
+        </div>
+
+        <div class="cr-ctrl-center">
+          <button type="button" id="cr-prev-topic" class="cr-nav-pill" title="Previous Topic">${window.icon('chevLeft', 'icon icon-xs')}<span>Prev</span></button>
+          <button type="button" id="cr-play-pause" class="cr-play-pill" title="Pause / Resume">${window.icon('pause', 'icon icon-xs')}<span>Pause</span></button>
+          <button type="button" id="cr-next-topic" class="cr-nav-pill" title="Next Topic"><span>Next</span>${window.icon('chevRight', 'icon icon-xs')}</button>
+        </div>
+
+        <div class="cr-ctrl-group cr-ctrl-right">
+          <button type="button" id="cr-repeat-btn" class="cr-ctrl-chip" title="Repeat Step">${window.icon('rotateCcw', 'icon icon-xs')}</button>
+          <button type="button" id="cr-speed-btn" class="cr-ctrl-chip" title="Teaching Speed"><span>${speed}x</span></button>
+        </div>
+      </footer>
     </div>
-
-    <footer class="cr-controls-bar">
-      <div class="cr-ctrl-group cr-ctrl-left">
-        <button type="button" id="cr-boards-btn" class="cr-ctrl-chip" title="Board Pages">${window.icon('grid', 'icon icon-xs')}<span id="cr-boards-lbl">1/1</span></button>
-        <button type="button" id="cr-subs-btn" class="cr-ctrl-chip" title="Subtitles & History">${window.icon('fileText', 'icon icon-xs')}<span>Subs</span></button>
-      </div>
-
-      <div class="cr-ctrl-center">
-        <button type="button" id="cr-prev-topic" class="cr-nav-pill" title="Previous Topic">${window.icon('chevLeft', 'icon icon-xs')}<span>Prev</span></button>
-        <button type="button" id="cr-play-pause" class="cr-play-pill" title="Pause / Resume">${window.icon('pause', 'icon icon-xs')}<span>Pause</span></button>
-        <button type="button" id="cr-next-topic" class="cr-nav-pill" title="Next Topic"><span>Next</span>${window.icon('chevRight', 'icon icon-xs')}</button>
-      </div>
-
-      <div class="cr-ctrl-group cr-ctrl-right">
-        <button type="button" id="cr-repeat-btn" class="cr-ctrl-chip" title="Repeat Step">${window.icon('rotateCcw', 'icon icon-xs')}</button>
-        <button type="button" id="cr-speed-btn" class="cr-ctrl-chip" title="Teaching Speed"><span>${speed}x</span></button>
-      </div>
-    </footer>
   `;
 }
 
@@ -298,19 +328,23 @@ function renderClassroomStepper(state) {
   if (!stepper || !state.engine) return;
   const total = Math.max(state.engine.steps.length, state.engine.meta?.totalSteps || 4);
   const cur = state.engine.currentStepIndex;
+  const genIdx = state.engine.generatingStepIndex;
 
   let html = '';
   for (let i = 0; i < total; i++) {
     const ready = Boolean(state.engine.steps[i]);
     const isActive = i === cur;
     const isDone = state.engine.completedSteps?.has(i);
-    html += `<button type="button" class="cr-step-tab ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}" data-step="${i}" ${ready ? '' : 'disabled'}>${i + 1}</button>`;
+    const isGenerating = !ready && genIdx !== null && i === genIdx;
+    const canQueue = !ready && genIdx !== null;
+    const lbl = isGenerating ? `${i + 1}…` : `${i + 1}`;
+    html += `<button type="button" class="cr-step-tab ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isGenerating ? 'is-generating' : ''}" data-step="${i}" ${ready || canQueue ? '' : 'disabled'}>${lbl}</button>`;
   }
   stepper.innerHTML = html;
   stepper.querySelectorAll('.cr-step-tab').forEach((btn) => {
     btn.onclick = () => {
       const idx = Number(btn.dataset.step);
-      if (state.engine?.steps[idx]) state.engine.playStep(idx);
+      state.engine?.goToStep(idx);
     };
   });
 }
@@ -322,7 +356,9 @@ function updateClassroomStepHeader(state, step, idx) {
   if (chEl && step?.title) chEl.textContent = step.title;
   if (subEl) {
     const langTag = state.engine?.language === 'hindi' ? 'हिंदी' : state.engine?.language === 'english' ? 'English' : 'Hinglish';
-    subEl.innerHTML = `Page ${state.pageNum} · Concept ${idx + 1}/${total} · <span class="cr-sub-accent">${langTag}</span>`;
+    const genIdx = state.engine?.generatingStepIndex;
+    const genSuffix = genIdx !== null && genIdx !== undefined ? ` · Preparing ${genIdx + 1}/${total}…` : '';
+    subEl.innerHTML = `Page ${state.pageNum} · Concept ${idx + 1}/${total} · <span class="cr-sub-accent">${langTag}</span>${genSuffix}`;
   }
 }
 
@@ -335,6 +371,10 @@ function updateClassroomUI(state, status, errMsg) {
       : status === 'doubt'
       ? `${window.icon('play', 'icon icon-xs')}<span>Resume</span>`
       : `${window.icon('play', 'icon icon-xs')}<span>${status === 'ended' ? 'Replay' : 'Play'}</span>`;
+  }
+
+  if (state.engine?.activeStep) {
+    updateClassroomStepHeader(state, state.engine.activeStep, state.engine.currentStepIndex);
   }
 
   if (status === 'error' && errMsg) {
@@ -690,6 +730,28 @@ function openMoreMenuDrawer(state) {
   document.getElementById('cr-m-exit').onclick = () => closeFullClassroom();
 }
 
+function toggleClassroomChrome(state, forceShow) {
+  if (!state?.stage) return;
+  // If a drawer is open, close it cleanly first or keep chrome visible
+  if (state.activeDrawer && forceShow === undefined) {
+    closeDrawer(state);
+    return;
+  }
+  const topEl = document.getElementById('cr-top-chrome');
+  const botEl = document.getElementById('cr-bottom-chrome');
+  if (!state.chromeHidden) {
+    if (topEl && topEl.offsetHeight > 0) {
+      state.stage.style.setProperty('--cr-top-h', `${topEl.offsetHeight}px`);
+    }
+    if (botEl && botEl.offsetHeight > 0) {
+      state.stage.style.setProperty('--cr-bot-h', `${botEl.offsetHeight}px`);
+    }
+  }
+  const nextHidden = forceShow !== undefined ? !forceShow : !state.chromeHidden;
+  state.chromeHidden = nextHidden;
+  state.stage.classList.toggle('cr-chrome-hidden', nextHidden);
+}
+
 function closeDrawer(state) {
   const drawer = document.getElementById('cr-drawer');
   if (drawer) drawer.hidden = true;
@@ -767,19 +829,44 @@ function bindClassroomEvents(state, selectedText, topicFocus) {
     document.getElementById('cr-speed-btn').innerHTML = `<span>${next}x</span>`;
   };
 
+  const penColorsEl = document.getElementById('cr-pen-colors');
   state.stage.querySelectorAll('.cr-tool-btn[data-tool]').forEach((btn) => {
     btn.onclick = () => {
       state.stage.querySelectorAll('.cr-tool-btn[data-tool]').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      board.setTool(btn.dataset.tool);
+      const tool = btn.dataset.tool;
+      board.setTool(tool);
+      if (penColorsEl) penColorsEl.hidden = tool !== 'pen';
+    };
+  });
+  state.stage.querySelectorAll('.cr-pen-dot[data-pcol]').forEach((dot) => {
+    dot.onclick = () => {
+      state.stage.querySelectorAll('.cr-pen-dot').forEach((d) => d.classList.remove('active'));
+      dot.classList.add('active');
+      board.setPenColor(dot.dataset.pcol);
     };
   });
   document.getElementById('cr-undo-btn').onclick = () => board.undo();
+  document.getElementById('cr-clear-ink-btn').onclick = () => {
+    board.clearUserStrokes();
+    window.toast?.('Cleared your pen strokes on this board.');
+  };
+  const followBtn = document.getElementById('cr-follow-btn');
+  if (followBtn) {
+    followBtn.onclick = () => {
+      const next = !board.autoFollow;
+      board.setAutoFollow(next);
+      followBtn.classList.toggle('active', next);
+      window.toast?.(next ? 'Auto-follow pen: On' : 'Auto-follow pen: Off');
+    };
+  }
   document.getElementById('cr-png-btn').onclick = () => {
     const slug = (engine.activeStep?.title || 'classroom').replace(/[^a-z0-9]+/gi, '_').slice(0, 32);
     board.exportPng(`${slug}_p${state.pageNum}.png`);
   };
+  document.getElementById('cr-zoom-out').onclick = () => board.setZoom((board.state.zoom || 1) - 0.25);
   document.getElementById('cr-zoom-reset').onclick = () => board.resetZoom();
+  document.getElementById('cr-zoom-in').onclick = () => board.setZoom((board.state.zoom || 1) + 0.25);
 }
 
 window.openFullClassroom = openFullClassroom;

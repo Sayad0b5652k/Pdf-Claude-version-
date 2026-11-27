@@ -34,7 +34,19 @@ function resolveMiniBoardTheme() {
   return document.documentElement.dataset.theme === 'dark' ? 'chalkboard' : 'whiteboard';
 }
 
-const MACRO_CUE_TYPES = new Set(['flowchart', 'cycle', 'tree', 'comparison', 'venn', 'timeline', 'barchart']);
+const MACRO_CUE_TYPES = new Set([
+  'flowchart',
+  'cycle',
+  'tree',
+  'comparison',
+  'venn',
+  'timeline',
+  'barchart',
+  'cause_effect',
+  'pyramid',
+  'matrix',
+  'callout',
+]);
 
 function deriveVisualCuesForStep(step) {
   const existing = Array.isArray(step?.boardCues) ? step.boardCues : [];
@@ -43,37 +55,21 @@ function deriveVisualCuesForStep(step) {
   }
 
   const cues = [
-    { type: 'title', atProgress: 0, text: step?.title || 'Key Concept', subtitle: step?.keyFormula || '', color: 'amber' },
+    { type: 'title', atProgress: 0, text: step?.title || 'Key Concept', sublabel: step?.conceptTag || '', color: 'amber' },
   ];
 
   const branches = [];
   const palette = ['teal', 'amber', 'mint', 'coral'];
   const icons = ['bulb', 'gear', 'book', 'leaf'];
 
-  if (step?.keyFormula) {
-    branches.push({
-      title: String(step.keyFormula).slice(0, 38),
-      sublabel: 'Core Formula / Rule',
-      color: 'amber',
-      icon: 'scale',
-    });
-  }
   if (Array.isArray(step?.keyTerms) && step.keyTerms.length) {
-    step.keyTerms.slice(0, 3).forEach((term, idx) => {
+    step.keyTerms.slice(0, 4).forEach((term, idx) => {
       branches.push({
         title: String(term).slice(0, 32),
-        sublabel: 'Key Concept',
+        sub: 'Core Concept',
         color: palette[idx % palette.length],
         icon: icons[idx % icons.length],
       });
-    });
-  }
-  if (step?.realLifeExample && branches.length < 4) {
-    branches.push({
-      title: 'Real-Life Example',
-      sublabel: String(step.realLifeExample).slice(0, 46),
-      color: 'mint',
-      icon: 'globe',
     });
   }
   if (!branches.length && existing.length) {
@@ -83,7 +79,7 @@ function deriveVisualCuesForStep(step) {
       .forEach((c, idx) => {
         branches.push({
           title: String(c.text).slice(0, 34),
-          sublabel: c.sublabel || '',
+          sub: c.sublabel || '',
           color: c.color || palette[idx % palette.length],
           icon: c.icon || icons[idx % icons.length],
         });
@@ -94,6 +90,7 @@ function deriveVisualCuesForStep(step) {
     cues.push({
       type: 'tree',
       atProgress: 0.14,
+      title: 'Concept Map',
       root: {
         title: String(step?.title || 'Concept').slice(0, 30),
         shape: 'pill',
@@ -102,22 +99,35 @@ function deriveVisualCuesForStep(step) {
       },
       branches,
     });
-    return cues;
   }
+  if (step?.keyFormula) {
+    cues.push({
+      type: 'equation',
+      atProgress: 0.45,
+      text: String(step.keyFormula),
+      color: 'amber',
+    });
+  }
+  if (step?.realLifeExample) {
+    cues.push({
+      type: 'callout',
+      atProgress: 0.62,
+      label: 'Real-Life Example',
+      icon: 'globe',
+      text: String(step.realLifeExample),
+      color: 'teal',
+    });
+  }
+  if (cues.length > 1) return cues;
 
   if (existing.length) return existing;
   return [
     ...cues,
     {
-      type: 'box',
+      type: 'callout',
       atProgress: 0.16,
-      x: 160,
-      y: 210,
-      w: 680,
-      h: 140,
-      shape: 'pill',
-      text: String(step?.title || 'Concept Overview').slice(0, 44),
-      sublabel: String(step?.realLifeExample || step?.spokenText || '').slice(0, 68),
+      label: 'Overview',
+      text: String(step?.spokenText || step?.title || 'Concept Overview').slice(0, 200),
       color: 'teal',
     },
   ];
@@ -250,6 +260,9 @@ export async function openTeacherExplainer({ selectedText = '', pageNum = null, 
     syncExplainerStep(state, existingSaved.steps[startIdx], startIdx);
     updateExplainerStatusUI(state, 'paused');
     renderExplainerStepper(state);
+    if (!existingSaved.generationComplete) {
+      engine.resumeRemainingChunks();
+    }
   } else {
     engine.generateAndStart({ topicFocus, selectedText, autoPlay: true });
   }
@@ -345,19 +358,23 @@ function renderExplainerStepper(state) {
   if (!stepper || !state.engine) return;
   const total = Math.max(state.engine.steps.length, state.engine.meta?.totalSteps || 4);
   const cur = state.engine.currentStepIndex;
+  const genIdx = state.engine.generatingStepIndex;
 
   let html = '';
   for (let i = 0; i < total; i++) {
     const ready = Boolean(state.engine.steps[i]);
     const isActive = i === cur;
     const isDone = state.engine.completedSteps?.has(i);
-    html += `<button type="button" class="exp-step-tab ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}" data-step="${i}" ${ready ? '' : 'disabled'}>${i + 1}</button>`;
+    const isGenerating = !ready && genIdx !== null && i === genIdx;
+    const canQueue = !ready && genIdx !== null;
+    const lbl = isGenerating ? `${i + 1}…` : `${i + 1}`;
+    html += `<button type="button" class="exp-step-tab ${isActive ? 'active' : ''} ${isDone ? 'done' : ''} ${isGenerating ? 'is-generating' : ''}" data-step="${i}" ${ready || canQueue ? '' : 'disabled'}>${lbl}</button>`;
   }
   stepper.innerHTML = html;
   stepper.querySelectorAll('.exp-step-tab').forEach((btn) => {
     btn.onclick = () => {
       const idx = Number(btn.dataset.step);
-      if (state.engine?.steps[idx]) state.engine.playStep(idx);
+      state.engine?.goToStep(idx);
     };
   });
 }
@@ -370,7 +387,10 @@ function updateExplainerStatusUI(state, status, errMsg) {
   if (stepCounter && state.engine) {
     const total = Math.max(state.engine.steps.length, state.engine.meta?.totalSteps || 4);
     const cur = state.engine.steps.length ? state.engine.currentStepIndex + 1 : 0;
-    stepCounter.textContent = cur ? `Step ${cur}/${total}` : 'Starting…';
+    const genIdx = state.engine.generatingStepIndex;
+    stepCounter.textContent = cur
+      ? `Step ${cur}/${total}${genIdx !== null ? ` (Gen ${genIdx + 1})` : ''}`
+      : 'Starting…';
   }
   if (langBadge && state.engine) {
     langBadge.textContent = status === 'loading'
@@ -501,7 +521,7 @@ function syncExplainerStep(state, step, idx) {
       const miniCanvas = document.getElementById('exp-mini-board');
       if (miniCanvas) {
         const board = new ClassroomBoard(miniCanvas, { theme: boardTheme }, { compact: true });
-        board.setSingleStepCues(visualCues, false);
+        board.setSingleStepCues(visualCues, false, step);
         board.setProgress(Math.max(0.32, state.engine?.stepProgress || 0.45));
         board.setTool(state.penMode ? 'pen' : 'view');
         state.miniBoard = board;

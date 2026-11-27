@@ -3668,6 +3668,10 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
         language = "hinglish",
         mode = "classroom",
         simplifyStep = null,
+        chunkMode = false,
+        chunkIndex = 0,
+        outline = null,
+        previousStepsSummary = [],
         stream: useStream = true,
         customKey,
       } = req.body || {};
@@ -3686,56 +3690,113 @@ Now reply in ${userLang}, in a natural conversational voice, with only as much d
         ? "Warm, clear conversational English like a great tutor."
         : "Natural conversational Hinglish (mix of easy everyday Hindi in Latin script + clear English academic terms, the way the best Indian teachers explain to students). NEVER write unreadable Devanagari-English gibberish; keep Hinglish fluent and easy for Indian Neural TTS to pronounce clearly.";
 
-      const sysInstruction = `You are an elite visual teacher inside S.A.Y.A.D. who teaches step-by-step using live hand-drawn WHITEBOARD FLOWCHARTS & DIAGRAMS.
+      const sysInstruction = `You are an elite visual classroom teacher inside S.A.Y.A.D. who teaches in full depth using a SCROLLABLE HAND-DRAWN WHITEBOARD (auto-stacked vertically with ZERO overlap).
 Your teaching MUST stay 100% grounded in the provided document sentences with ZERO hallucinations.
 TEACHING LANGUAGE: ${langDesc}
 
-VISUAL TEACHING RULE (CRITICAL):
-- NEVER dump just plain text bullets! Every step MUST feature a clear visual diagram ('flowchart', 'cycle', 'tree', 'comparison', 'venn', 'timeline', or 'barchart') paired cleanly with a crisp 'title' and optional 'equation' or 1-2 short bottom takeaway 'bullet's.
-- Keep text inside diagram nodes SHORT (2–5 words title, 2–6 words sub) so everything looks crisp like a Golpo AI whiteboard video!
+FULL-WHITEBOARD RICH VISUAL TEACHING RULES (CRITICAL):
+- NEVER produce sparse 1-2 point boards or bare 'arrow' cues! Use the full canvas richly per step with 5 to 8 semantic cues combining:
+  (a) "title" (with crisp "sublabel"),
+  (b) 1 or 2 complementary MACRO DIAGRAMS (e.g. a 3–6 node "flowchart" + a "comparison" / "cause_effect" / "matrix" / "tree" / "pyramid" / "cycle" / "timeline" / "barchart" / "venn"), giving EACH diagram its own descriptive "title" field so multiple charts on the same board read like a structured textbook lecture!
+  (c) "equation" (if any formula, reaction, ratio, or key rule exists),
+  (d) "callout" (for a vivid "Real-Life Analogy", "Exam Tip", or "Core Rule"),
+  (e) 2 to 4 detailed numbered "bullet" takeaways covering definitions, steps, quantities, exceptions, or dates from the PDF.
+- Keep text inside flowchart/tree/cycle nodes scannable (2–5 word title, 3–8 word sub), and put detailed explanations cleanly into "comparison", "cause_effect", "matrix", "callout", and "bullet" cues!
 - Available semantic vector icons ('icon' field): "sun", "leaf", "chloroplast", "water", "atom", "dna", "cell", "heart", "brain", "bulb", "book", "crown", "castle", "scroll", "mountain", "ship", "people", "flag", "fire", "coin", "map", "wheel", "gear", "globe", "scale".
 
-SEMANTIC BOARD CUE TYPES (auto-arranged cleanly with ZERO overlaps — omit x/y for auto-layout):
-1. {"type":"title","atProgress":0.0,"text":"Short Step Title","sublabel":"Optional short tag","color":"amber"}
-2. {"type":"flowchart","atProgress":0.12,"direction":"row","nodes":[{"title":"Sunlight","sub":"Light energy","shape":"circle","icon":"sun","color":"amber"},{"title":"Photolysis","sub":"Splits H2O","shape":"box","icon":"water","color":"teal"},{"title":"ATP & NADPH","sub":"Energy carriers","shape":"pill","icon":"bulb","color":"coral"}],"edges":[{"from":0,"to":1,"label":"absorbs"},{"from":1,"to":2,"label":"produces"}]}
-   (shapes supported: "box" | "pill" | "circle" | "diamond" | "cloud"; 2 to 4 nodes max)
-3. {"type":"cycle","atProgress":0.12,"centerTitle":"Calvin Cycle","nodes":[{"title":"Fixation","sub":"CO2 + RuBP","icon":"leaf","color":"teal"},{"title":"Reduction","sub":"Uses ATP","icon":"bulb","color":"amber"},{"title":"Glucose","sub":"Sugar formed","icon":"cell","color":"mint"},{"title":"Regenerate","sub":"RuBP ready","icon":"wheel","color":"coral"}]}
-4. {"type":"tree","atProgress":0.12,"root":{"title":"Photosynthesis","sub":"Plant food process","icon":"leaf","color":"mint"},"branches":[{"title":"Light Reaction","sub":"Thylakoid · O2","icon":"sun","color":"amber"},{"title":"Dark Reaction","sub":"Stroma · Glucose","icon":"chloroplast","color":"teal"}]}
-5. {"type":"comparison","atProgress":0.12,"left":{"title":"Light Reaction","color":"amber","points":["Needs sunlight","Produces ATP & O2"]},"right":{"title":"Calvin Cycle","color":"teal","points":["In Stroma","Makes Glucose"]}}
-6. {"type":"venn","atProgress":0.12,"left":{"title":"Set A","sub":"Unique A","color":"amber"},"right":{"title":"Set B","sub":"Unique B","color":"teal"},"overlap":"Shared core"}
-7. {"type":"timeline","atProgress":0.12,"items":[{"year":"Stage 1","text":"Absorption"},{"year":"Stage 2","text":"Splitting H2O"},{"year":"Stage 3","text":"Glucose"}]}
-8. {"type":"barchart","atProgress":0.15,"title":"Comparison","bars":[{"label":"A","value":40,"color":"amber"},{"label":"B","value":85,"color":"teal"}]}
-9. {"type":"equation","atProgress":0.62,"text":"6CO2 + 6H2O -> C6H12O6 + 6O2","color":"amber"}
-10. {"type":"bullet","atProgress":0.72,"text":"1 short crisp takeaway line","color":"teal"}`;
+SEMANTIC BOARD CUE TYPES (auto-stacked vertically with ZERO overlap — omit x/y):
+1. {"type":"title","atProgress":0.0,"text":"Step Title","sublabel":"Concise scope/topic subtitle","color":"amber"}
+2. {"type":"flowchart","atProgress":0.1,"title":"Process Flow","direction":"row","nodes":[{"title":"Sunlight","sub":"Absorbed by pigment","shape":"circle","icon":"sun","color":"amber"},{"title":"Photolysis","sub":"Splits H2O molecules","shape":"box","icon":"water","color":"teal"},{"title":"Electron Flow","sub":"Moves along carriers","shape":"diamond","icon":"gear","color":"mint"},{"title":"ATP & NADPH","sub":"Chemical energy stored","shape":"pill","icon":"bulb","color":"coral"}],"edges":[{"from":0,"to":1,"label":"excites"},{"from":1,"to":2,"label":"releases e-"},{"from":2,"to":3,"label":"synthesizes"}]}
+   (shapes: "box" | "pill" | "circle" | "diamond" | "cloud"; 2 to 6 nodes supported — 4-6 nodes auto-flow into a clean 2-row S-curve!)
+3. {"type":"cycle","atProgress":0.15,"title":"Cycle Overview","centerTitle":"Calvin Cycle","nodes":[{"title":"Fixation","sub":"CO2 + RuBP","icon":"leaf","color":"teal"},{"title":"Reduction","sub":"Uses ATP","icon":"bulb","color":"amber"},{"title":"Glucose","sub":"Sugar formed","icon":"cell","color":"mint"},{"title":"Regenerate","sub":"RuBP ready","icon":"wheel","color":"coral"}]}
+4. {"type":"tree","atProgress":0.15,"title":"Concept Breakdown","root":{"title":"Photosynthesis","sub":"Energy conversion","icon":"leaf","color":"mint"},"branches":[{"title":"Light Reaction","sub":"Thylakoid · ATP + O2","icon":"sun","color":"amber"},{"title":"Calvin Cycle","sub":"Stroma · Glucose","icon":"chloroplast","color":"teal"},{"title":"Byproduct","sub":"Oxygen released","icon":"water","color":"coral"}]}
+5. {"type":"comparison","atProgress":0.35,"title":"Side-by-Side Comparison","left":{"title":"Side A","color":"amber","points":["Point 1 detail","Point 2 detail","Point 3 detail"]},"right":{"title":"Side B","color":"teal","points":["Point 1 detail","Point 2 detail","Point 3 detail"]}}
+6. {"type":"cause_effect","atProgress":0.4,"title":"Cause -> Effect Chain","pairs":[{"cause":"Chlorophyll absorbs light","via":"triggers","effect":"Water splits into H+, e-, O2"},{"cause":"Proton gradient builds","via":"drives","effect":"ATP synthase makes ATP"}]}
+7. {"type":"pyramid","atProgress":0.3,"title":"Hierarchy / Levels","tiers":[{"title":"Top Level","sub":"Key detail","color":"coral"},{"title":"Middle Level","sub":"Supporting mechanism","color":"amber"},{"title":"Foundation","sub":"Base requirement","color":"teal"}]}
+8. {"type":"matrix","atProgress":0.42,"title":"Key Summary Table","headers":["Component","Location","Main Role"],"rows":[["Photosystem","Thylakoid","Captures photons"],["ATP Synthase","Membrane","Generates ATP"]]}
+9. {"type":"venn","atProgress":0.35,"title":"Overlap & Differences","left":{"title":"Set A","sub":"Unique A","color":"amber"},"right":{"title":"Set B","sub":"Unique B","color":"teal"},"overlap":"Shared core"}
+10. {"type":"timeline","atProgress":0.3,"title":"Sequence / Timeline","items":[{"year":"Stage 1","text":"Light capture"},{"year":"Stage 2","text":"Water split"},{"year":"Stage 3","text":"ATP formed"},{"year":"Stage 4","text":"Sugar built"}]}
+11. {"type":"barchart","atProgress":0.4,"title":"Data Comparison","bars":[{"label":"A","value":40,"color":"amber"},{"label":"B","value":85,"color":"teal"}]}
+12. {"type":"equation","atProgress":0.58,"text":"6CO2 + 6H2O -> C6H12O6 + 6O2","color":"amber"}
+13. {"type":"callout","atProgress":0.66,"label":"Real-Life Analogy / Exam Tip","icon":"bulb","text":"Clear 1-2 sentence relatable analogy or exam caution from the source.","color":"teal"}
+14. {"type":"bullet","atProgress":0.76,"text":"Detailed, crisp factual takeaway anchored in the text.","color":"mint"}`;
 
       let prompt = "";
       if (simplifyStep) {
-        prompt = `Re-explain ONLY this step in MUCH SIMPLER language with a vivid everyday real-life Indian analogy and a super clear visual flowchart/tree so even a 10-year-old grasps it instantly, staying 100% accurate to the source text.
+        prompt = `Re-explain ONLY this step in MUCH SIMPLER language with a vivid everyday real-life Indian analogy and a clear multi-part visual board (flowchart/tree + callout + key bullets) so even a 10-year-old grasps it thoroughly, staying 100% accurate to the source text.
 ORIGINAL STEP TITLE: ${simplifyStep.title || ""}
 ORIGINAL SOURCE QUOTE: ${simplifyStep.sourceQuote || ""}
 SOURCE SENTENCES FROM PAGE ${pageNum}:
 ${sentencesText}
 
 Output ONE compact JSON object on a single line (no markdown fences):
-{"stepIndex":${Number(simplifyStep.stepIndex || 0)},"title":"Simpler: ...","conceptTag":"Simplified","spokenText":"...","realLifeExample":"...","keyFormula":"...","keyTerms":["term1"],"sourceType":"quote","sourceSentenceIds":["S1"],"sourceQuote":"verbatim exact substring from source sentences","newBoardPage":false,"checkQuestion":"","boardCues":[...]}`;
-      } else {
+{"stepIndex":${Number(simplifyStep.stepIndex || 0)},"title":"Simpler: ...","conceptTag":"Simplified","spokenText":"90-140 word warm explanation...","realLifeExample":"...","keyFormula":"...","keyTerms":["term1"],"sourceType":"quote","sourceSentenceIds":["S1"],"sourceQuote":"verbatim exact substring from source sentences","newBoardPage":false,"checkQuestion":"","boardCues":[5 to 7 rich non-overlapping semantic cues]}`;
+      } else if (chunkMode && Number(chunkIndex) === 0) {
         prompt = `Book: "${bookTitle || "Study Material"}" | Chapter: "${chapterTitle || `Page ${pageNum}`}" | Page ${pageNum} of ${totalPages}
-${selectedText ? `STUDENT SELECTED PASSAGE (prioritize explaining this cleanly):\n"""${selectedText}"""\n` : ""}
+${selectedText ? `STUDENT SELECTED PASSAGE (prioritize explaining this thoroughly):\n"""${selectedText}"""\n` : ""}
 ${topicFocus ? `FOCUS TOPIC: ${topicFocus}\n` : ""}
 SOURCE SENTENCES (Use [S#] IDs and verbatim sourceQuote substrings ONLY from here):
 ${sentencesText}
 
-TASK: Teach this content as an engaging ${mode === "explainer" ? "Visual Split-PDF Tutor" : "Live Blackboard/Whiteboard Teacher"} using FLOWCHARTS, CYCLES, MIND-MAP TREES, COMPARISONS & ICONS in 4 progressive steps:
-1. Big Picture Overview (Use a "tree" or 3-node "flowchart" showing the main idea & components)
-2. Core Mechanism Part 1 (Use a detailed "flowchart" with shapes box/diamond/circle/pill, arrows, and icons)
-3. Mechanism Part 2 / Comparison / Process Cycle (Use "cycle", "comparison", "venn", or "flowchart" + "equation" if applicable)
-4. Summary & Exam Takeaways (Use a "timeline" or summary "tree" + crisp formula/takeaway)
+TASK (CHUNK 1 OF 4 — FAST START):
+First plan a complete 4-concept teaching outline covering the whole page without gaps:
+- Concept 1 (Index 0): Big Picture & Core Foundation
+- Concept 2 (Index 1): Deep Mechanism / Process Step-by-Step
+- Concept 3 (Index 2): Nuances, Comparisons & Relationships
+- Concept 4 (Index 3): Synthesis, Formulas & Exam Takeaways
 
-CRITICAL OUTPUT FORMAT: Output STRICTLY NDJSON (each JSON object on its own line, NO markdown \`\`\` fences, NO wrapper array).
+Then generate ONLY Concept 1 (stepIndex: 0) right now in FULL visual richness as an inspiring ${mode === "explainer" ? "Visual Split-PDF Master Tutor" : "Live Full-Canvas Whiteboard Teacher"}!
+CRITICAL: Do NOT generate steps 1, 2, or 3 yet — they will be generated next in chunks.
+
+OUTPUT STRICTLY 2 NDJSON LINES (no markdown fences, no wrapper array):
+Line 1 (meta + 4-concept outline):
+{"_kind":"meta","chapterTitle":"...","topicSummary":"1 sentence summary","totalSteps":4,"outline":[{"stepIndex":0,"title":"...","focus":"specific sentences/aspect","diagramHint":"tree"},{"stepIndex":1,"title":"...","focus":"specific mechanism","diagramHint":"flowchart"},{"stepIndex":2,"title":"...","focus":"comparisons/nuances","diagramHint":"comparison|matrix"},{"stepIndex":3,"title":"...","focus":"summary & exam points","diagramHint":"timeline|pyramid"}]}
+Line 2 (ONLY Concept 1 with 5 to 8 rich semantic cues filling the full whiteboard):
+{"_kind":"step","stepIndex":0,"title":"Short Step Title","conceptTag":"Intro","spokenText":"Rich 105-160 word warm conversational teacher explanation introducing the page clearly","realLifeExample":"Relatable real-life comparison","keyFormula":"Equation/rule or empty","keyTerms":["term1","term2","term3"],"sourceType":"quote|synthesis","sourceSentenceIds":["S1"],"sourceQuote":"exact verbatim substring copied character-for-character from one cited [S#] above","newBoardPage":true,"checkQuestion":"Optional quick check question","boardCues":[5 to 8 rich semantic cues: title + 1-2 macro diagrams (tree/flowchart) + callout/equation + 2-4 detailed bullets]}`;
+      } else if (chunkMode && Number(chunkIndex) > 0) {
+        const cIdx = Number(chunkIndex);
+        const targetOutline = Array.isArray(outline) ? outline[cIdx] : null;
+        const prevText = Array.isArray(previousStepsSummary) && previousStepsSummary.length
+          ? previousStepsSummary.map((p: any, i: number) => `Concept ${i + 1}: ${p.title || ""} (${(p.keyTerms || []).join(", ")})`).join(" | ")
+          : "Previous concepts already covered.";
+        const roleHints = [
+          "Intro & Big Picture",
+          "Deep Step-by-Step Mechanism (use a 4-6 node flowchart + cause_effect or equation + 2-3 detailed bullets)",
+          "Comparisons, Exceptions & Nuances (use comparison or matrix/venn/cycle + callout insight + 2-3 detailed bullets)",
+          "Complete Synthesis & Revision Sheet (use timeline or pyramid/tree + key equation/callout + 3 exam takeaway bullets)",
+        ];
+        prompt = `Book: "${bookTitle || "Study Material"}" | Chapter: "${chapterTitle || `Page ${pageNum}`}" | Page ${pageNum} of ${totalPages}
+${selectedText ? `STUDENT SELECTED PASSAGE:\n"""${selectedText}"""\n` : ""}
+SOURCE SENTENCES (Use [S#] IDs and verbatim sourceQuote substrings ONLY from here):
+${sentencesText}
+
+ALREADY TAUGHT (do NOT repeat these — build seamlessly onto them):
+${prevText}
+
+YOUR CURRENT CHUNK TASK: Generate ONLY Concept ${cIdx + 1} (stepIndex: ${cIdx})!
+${targetOutline ? `PLANNED TOPIC: "${targetOutline.title}" | FOCUS: ${targetOutline.focus} | PREFERRED DIAGRAM: ${targetOutline.diagramHint}` : `ROLE: ${roleHints[cIdx] || "Deep Concept & Visual Summary"}`}
+
+CRITICAL: Make this single concept SUPER RICH on the full whiteboard (5 to 8 semantic cues: title + 1-2 full-width macro diagrams like flowchart/comparison/cause_effect/matrix/cycle/pyramid/timeline + equation/callout + 2-4 detailed bullets). NEVER output only 2 arrows or a tiny box!
+Output STRICTLY ONE NDJSON LINE (no markdown fences):
+{"_kind":"step","stepIndex":${cIdx},"title":"${targetOutline?.title ? String(targetOutline.title).replace(/"/g, "'") : `Concept ${cIdx + 1}`}","conceptTag":"${cIdx === 1 ? "Mechanism" : cIdx === 2 ? "Comparison" : "Revision"}","spokenText":"Rich 105-160 word conversational explanation advancing smoothly from previous concepts while walking through every diagram drawn","realLifeExample":"Relatable real-life comparison","keyFormula":"Equation/rule or empty","keyTerms":["term1","term2","term3"],"sourceType":"quote|synthesis","sourceSentenceIds":["S1"],"sourceQuote":"exact verbatim substring copied character-for-character from one cited [S#] above","newBoardPage":true,"checkQuestion":"Optional quick check question","boardCues":[5 to 8 rich semantic cues]}`;
+      } else {
+        prompt = `Book: "${bookTitle || "Study Material"}" | Chapter: "${chapterTitle || `Page ${pageNum}`}" | Page ${pageNum} of ${totalPages}
+${selectedText ? `STUDENT SELECTED PASSAGE (prioritize explaining this thoroughly):\n"""${selectedText}"""\n` : ""}
+${topicFocus ? `FOCUS TOPIC: ${topicFocus}\n` : ""}
+SOURCE SENTENCES (Use [S#] IDs and verbatim sourceQuote substrings ONLY from here):
+${sentencesText}
+
+TASK: Teach this content thoroughly as an inspiring ${mode === "explainer" ? "Visual Split-PDF Master Tutor" : "Live Full-Canvas Whiteboard Teacher"} using MULTIPLE CHARTS, SNAKE FLOWCHARTS, CAUSE-EFFECT CHAINS, TABLES, CALLOUTS & DETAILED POINTS across 4 progressive concepts:
+1. Big Picture & Foundation (tree + callout real-life analogy + 2 detailed bullets)
+2. Deep Mechanism Step-by-Step (4–6 node flowchart + cause_effect or equation + 2 detailed bullets)
+3. Comparisons, Nuances & Relationships (comparison or matrix/venn/cycle + callout exam insight + bullets)
+4. Complete Synthesis & Revision Sheet (timeline or pyramid/tree + key equation/definition + 3 exam takeaway bullets)
+
+CRITICAL OUTPUT FORMAT: Output STRICTLY NDJSON (each JSON object on its own line, NO markdown fences, NO wrapper array).
 Line 1 MUST be meta:
 {"_kind":"meta","chapterTitle":"...","topicSummary":"1 sentence summary","totalSteps":4}
 Lines 2..5 MUST be each step one by one:
-{"_kind":"step","stepIndex":0,"title":"Short Step Title","conceptTag":"Intro|Flowchart|Mechanism|Summary","spokenText":"Natural 45-85 word conversational teacher explanation referring naturally to what is being drawn on the board","realLifeExample":"Relatable real-life comparison","keyFormula":"Equation/definition or empty","keyTerms":["term1","term2"],"sourceType":"quote|synthesis","sourceSentenceIds":["S1"],"sourceQuote":"exact verbatim substring copied character-for-character from one cited [S#] above (or empty if synthesis)","newBoardPage":true,"checkQuestion":"Optional quick thought question for student","boardCues":[2 to 4 semantic cues e.g. title + flowchart/tree/cycle + optional equation or 1 bullet]}`;
+{"_kind":"step","stepIndex":0,"title":"Short Step Title","conceptTag":"Intro|Flowchart|Comparison|Summary","spokenText":"Rich 105-160 word thorough conversational teacher explanation walking through intuition, step-by-step mechanism, real-life example, and exact facts while pointing to the diagrams being drawn","realLifeExample":"Relatable real-life comparison","keyFormula":"Equation/rule or empty","keyTerms":["term1","term2","term3"],"sourceType":"quote|synthesis","sourceSentenceIds":["S1"],"sourceQuote":"exact verbatim substring copied character-for-character from one cited [S#] above (or empty if synthesis)","newBoardPage":true,"checkQuestion":"Optional quick check question","boardCues":[5 to 8 rich semantic cues: title + 1-2 macro charts + callout/equation + 2-4 detailed bullets]}`;
       }
 
       const wantsStream = Boolean(useStream);
@@ -3898,19 +3959,19 @@ Lines 2..5 MUST be each step one by one:
         ? "Clear, friendly English."
         : "Natural Hinglish (mix of everyday Hindi + English academic terms, clear Latin script).";
 
-      const sysInstruction = `You are a patient classroom teacher pausing mid-lesson to answer a student's doubt accurately.
+      const sysInstruction = `You are a patient classroom teacher pausing mid-lesson to answer a student's doubt accurately and visually.
 LANGUAGE: ${langDesc}
 Ground every answer in the textbook lines and current board state. Never hallucinate citations.
 Return strictly ONE JSON object (no markdown fences):
 {
-  "answerSpoken": "Clear 35-70 word conversational answer teacher speaks aloud right away",
+  "answerSpoken": "Clear 55-95 word thorough conversational answer teacher speaks aloud right away",
   "answerSummary": "Crisp 1-2 line written takeaway for subtitles/notes",
   "sourceType": "quote|synthesis",
   "sourceSentenceIds": ["S1"],
   "sourceQuote": "exact verbatim substring from source sentences if directly referenced, else empty",
   "needsNewBoardPage": false,
   "extraBoardCues": [
-    {"type":"box|arrow|equation|bullet|highlight|circle","atProgress":0.1,"x":600,"y":430,"w":310,"h":90,"text":"Doubt Clarified","sublabel":"Short visual proof/example","color":"mint"}
+    {"type":"callout|flowchart|cause_effect|comparison|matrix|equation|bullet|box","atProgress":0.1,"label":"Doubt Clarified","text":"Visual explanation or step-by-step proof","color":"mint"}
   ]
 }`;
 
@@ -3922,7 +3983,7 @@ ${sentencesText.slice(0, 5500)}
 
 STUDENT'S DOUBT: "${String(question).trim()}"
 
-Respond warmly, clarify the exact confusion, cite verbatim sourceQuote if applicable, and add 1–3 non-overlapping extraBoardCues (usually in lower-right x:560..930, y:370..560 or highlighted on existing elements) if drawing helps.`;
+Respond warmly, clarify the exact confusion thoroughly, cite verbatim sourceQuote if applicable, and add 1–3 semantic extraBoardCues (omit x/y — the scrollable board automatically inserts a clean divider and stacks cues vertically with zero overlap).`;
 
       const cleanCustomKey = typeof customKey === "string" ? cleanKeyInput(customKey) : "";
       const hasByokGemini = cleanCustomKey.length > 10;
