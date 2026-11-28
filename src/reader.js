@@ -2661,7 +2661,7 @@ export async function openBookmarkCategoryPicker(fid, page){
   };
 }
 
-export async function openReaderMenu(){
+export async function openReaderMenu(startTab){
   const fid = window.State.currentFile.id;
   const bms = (await window.DB.byIndex('bookmarks','fileId',fid)).sort((a,b)=>a.page-b.page);
   // freehand drawings live in the same store but are not highlights, keep them out of this list
@@ -2746,7 +2746,7 @@ export async function openReaderMenu(){
   const isForeign = (a)=> !!(a.by && a.by!==myName && !a.reviewed);
   function showHighlights(){
     const pending = annots.filter(isForeign);
-    content.innerHTML = (annots.length? `<button class="btn btn-ghost" id="hl-to-cards" style="width:100%; padding:10px; margin-bottom:6px; font-size:13px;">${window.icon('cards','icon icon-sm')} Make flashcards from my highlights</button>`:'') + (pending.length? `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; margin-bottom:6px; background:var(--accent-soft); border-radius:var(--radius-md); font-size:12.5px;"><span><b>${pending.length}</b> to review from ${[...new Set(pending.map(x=>window.escapeHtml(String(x.by))))].join(', ')}</span><button class="btn" id="review-accept-all" style="padding:6px 10px; font-size:12px;">Keep all</button></div>`:'') + (annots.length? annots.map(a=>`<div class="menu-jump" data-page="${a.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
+    content.innerHTML = `<button class="btn btn-primary" id="hl-auto" style="width:100%; padding:11px; margin-bottom:6px; font-size:13.5px;">${window.icon('highlighter','icon icon-sm')} Auto-highlight this book</button>` + (annots.length? `<button class="btn btn-ghost" id="hl-to-cards" style="width:100%; padding:10px; margin-bottom:6px; font-size:13px;">${window.icon('cards','icon icon-sm')} Make flashcards from my highlights</button>`:'') + (pending.length? `<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:9px 11px; margin-bottom:6px; background:var(--accent-soft); border-radius:var(--radius-md); font-size:12.5px;"><span><b>${pending.length}</b> to review from ${[...new Set(pending.map(x=>window.escapeHtml(String(x.by))))].join(', ')}</span><button class="btn" id="review-accept-all" style="padding:6px 10px; font-size:12px;">Keep all</button></div>`:'') + (annots.length? annots.map(a=>`<div class="menu-jump" data-page="${a.page}" style="padding:11px; border-bottom:1px solid var(--border); cursor:pointer; display:flex; gap:10px; align-items:flex-start;">
       <div style="flex:1; min-width:0;">
         <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;"><span style="width:10px; height:10px; border-radius:50%; background:${window.safeCssColor(a.color)}; flex-shrink:0;"></span><span class="font-mono" style="font-size:11px; color:var(--text-faint);">Page ${Number(a.page)||1} · ${a.type==='underline'?'underline':'highlight'}${a.by?' · '+window.escapeHtml(String(a.by)):''}</span></div>
         <div style="font-size:13.5px; color:var(--text-dim); overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;">${window.escapeHtml(a.text||'')}</div>
@@ -2762,6 +2762,13 @@ export async function openReaderMenu(){
         if(a){ a.reviewed = true; await window.DB.put('annotations', a); showHighlights(); }
       };
     });
+    const autoBtn = document.getElementById('hl-auto');
+    if(autoBtn) autoBtn.onclick = async ()=>{
+      try{
+        const m = await import('./auto_highlight.js');
+        m.openAutoHighlightSheet({ fileId: fid, onDone: async ()=>{ await window.openReaderMenu('highlights'); } });
+      }catch(e){ console.error(e); window.toast('Could not open auto-highlight'); }
+    };
     const toCards = document.getElementById('hl-to-cards');
     if(toCards) toCards.onclick = async ()=>{
       try{
@@ -2811,7 +2818,7 @@ export async function openReaderMenu(){
   document.getElementById('tab-bookmarks').onclick = () => { showBookmarks(); animateTabContent(); };
   document.getElementById('tab-highlights').onclick = () => { showHighlights(); animateTabContent(); };
   document.getElementById('tab-notes').onclick = () => { showNotes(); animateTabContent(); };
-  showBookmarks();
+  if (startTab === 'highlights') showHighlights(); else showBookmarks();
 }
 
 // Bind to window for global availability
